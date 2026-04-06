@@ -83,9 +83,9 @@ type AirportCode = "FLL" | "MIA" | "PBI";
 
 function detectAirportCode(address: string): AirportCode | null {
   const upper = address.toUpperCase();
-  if (upper.startsWith("FLL") || upper.includes(" FLL ") || upper.includes("FLL -") || upper.includes("FLL—")) return "FLL";
-  if (upper.startsWith("MIA") || upper.includes(" MIA ") || upper.includes("MIA -") || upper.includes("MIA—")) return "MIA";
-  if (upper.startsWith("PBI") || upper.includes(" PBI ") || upper.includes("PBI -") || upper.includes("PBI—")) return "PBI";
+  if (/\bFLL\b/.test(upper)) return "FLL";
+  if (/\bMIA\b/.test(upper)) return "MIA";
+  if (/\bPBI\b/.test(upper)) return "PBI";
   return null;
 }
 
