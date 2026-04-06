@@ -388,6 +388,11 @@ export const CreateDriverBody = zod.object({
   email: zod.string(),
   phone: zod.string(),
   licenseNumber: zod.string(),
+  vehicleYear: zod.string().nullish(),
+  vehicleMake: zod.string().nullish(),
+  vehicleModel: zod.string().nullish(),
+  vehicleColor: zod.string().nullish(),
+  passengerCapacity: zod.number().nullish(),
 });
 
 /**
@@ -806,6 +811,7 @@ export const UpdatePromoParams = zod.object({
 export const UpdatePromoBody = zod.object({
   isActive: zod.boolean().nullish(),
   expiresAt: zod.string().nullish(),
+  description: zod.string().nullish(),
 });
 
 export const UpdatePromoResponse = zod.object({

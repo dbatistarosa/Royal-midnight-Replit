@@ -12,8 +12,9 @@ const FINPUT = "bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
 
 type AddDriverForm = {
   name: string; email: string; phone: string; licenseNumber: string;
+  vehicleYear: string; vehicleMake: string; vehicleModel: string; vehicleColor: string; passengerCapacity: string;
 };
-const EMPTY_DRIVER: AddDriverForm = { name: "", email: "", phone: "", licenseNumber: "" };
+const EMPTY_DRIVER: AddDriverForm = { name: "", email: "", phone: "", licenseNumber: "", vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: "" };
 
 const adminNavItems = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
@@ -155,15 +156,27 @@ export default function AdminDrivers() {
 
   const handleAddDriver = async () => {
     if (!addForm.name || !addForm.email || !addForm.phone || !addForm.licenseNumber) {
-      toast({ title: "Missing fields", description: "All fields are required.", variant: "destructive" });
+      toast({ title: "Missing fields", description: "Name, email, phone, and license number are required.", variant: "destructive" });
       return;
     }
     setAddSaving(true);
     try {
+      const payload: Record<string, unknown> = {
+        name: addForm.name,
+        email: addForm.email,
+        phone: addForm.phone,
+        licenseNumber: addForm.licenseNumber,
+      };
+      if (addForm.vehicleYear) payload.vehicleYear = addForm.vehicleYear;
+      if (addForm.vehicleMake) payload.vehicleMake = addForm.vehicleMake;
+      if (addForm.vehicleModel) payload.vehicleModel = addForm.vehicleModel;
+      if (addForm.vehicleColor) payload.vehicleColor = addForm.vehicleColor;
+      if (addForm.passengerCapacity) payload.passengerCapacity = parseInt(addForm.passengerCapacity);
+
       const res = await fetch(`${API_BASE}/drivers`, {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify(addForm),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
       toast({ title: "Driver created", description: `${addForm.name} has been added and is immediately active.` });
@@ -390,23 +403,50 @@ export default function AdminDrivers() {
               <h2 className="font-serif text-xl">Add Driver</h2>
               <button onClick={() => { setShowAdd(false); setAddForm(EMPTY_DRIVER); }} className="text-muted-foreground hover:text-white"><X className="w-5 h-5" /></button>
             </div>
-            <div className="p-7 space-y-5">
+            <div className="p-7 space-y-5 max-h-[60vh] overflow-y-auto">
               <p className="text-xs text-muted-foreground">Admin-created drivers bypass the approval flow and are immediately active.</p>
-              <div>
-                <label className={LABEL}>Full Name *</label>
-                <Input value={addForm.name} onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))} className={FINPUT} placeholder="James Williams" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={LABEL}>Full Name *</label>
+                  <Input value={addForm.name} onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))} className={FINPUT} placeholder="James Williams" />
+                </div>
+                <div>
+                  <label className={LABEL}>Email Address *</label>
+                  <Input type="email" value={addForm.email} onChange={e => setAddForm(p => ({ ...p, email: e.target.value }))} className={FINPUT} placeholder="driver@royalmidnight.com" />
+                </div>
+                <div>
+                  <label className={LABEL}>Phone Number *</label>
+                  <Input value={addForm.phone} onChange={e => setAddForm(p => ({ ...p, phone: e.target.value }))} className={FINPUT} placeholder="+1 (305) 555-0000" />
+                </div>
+                <div>
+                  <label className={LABEL}>License Number *</label>
+                  <Input value={addForm.licenseNumber} onChange={e => setAddForm(p => ({ ...p, licenseNumber: e.target.value }))} className={FINPUT} placeholder="FL-D12345678" />
+                </div>
               </div>
-              <div>
-                <label className={LABEL}>Email Address *</label>
-                <Input type="email" value={addForm.email} onChange={e => setAddForm(p => ({ ...p, email: e.target.value }))} className={FINPUT} placeholder="driver@royalmidnight.com" />
-              </div>
-              <div>
-                <label className={LABEL}>Phone Number *</label>
-                <Input value={addForm.phone} onChange={e => setAddForm(p => ({ ...p, phone: e.target.value }))} className={FINPUT} placeholder="+1 (305) 555-0000" />
-              </div>
-              <div>
-                <label className={LABEL}>License Number *</label>
-                <Input value={addForm.licenseNumber} onChange={e => setAddForm(p => ({ ...p, licenseNumber: e.target.value }))} className={FINPUT} placeholder="FL-D12345678" />
+              <div className="border-t border-white/10 pt-4">
+                <p className="text-xs text-muted-foreground mb-3 uppercase tracking-widest">Vehicle Details (Optional)</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={LABEL}>Make</label>
+                    <Input value={addForm.vehicleMake} onChange={e => setAddForm(p => ({ ...p, vehicleMake: e.target.value }))} className={FINPUT} placeholder="Chevrolet" />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Model</label>
+                    <Input value={addForm.vehicleModel} onChange={e => setAddForm(p => ({ ...p, vehicleModel: e.target.value }))} className={FINPUT} placeholder="Suburban" />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Year</label>
+                    <Input value={addForm.vehicleYear} onChange={e => setAddForm(p => ({ ...p, vehicleYear: e.target.value }))} className={FINPUT} placeholder="2026" />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Color</label>
+                    <Input value={addForm.vehicleColor} onChange={e => setAddForm(p => ({ ...p, vehicleColor: e.target.value }))} className={FINPUT} placeholder="Midnight Black" />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Passenger Capacity</label>
+                    <Input type="number" min="1" max="14" value={addForm.passengerCapacity} onChange={e => setAddForm(p => ({ ...p, passengerCapacity: e.target.value }))} className={FINPUT} placeholder="6" />
+                  </div>
+                </div>
               </div>
             </div>
             <div className="px-7 py-5 border-t border-border flex justify-end gap-3">

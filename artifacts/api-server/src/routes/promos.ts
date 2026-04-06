@@ -113,6 +113,7 @@ router.patch("/promos/:id", async (req, res): Promise<void> => {
   const updateData: Record<string, unknown> = {};
   if (parsed.data.isActive != null) updateData.isActive = parsed.data.isActive;
   if (parsed.data.expiresAt !== undefined) updateData.expiresAt = parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null;
+  if (parsed.data.description != null) updateData.description = parsed.data.description;
 
   const [promo] = await db
     .update(promoCodesTable)

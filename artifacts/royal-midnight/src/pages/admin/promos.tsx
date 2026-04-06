@@ -108,23 +108,33 @@ export default function AdminPromos() {
   };
 
   const handleSubmit = async () => {
-    if (!form.code || !form.description || !form.discountValue) {
+    if (!editPromo && (!form.code || !form.description || !form.discountValue)) {
       toast({ title: "Missing fields", description: "Code, description, and discount value are required.", variant: "destructive" });
       return;
     }
     setSaving(true);
     try {
-      const body = {
-        code: form.code.toUpperCase(),
-        description: form.description,
-        discountType: form.discountType,
-        discountValue: parseFloat(form.discountValue),
-        maxUses: form.maxUses ? parseInt(form.maxUses) : null,
-        expiresAt: form.expiresAt || null,
-      };
       const res = editPromo
-        ? await fetch(`${API_BASE}/promos/${editPromo.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: authHdr }, body: JSON.stringify({ expiresAt: body.expiresAt }) })
-        : await fetch(`${API_BASE}/promos`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: authHdr }, body: JSON.stringify(body) });
+        ? await fetch(`${API_BASE}/promos/${editPromo.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Authorization: authHdr },
+            body: JSON.stringify({
+              description: form.description || undefined,
+              expiresAt: form.expiresAt || null,
+            }),
+          })
+        : await fetch(`${API_BASE}/promos`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHdr },
+            body: JSON.stringify({
+              code: form.code.toUpperCase(),
+              description: form.description,
+              discountType: form.discountType,
+              discountValue: parseFloat(form.discountValue),
+              maxUses: form.maxUses ? parseInt(form.maxUses) : null,
+              expiresAt: form.expiresAt || null,
+            }),
+          });
       if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
       toast({ title: editPromo ? "Promo updated" : "Promo created" });
       setModalOpen(false);
@@ -245,29 +255,27 @@ export default function AdminPromos() {
       </div>
 
       {modalOpen && (
-        <Modal title={editPromo ? `Edit Expiry — ${editPromo.code}` : "New Promo Code"} onClose={() => setModalOpen(false)} onSubmit={handleSubmit} submitting={saving}>
-          {editPromo && (
-            <div className="bg-white/5 border border-white/10 px-4 py-3 text-sm text-muted-foreground">
-              Only the expiry date can be changed for an existing code. To change discount terms, delete and recreate the promo.
+        <Modal title={editPromo ? `Edit Promo — ${editPromo.code}` : "New Promo Code"} onClose={() => setModalOpen(false)} onSubmit={handleSubmit} submitting={saving}>
+          {!editPromo && (
+            <div>
+              <label className={LABEL}>Code *</label>
+              <Input
+                value={form.code}
+                onChange={e => setField("code", e.target.value.toUpperCase())}
+                className={INPUT}
+                placeholder="WELCOME20"
+              />
             </div>
           )}
-          {!editPromo && (
-            <>
-              <div>
-                <label className={LABEL}>Code *</label>
-                <Input
-                  value={form.code}
-                  onChange={e => setField("code", e.target.value.toUpperCase())}
-                  className={INPUT}
-                  placeholder="WELCOME20"
-                />
-              </div>
-              <div>
-                <label className={LABEL}>Description *</label>
-                <Input value={form.description} onChange={e => setField("description", e.target.value)} className={INPUT} placeholder="Welcome discount for new passengers" />
-              </div>
-            </>
+          {editPromo && (
+            <div className="bg-white/5 border border-white/10 px-4 py-3 text-sm text-muted-foreground">
+              Code: <strong className="text-white font-mono">{editPromo.code}</strong> — discount terms cannot be changed. Delete and recreate to change discount value/type.
+            </div>
           )}
+          <div>
+            <label className={LABEL}>Description {editPromo ? "" : "*"}</label>
+            <Input value={form.description} onChange={e => setField("description", e.target.value)} className={INPUT} placeholder="Welcome discount for new passengers" />
+          </div>
           {!editPromo && (
             <>
               <div className="grid grid-cols-2 gap-4">
