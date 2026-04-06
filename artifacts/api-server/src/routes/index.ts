@@ -15,6 +15,7 @@ import promosRouter from "./promos";
 import pricingRouter from "./pricing";
 import paymentsRouter from "./payments";
 import githubRouter from "./github";
+import settingsRouter from "./settings";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use(promosRouter);
 router.use(pricingRouter);
 router.use(paymentsRouter);
 router.use(githubRouter);
+router.use(settingsRouter);
 
 export default router;

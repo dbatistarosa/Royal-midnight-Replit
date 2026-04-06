@@ -1,4 +1,6 @@
 import { Router, type IRouter } from "express";
+import { db, settingsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
@@ -66,6 +68,15 @@ async function getGoogleMapsDistance(
   }
 }
 
+async function getSetting(key: string, fallback: string): Promise<string> {
+  try {
+    const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, key));
+    return row?.value ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 router.post("/quote", async (req, res): Promise<void> => {
   const parsed = GetQuoteBody.safeParse(req.body);
   if (!parsed.success) {
@@ -73,9 +84,29 @@ router.post("/quote", async (req, res): Promise<void> => {
     return;
   }
 
-  const { pickupAddress, dropoffAddress, vehicleClass, passengers } = parsed.data;
+  const { pickupAddress, dropoffAddress, vehicleClass, passengers, pickupAt } = parsed.data;
   const vc = vehicleClass as string;
   const numPassengers = Number(passengers) || 1;
+
+  // Validate minimum lead time (EST = UTC-4 in summer, UTC-5 in winter — use UTC offset dynamically)
+  const minHoursStr = await getSetting("min_booking_hours", "2");
+  const minHours = parseFloat(minHoursStr);
+  const pickupDate = new Date(pickupAt);
+  const nowUtc = Date.now();
+  const leadTimeMs = pickupDate.getTime() - nowUtc;
+  const leadTimeHours = leadTimeMs / (1000 * 60 * 60);
+  if (leadTimeHours < minHours) {
+    res.status(400).json({
+      error: `Bookings require at least ${minHours} hour${minHours !== 1 ? "s" : ""} advance notice. Please select a later time.`,
+      code: "LEAD_TIME_VIOLATION",
+      minHours,
+    });
+    return;
+  }
+
+  // Get Florida tax rate from settings
+  const taxRateStr = await getSetting("florida_tax_rate", "0.07");
+  const taxRate = parseFloat(taxRateStr);
 
   const baseFare = BASE_FARES[vc] ?? 35;
   const ratePerMile = RATE_PER_MILE[vc] ?? 2.5;
@@ -86,8 +117,12 @@ router.post("/quote", async (req, res): Promise<void> => {
 
   const distanceCharge = Math.round(estimatedDistance * ratePerMile * 100) / 100;
   const airportFee = isAirportTrip(pickupAddress) || isAirportTrip(dropoffAddress) ? 15 : 0;
-  const passengerSurcharge = numPassengers > 4 ? 10 : 0;
-  const estimatedPrice = Math.round((baseFare + distanceCharge + airportFee + passengerSurcharge) * 100) / 100;
+  const subtotal = Math.round((baseFare + distanceCharge + airportFee) * 100) / 100;
+  const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
+  const totalWithTax = Math.round((subtotal + taxAmount) * 100) / 100;
+
+  // estimatedPrice = subtotal (pre-tax, for backward compat)
+  const estimatedPrice = subtotal;
 
   res.json(
     GetQuoteResponse.parse({
@@ -95,6 +130,10 @@ router.post("/quote", async (req, res): Promise<void> => {
       estimatedPrice,
       baseFare,
       distanceCharge,
+      airportFee,
+      taxRate,
+      taxAmount,
+      totalWithTax,
       estimatedDuration,
       estimatedDistance,
       currency: "USD",

@@ -13,6 +13,7 @@ export const bookingsTable = pgTable("bookings", {
   pickupAt: timestamp("pickup_at", { withTimezone: true }).notNull(),
   vehicleClass: text("vehicle_class").notNull().default("standard"),
   passengers: integer("passengers").notNull().default(1),
+  luggageCount: integer("luggage_count").notNull().default(0),
   flightNumber: text("flight_number"),
   specialRequests: text("special_requests"),
   status: text("status").notNull().default("pending"),

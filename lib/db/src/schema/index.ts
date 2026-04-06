@@ -8,3 +8,4 @@ export * from "./support-tickets";
 export * from "./notifications";
 export * from "./promo-codes";
 export * from "./pricing-rules";
+export * from "./settings";

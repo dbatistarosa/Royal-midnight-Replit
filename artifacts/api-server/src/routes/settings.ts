@@ -1,0 +1,50 @@
+import { Router, type IRouter } from "express";
+import { db, settingsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+
+const router: IRouter = Router();
+
+// Public read of safe settings (min_booking_hours, florida_tax_rate)
+router.get("/settings/public", async (_req, res): Promise<void> => {
+  const rows = await db.select().from(settingsTable);
+  const map: Record<string, string> = {};
+  for (const row of rows) {
+    // Only expose non-sensitive keys
+    if (["min_booking_hours", "florida_tax_rate"].includes(row.key)) {
+      map[row.key] = row.value;
+    }
+  }
+  res.json(map);
+});
+
+// Admin: get all settings
+router.get("/admin/settings", async (_req, res): Promise<void> => {
+  const rows = await db.select().from(settingsTable);
+  const map: Record<string, string> = {};
+  for (const row of rows) {
+    map[row.key] = row.value;
+  }
+  res.json(map);
+});
+
+// Admin: update a setting
+router.patch("/admin/settings/:key", async (req, res): Promise<void> => {
+  const key = req.params["key"];
+  const value = req.body?.value;
+  if (typeof value !== "string" || !value.trim()) {
+    res.status(400).json({ error: "Invalid value" });
+    return;
+  }
+
+  await db
+    .insert(settingsTable)
+    .values({ key, value })
+    .onConflictDoUpdate({
+      target: settingsTable.key,
+      set: { value, updatedAt: new Date() },
+    });
+
+  res.json({ key, value });
+});
+
+export default router;

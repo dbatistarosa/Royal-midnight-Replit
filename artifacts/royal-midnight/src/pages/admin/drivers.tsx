@@ -1,6 +1,6 @@
 import { useListDrivers } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings } from "lucide-react";
 
 const adminNavItems = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
@@ -13,6 +13,7 @@ const adminNavItems = [
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
+  { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 
 export default function AdminDrivers() {
