@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import { useListDrivers } from "@workspace/api-client-react";
+import React, { useState, useEffect, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
@@ -70,18 +69,35 @@ function DetailRow({ label, value }: { label: string; value?: string | number | 
 }
 
 export default function AdminDrivers() {
-  const { data: drivers, isLoading, refetch } = useListDrivers();
   const { toast } = useToast();
   const { token } = useAuth();
+  const [drivers, setDrivers] = useState<DriverRow[] | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState<Record<number, string>>({});
   const [rejectingId, setRejectingId] = useState<number | null>(null);
 
-  const authHeaders = {
+  const authHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+
+  const refetch = useCallback(() => {
+    if (!token) return;
+    setIsLoading(true);
+    fetch(`${API_BASE}/drivers`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() as Promise<DriverRow[]> : Promise.reject(new Error("Failed")))
+      .then(data => setDrivers(data))
+      .catch(() => setDrivers([]))
+      .finally(() => setIsLoading(false));
+  }, [token]);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
   const handleApprove = async (driverId: number) => {
     setActionLoading(driverId);
@@ -126,7 +142,7 @@ export default function AdminDrivers() {
     setActionLoading(null);
   };
 
-  const pendingCount = (drivers as DriverRow[] | undefined)?.filter(d => !d.approvalStatus || d.approvalStatus === "pending").length ?? 0;
+  const pendingCount = drivers?.filter(d => !d.approvalStatus || d.approvalStatus === "pending").length ?? 0;
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
@@ -166,7 +182,7 @@ export default function AdminDrivers() {
                 <tr>
                   <td colSpan={8} className="px-5 py-8 text-center text-muted-foreground">No drivers found.</td>
                 </tr>
-              ) : (drivers as DriverRow[]).map((driver) => {
+              ) : (drivers ?? []).map((driver) => {
                 const isPending = !driver.approvalStatus || driver.approvalStatus === "pending";
                 const isExpanded = expandedId === driver.id;
                 const isRejecting = rejectingId === driver.id;

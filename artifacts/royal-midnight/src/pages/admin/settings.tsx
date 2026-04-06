@@ -71,7 +71,7 @@ function AdminSettingsInner() {
   const [saving, setSaving] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   useEffect(() => {
     fetch(`${API_BASE}/admin/settings`, { headers: authHeader })
