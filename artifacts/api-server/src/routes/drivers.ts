@@ -107,7 +107,7 @@ router.patch("/drivers/:id", requireAdmin, async (req, res): Promise<void> => {
   res.json(UpdateDriverResponse.parse(parseDriver(driver)));
 });
 
-router.patch("/drivers/:id/toggle-availability", async (req, res): Promise<void> => {
+router.patch("/drivers/:id/toggle-availability", requireAuth, async (req, res): Promise<void> => {
   const params = ToggleDriverAvailabilityParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -120,18 +120,30 @@ router.patch("/drivers/:id/toggle-availability", async (req, res): Promise<void>
     return;
   }
 
-  const [driver] = await db
-    .update(driversTable)
-    .set({ isOnline: parsed.data.isOnline })
-    .where(eq(driversTable.id, params.data.id))
-    .returning();
-
+  const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, params.data.id));
   if (!driver) {
     res.status(404).json({ error: "Driver not found" });
     return;
   }
 
-  res.json(ToggleDriverAvailabilityResponse.parse(parseDriver(driver)));
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== driver.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  if (parsed.data.isOnline && driver.approvalStatus !== "approved") {
+    res.status(403).json({ error: "Driver must be approved before going online" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(driversTable)
+    .set({ isOnline: parsed.data.isOnline })
+    .where(eq(driversTable.id, params.data.id))
+    .returning();
+
+  res.json(ToggleDriverAvailabilityResponse.parse(parseDriver(updated)));
 });
 
 router.get("/drivers/by-user/:userId", requireAuth, async (req, res): Promise<void> => {
