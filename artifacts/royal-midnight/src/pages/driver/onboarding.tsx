@@ -65,6 +65,13 @@ type Step4Values = z.infer<typeof step4Schema>;
 const inputClass = "bg-white/5 border-white/10 text-white rounded-none h-12 focus:border-primary placeholder:text-gray-600";
 const labelClass = "text-gray-400 uppercase tracking-widest text-xs";
 
+type Step1Response = {
+  token: string;
+  user: { id: number; name: string; email: string; phone: string | null; role: "passenger" | "driver" | "admin" };
+  driverId: number;
+  error?: string;
+};
+
 export default function DriverOnboarding() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -73,101 +80,131 @@ export default function DriverOnboarding() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  // Steps 1-3 collect data locally; Step 4 submits everything atomically
-  const [step1Data, setStep1Data] = useState<Step1Values | null>(null);
-  const [step2Data, setStep2Data] = useState<Step2Values | null>(null);
-  const [step3Data, setStep3Data] = useState<Step3Values | null>(null);
+  // Persisted after Step 1 creates the account
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [driverId, setDriverId] = useState<number | null>(null);
 
   const form1 = useForm<Step1Values>({ resolver: zodResolver(step1Schema), defaultValues: { name: "", email: "", phone: "", password: "", confirmPassword: "" } });
   const form2 = useForm<Step2Values>({ resolver: zodResolver(step2Schema), defaultValues: { serviceArea: "" } });
   const form3 = useForm<Step3Values>({ resolver: zodResolver(step3Schema), defaultValues: { vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: 4, luggageCapacity: 3, hasCarSeat: false } });
   const form4 = useForm<Step4Values>({ resolver: zodResolver(step4Schema), defaultValues: { licenseNumber: "", licenseExpiry: "", licenseDoc: "", regVin: "", regPlate: "", regExpiry: "", regDoc: "", insuranceExpiry: "", insuranceDoc: "" } });
 
-  const handleStep1 = form1.handleSubmit((data) => {
-    setStep1Data(data);
-    setStep(2);
-  });
-
-  const handleStep2 = form2.handleSubmit((data) => {
-    setStep2Data(data);
-    setStep(3);
-  });
-
-  const handleStep3 = form3.handleSubmit((data) => {
-    setStep3Data(data);
-    setStep(4);
-  });
-
-  // Step 4 performs the single atomic submit via POST /auth/driver-register
-  const handleStep4 = form4.handleSubmit(async (step4Data) => {
-    if (!step1Data || !step2Data || !step3Data) return;
+  // Step 1: Creates user + driver record immediately; subsequent steps save incrementally
+  const handleStep1 = form1.handleSubmit(async (data) => {
     setIsSubmitting(true);
-
     try {
-      const payload = {
-        name: step1Data.name,
-        email: step1Data.email,
-        phone: step1Data.phone,
-        password: step1Data.password,
-        serviceArea: step2Data.serviceArea,
-        vehicleYear: step3Data.vehicleYear,
-        vehicleMake: step3Data.vehicleMake,
-        vehicleModel: step3Data.vehicleModel,
-        vehicleColor: step3Data.vehicleColor,
-        passengerCapacity: Number(step3Data.passengerCapacity),
-        luggageCapacity: Number(step3Data.luggageCapacity),
-        hasCarSeat: Boolean(step3Data.hasCarSeat),
-        licenseNumber: step4Data.licenseNumber,
-        licenseExpiry: step4Data.licenseExpiry,
-        licenseDoc: step4Data.licenseDoc || "",
-        regVin: step4Data.regVin || "",
-        regPlate: step4Data.regPlate || "",
-        regExpiry: step4Data.regExpiry || "",
-        regDoc: step4Data.regDoc || "",
-        insuranceExpiry: step4Data.insuranceExpiry || "",
-        insuranceDoc: step4Data.insuranceDoc || "",
-      };
-
-      const res = await fetch(`${API_BASE}/auth/driver-register`, {
+      const res = await fetch(`${API_BASE}/auth/driver-step1`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ name: data.name, email: data.email, phone: data.phone, password: data.password }),
       });
-
-      const data = await res.json() as {
-        token?: string;
-        user?: { id: number; name: string; email: string; phone: string | null; role: "passenger" | "driver" | "admin" };
-        error?: string;
-      };
-
+      const json = await res.json() as Step1Response;
       if (!res.ok) {
-        const isEmailTaken = data.error?.toLowerCase().includes("already registered");
+        const isEmailTaken = json.error?.toLowerCase().includes("already registered");
         toast({
           title: isEmailTaken ? "Email already in use" : "Registration failed",
           description: isEmailTaken
-            ? "An account exists for this email. Sign in to check your application status."
-            : data.error || "Could not submit application.",
+            ? "An account already exists with this email. Sign in to check your application status."
+            : json.error || "Could not create account.",
           variant: "destructive",
         });
         setIsSubmitting(false);
         return;
       }
+      login({ id: json.user.id, name: json.user.name, email: json.user.email, phone: json.user.phone, role: json.user.role }, json.token);
+      setSessionToken(json.token);
+      setDriverId(json.driverId);
+      setStep(2);
+    } catch {
+      toast({ title: "Error", description: "Could not create account. Please try again.", variant: "destructive" });
+    }
+    setIsSubmitting(false);
+  });
 
-      if (data.token && data.user) {
-        login({
-          id: data.user.id,
-          name: data.user.name,
-          email: data.user.email,
-          phone: data.user.phone ?? null,
-          role: data.user.role,
-        }, data.token);
+  // Step 2: Saves service area to the driver record created in Step 1
+  const handleStep2 = form2.handleSubmit(async (data) => {
+    if (!driverId || !sessionToken) return;
+    setIsSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE}/drivers/${driverId}/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` },
+        body: JSON.stringify({ serviceArea: data.serviceArea }),
+      });
+      if (!res.ok) {
+        const json = await res.json() as { error?: string };
+        toast({ title: "Error", description: json.error || "Could not save service area.", variant: "destructive" });
+        setIsSubmitting(false);
+        return;
       }
+      setStep(3);
+    } catch {
+      toast({ title: "Error", description: "Could not save service area.", variant: "destructive" });
+    }
+    setIsSubmitting(false);
+  });
 
+  // Step 3: Saves vehicle information
+  const handleStep3 = form3.handleSubmit(async (data) => {
+    if (!driverId || !sessionToken) return;
+    setIsSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE}/drivers/${driverId}/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` },
+        body: JSON.stringify({
+          vehicleYear: data.vehicleYear,
+          vehicleMake: data.vehicleMake,
+          vehicleModel: data.vehicleModel,
+          vehicleColor: data.vehicleColor,
+          passengerCapacity: Number(data.passengerCapacity),
+          luggageCapacity: Number(data.luggageCapacity),
+          hasCarSeat: Boolean(data.hasCarSeat),
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json() as { error?: string };
+        toast({ title: "Error", description: json.error || "Could not save vehicle info.", variant: "destructive" });
+        setIsSubmitting(false);
+        return;
+      }
+      setStep(4);
+    } catch {
+      toast({ title: "Error", description: "Could not save vehicle info.", variant: "destructive" });
+    }
+    setIsSubmitting(false);
+  });
+
+  // Step 4: Saves document information and completes the application
+  const handleStep4 = form4.handleSubmit(async (data) => {
+    if (!driverId || !sessionToken) return;
+    setIsSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE}/drivers/${driverId}/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` },
+        body: JSON.stringify({
+          licenseNumber: data.licenseNumber,
+          licenseExpiry: data.licenseExpiry,
+          licenseDoc: data.licenseDoc || "",
+          regVin: data.regVin || "",
+          regPlate: data.regPlate || "",
+          regExpiry: data.regExpiry || "",
+          regDoc: data.regDoc || "",
+          insuranceExpiry: data.insuranceExpiry || "",
+          insuranceDoc: data.insuranceDoc || "",
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json() as { error?: string };
+        toast({ title: "Error", description: json.error || "Could not save documents.", variant: "destructive" });
+        setIsSubmitting(false);
+        return;
+      }
       setSubmitted(true);
     } catch {
       toast({ title: "Error", description: "Could not submit application. Please try again.", variant: "destructive" });
     }
-
     setIsSubmitting(false);
   });
 
@@ -289,8 +326,8 @@ export default function DriverOnboarding() {
                   <Link href="/auth/login" className="text-gray-600 text-xs hover:text-gray-400 transition-colors flex items-center gap-1">
                     <ChevronLeft className="w-3 h-3" /> Already registered? Sign in
                   </Link>
-                  <Button type="submit" className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-[0.2em] text-xs px-10 h-11">
-                    Continue <ArrowRight className="w-4 h-4 ml-2" />
+                  <Button type="submit" disabled={isSubmitting} className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-[0.2em] text-xs px-10 h-11">
+                    {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating account...</> : <>Continue <ArrowRight className="w-4 h-4 ml-2" /></>}
                   </Button>
                 </div>
               </form>
@@ -350,11 +387,11 @@ export default function DriverOnboarding() {
                 </div>
 
                 <div className="flex justify-between pt-2">
-                  <Button type="button" variant="outline" onClick={() => setStep(1)} className="border-white/15 text-white/60 hover:text-white rounded-none uppercase tracking-widest text-xs px-6 h-11">
+                  <Button type="button" variant="outline" onClick={() => setStep(1)} disabled={isSubmitting} className="border-white/15 text-white/60 hover:text-white rounded-none uppercase tracking-widest text-xs px-6 h-11">
                     <ChevronLeft className="w-4 h-4 mr-1" /> Back
                   </Button>
-                  <Button type="submit" className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-[0.2em] text-xs px-10 h-11">
-                    Continue <ArrowRight className="w-4 h-4 ml-2" />
+                  <Button type="submit" disabled={isSubmitting} className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-[0.2em] text-xs px-10 h-11">
+                    {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving...</> : <>Continue <ArrowRight className="w-4 h-4 ml-2" /></>}
                   </Button>
                 </div>
               </form>
@@ -460,11 +497,11 @@ export default function DriverOnboarding() {
                 </div>
 
                 <div className="flex justify-between pt-2">
-                  <Button type="button" variant="outline" onClick={() => setStep(2)} className="border-white/15 text-white/60 hover:text-white rounded-none uppercase tracking-widest text-xs px-6 h-11">
+                  <Button type="button" variant="outline" onClick={() => setStep(2)} disabled={isSubmitting} className="border-white/15 text-white/60 hover:text-white rounded-none uppercase tracking-widest text-xs px-6 h-11">
                     <ChevronLeft className="w-4 h-4 mr-1" /> Back
                   </Button>
-                  <Button type="submit" className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-[0.2em] text-xs px-10 h-11">
-                    Continue <ArrowRight className="w-4 h-4 ml-2" />
+                  <Button type="submit" disabled={isSubmitting} className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-[0.2em] text-xs px-10 h-11">
+                    {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving...</> : <>Continue <ArrowRight className="w-4 h-4 ml-2" /></>}
                   </Button>
                 </div>
               </form>
