@@ -392,6 +392,7 @@ export const CreateDriverBody = zod.object({
   vehicleMake: zod.string().nullish(),
   vehicleModel: zod.string().nullish(),
   vehicleColor: zod.string().nullish(),
+  vehicleClass: zod.string().nullish(),
   passengerCapacity: zod.number().nullish(),
 });
 

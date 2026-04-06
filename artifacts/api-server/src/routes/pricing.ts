@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, pricingRulesTable } from "@workspace/db";
+import { requireAdmin } from "../middleware/auth.js";
 import {
   ListPricingRulesResponse,
   CreatePricingRuleBody,
@@ -27,7 +28,7 @@ router.get("/pricing", async (_req, res): Promise<void> => {
   res.json(ListPricingRulesResponse.parse(rules.map(parseRule)));
 });
 
-router.post("/pricing", async (req, res): Promise<void> => {
+router.post("/pricing", requireAdmin, async (req, res): Promise<void> => {
   const parsed = CreatePricingRuleBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -47,7 +48,7 @@ router.post("/pricing", async (req, res): Promise<void> => {
   res.status(201).json(parseRule(rule));
 });
 
-router.patch("/pricing/:id", async (req, res): Promise<void> => {
+router.patch("/pricing/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = UpdatePricingRuleParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -80,7 +81,7 @@ router.patch("/pricing/:id", async (req, res): Promise<void> => {
   res.json(UpdatePricingRuleResponse.parse(parseRule(rule)));
 });
 
-router.delete("/pricing/:id", async (req, res): Promise<void> => {
+router.delete("/pricing/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = DeletePricingRuleParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });

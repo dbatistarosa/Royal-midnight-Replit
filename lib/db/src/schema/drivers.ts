@@ -20,6 +20,7 @@ export const driversTable = pgTable("drivers", {
   vehicleMake: text("vehicle_make"),
   vehicleModel: text("vehicle_model"),
   vehicleColor: text("vehicle_color"),
+  vehicleClass: text("vehicle_class"),
   passengerCapacity: integer("passenger_capacity"),
   luggageCapacity: integer("luggage_capacity"),
   hasCarSeat: boolean("has_car_seat").default(false),

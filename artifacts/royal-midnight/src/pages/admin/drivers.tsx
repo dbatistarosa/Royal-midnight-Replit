@@ -12,9 +12,9 @@ const FINPUT = "bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
 
 type AddDriverForm = {
   name: string; email: string; phone: string; licenseNumber: string;
-  vehicleYear: string; vehicleMake: string; vehicleModel: string; vehicleColor: string; passengerCapacity: string;
+  vehicleClass: string; vehicleYear: string; vehicleMake: string; vehicleModel: string; vehicleColor: string; passengerCapacity: string;
 };
-const EMPTY_DRIVER: AddDriverForm = { name: "", email: "", phone: "", licenseNumber: "", vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: "" };
+const EMPTY_DRIVER: AddDriverForm = { name: "", email: "", phone: "", licenseNumber: "", vehicleClass: "", vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: "" };
 
 const adminNavItems = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
@@ -167,6 +167,7 @@ export default function AdminDrivers() {
         phone: addForm.phone,
         licenseNumber: addForm.licenseNumber,
       };
+      if (addForm.vehicleClass) payload.vehicleClass = addForm.vehicleClass;
       if (addForm.vehicleYear) payload.vehicleYear = addForm.vehicleYear;
       if (addForm.vehicleMake) payload.vehicleMake = addForm.vehicleMake;
       if (addForm.vehicleModel) payload.vehicleModel = addForm.vehicleModel;
@@ -426,6 +427,14 @@ export default function AdminDrivers() {
               <div className="border-t border-white/10 pt-4">
                 <p className="text-xs text-muted-foreground mb-3 uppercase tracking-widest">Vehicle Details (Optional)</p>
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className={LABEL}>Vehicle Class</label>
+                    <select value={addForm.vehicleClass} onChange={e => setAddForm(p => ({ ...p, vehicleClass: e.target.value }))} className="bg-white/5 border border-white/10 text-white rounded-none h-10 text-sm px-3 w-full">
+                      <option value="">— Select class —</option>
+                      <option value="business">Business Class Sedan</option>
+                      <option value="suv">Premium SUV (Chevrolet Suburban)</option>
+                    </select>
+                  </div>
                   <div>
                     <label className={LABEL}>Make</label>
                     <Input value={addForm.vehicleMake} onChange={e => setAddForm(p => ({ ...p, vehicleMake: e.target.value }))} className={FINPUT} placeholder="Chevrolet" />

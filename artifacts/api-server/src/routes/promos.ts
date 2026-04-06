@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, promoCodesTable } from "@workspace/db";
+import { requireAdmin } from "../middleware/auth.js";
 import {
   ListPromosResponse,
   CreatePromoBody,
@@ -28,7 +29,7 @@ router.get("/promos", async (_req, res): Promise<void> => {
   );
 });
 
-router.post("/promos", async (req, res): Promise<void> => {
+router.post("/promos", requireAdmin, async (req, res): Promise<void> => {
   const parsed = CreatePromoBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -97,7 +98,7 @@ router.post("/promos/validate", async (req, res): Promise<void> => {
   res.json({ valid: true, discountAmount, finalAmount, message: `${promo.description} applied` });
 });
 
-router.patch("/promos/:id", async (req, res): Promise<void> => {
+router.patch("/promos/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = UpdatePromoParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -137,7 +138,7 @@ router.patch("/promos/:id", async (req, res): Promise<void> => {
   );
 });
 
-router.delete("/promos/:id", async (req, res): Promise<void> => {
+router.delete("/promos/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = DeletePromoParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
