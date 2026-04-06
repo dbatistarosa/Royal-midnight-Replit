@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Loader } from "@googlemaps/js-api-loader";
+import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
 import { MapPin } from "lucide-react";
 
 const SOUTH_FLORIDA_AIRPORTS = [
@@ -8,21 +8,16 @@ const SOUTH_FLORIDA_AIRPORTS = [
   { code: "PBI", name: "Palm Beach International Airport", address: "1000 James L Turnage Blvd, West Palm Beach, FL 33406" },
 ];
 
-let loaderInstance: Loader | null = null;
-let loadedPromise: Promise<typeof google> | null = null;
+let mapsInitialized = false;
 
-function getLoader(): Promise<typeof google> {
-  if (!loaderInstance) {
-    loaderInstance = new Loader({
+function initMaps() {
+  if (!mapsInitialized) {
+    setOptions({
       apiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
       version: "weekly",
-      libraries: ["places"],
     });
+    mapsInitialized = true;
   }
-  if (!loadedPromise) {
-    loadedPromise = loaderInstance.load();
-  }
-  return loadedPromise;
 }
 
 interface PlacesAutocompleteProps {
@@ -34,9 +29,9 @@ interface PlacesAutocompleteProps {
 }
 
 export function PlacesAutocomplete({ value, onChange, placeholder, className, id }: PlacesAutocompleteProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const elementRef = useRef<HTMLElement | null>(null);
+  const [showAirports, setShowAirports] = useState(false);
   const [inputValue, setInputValue] = useState(value);
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
@@ -45,34 +40,48 @@ export function PlacesAutocomplete({ value, onChange, placeholder, className, id
   }, [value]);
 
   useEffect(() => {
-    if (!apiKey || !inputRef.current) return;
+    if (!apiKey || !containerRef.current) return;
 
-    getLoader().then(() => {
-      if (!inputRef.current) return;
-      autocompleteRef.current = new google.maps.places.Autocomplete(inputRef.current, {
-        componentRestrictions: { country: "us" },
-        fields: ["formatted_address", "name"],
-        bounds: new google.maps.LatLngBounds(
-          new google.maps.LatLng(24.5, -81.0),
-          new google.maps.LatLng(27.5, -79.5)
-        ),
-        strictBounds: false,
-      });
+    initMaps();
 
-      autocompleteRef.current.addListener("place_changed", () => {
-        const place = autocompleteRef.current?.getPlace();
-        const addr = place?.formatted_address || place?.name || "";
-        if (addr) {
+    importLibrary("places").then(() => {
+      if (!containerRef.current || elementRef.current) return;
+
+      const el = document.createElement("gmp-place-autocomplete") as HTMLElement;
+      el.setAttribute("placeholder", placeholder || "");
+      el.setAttribute("country", "us");
+      el.style.width = "100%";
+      el.style.height = "48px";
+      el.style.display = "block";
+
+      // Style via CSS custom properties for the shadow DOM
+      el.style.setProperty("--gmpx-color-surface", "rgba(255,255,255,0.04)");
+      el.style.setProperty("--gmpx-color-on-surface", "#ffffff");
+      el.style.setProperty("--gmpx-color-on-surface-variant", "rgba(255,255,255,0.5)");
+      el.style.setProperty("--gmpx-color-primary", "#c9a84c");
+      el.style.setProperty("--gmpx-font-family-base", "Inter, system-ui, sans-serif");
+      el.style.setProperty("--gmpx-font-size-base", "14px");
+
+      el.addEventListener("gmp-placeselect", (e: Event) => {
+        const event = e as CustomEvent;
+        const place = event.detail?.place as google.maps.places.Place | undefined;
+        if (!place) return;
+        place.fetchFields({ fields: ["displayName", "formattedAddress"] }).then(() => {
+          const addr = place.formattedAddress || place.displayName || "";
           setInputValue(addr);
           onChange(addr);
-          setShowSuggestions(false);
-        }
+          setShowAirports(false);
+        });
       });
+
+      containerRef.current.appendChild(el);
+      elementRef.current = el;
     }).catch(() => {});
 
     return () => {
-      if (autocompleteRef.current) {
-        google.maps.event.clearInstanceListeners(autocompleteRef.current);
+      if (elementRef.current && containerRef.current?.contains(elementRef.current)) {
+        containerRef.current.removeChild(elementRef.current);
+        elementRef.current = null;
       }
     };
   }, [apiKey]);
@@ -81,38 +90,45 @@ export function PlacesAutocomplete({ value, onChange, placeholder, className, id
     const val = `${airport.code} - ${airport.name}`;
     setInputValue(val);
     onChange(val);
-    setShowSuggestions(false);
+    setShowAirports(false);
   }, [onChange]);
 
-  const matchingAirports = SOUTH_FLORIDA_AIRPORTS.filter(a =>
-    !inputValue ||
-    a.code.toLowerCase().includes(inputValue.toLowerCase()) ||
-    a.name.toLowerCase().includes(inputValue.toLowerCase())
-  );
-
-  return (
-    <div className="relative">
+  // Fallback plain input when no API key
+  if (!apiKey) {
+    return (
       <input
-        ref={inputRef}
         id={id}
         value={inputValue}
-        onChange={(e) => {
-          setInputValue(e.target.value);
-          onChange(e.target.value);
-          setShowSuggestions(true);
-        }}
-        onFocus={() => setShowSuggestions(true)}
-        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+        onChange={e => { setInputValue(e.target.value); onChange(e.target.value); }}
         placeholder={placeholder}
         className={className}
         autoComplete="off"
       />
-      {showSuggestions && matchingAirports.length > 0 && (
+    );
+  }
+
+  return (
+    <div className="relative">
+      {/* Airport shortcuts shown above autocomplete on focus */}
+      <div
+        className="relative"
+        onFocus={() => setShowAirports(true)}
+        onBlur={() => setTimeout(() => setShowAirports(false), 200)}
+      >
+        <div
+          ref={containerRef}
+          id={id}
+          className="w-full [&>gmp-place-autocomplete]:block"
+          style={{ minHeight: "48px" }}
+        />
+      </div>
+
+      {showAirports && (
         <div className="absolute z-50 top-full left-0 right-0 bg-[#0a0a0a] border border-white/20 shadow-xl">
           <div className="px-3 py-2 text-xs uppercase tracking-widest text-muted-foreground border-b border-white/10">
             South Florida Airports
           </div>
-          {matchingAirports.map(airport => (
+          {SOUTH_FLORIDA_AIRPORTS.map(airport => (
             <button
               key={airport.code}
               type="button"
