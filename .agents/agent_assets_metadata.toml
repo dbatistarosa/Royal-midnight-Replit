@@ -1,0 +1,50 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "4_SALPHBMYkPBy7sjHRJx"
+uri = "file://artifacts/royal-midnight/public/hero-bg.png"
+type = "image"
+title = "Luxury black sedan at night"
+
+[[generated]]
+id = "gvvGnGnUEb4U1boX0cHYY"
+uri = "file://artifacts/royal-midnight/public/interior.png"
+type = "image"
+title = "Luxury car interior"
+
+[[generated]]
+id = "y4yXsPIQJ6zYnNOxfbFtw"
+uri = "file://artifacts/royal-midnight/public/chauffeur.png"
+type = "image"
+title = "Chauffeur opening door"
+
+[[generated]]
+id = "IznQT-sZsQKgtG20TstGW"
+uri = "file://artifacts/royal-midnight/public/standard.png"
+type = "image"
+title = "Luxury black sedan"
+
+[[generated]]
+id = "NI29xK-K-9yU3XkrKWSN1"
+uri = "file://artifacts/royal-midnight/public/business.png"
+type = "image"
+title = "Business class black sedan"
+
+[[generated]]
+id = "y8AiudgsYzhOQryvHJOMc"
+uri = "file://artifacts/royal-midnight/public/first_class.png"
+type = "image"
+title = "First class black limousine"
+
+[[generated]]
+id = "ITM4bZcpF2ZLrMZ14MG_m"
+uri = "file://artifacts/royal-midnight/public/suv.png"
+type = "image"
+title = "Premium black SUV"
+
+[[generated]]
+id = "TqmklCNMxfutd0P1sLbJL"
+uri = "file://artifacts/royal-midnight/public/van.png"
+type = "image"
+title = "Executive black van"
