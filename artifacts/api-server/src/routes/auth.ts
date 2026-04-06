@@ -154,49 +154,6 @@ router.post("/auth/verify-otp", async (req, res): Promise<void> => {
   });
 });
 
-// Step-1 only: create user + driver record, return token immediately
-const DriverStep1Body = z.object({
-  name: z.string().min(2),
-  email: z.string().email(),
-  phone: z.string().min(7),
-  password: z.string().min(6),
-});
-
-router.post("/auth/driver-step1", async (req, res): Promise<void> => {
-  const parsed = DriverStep1Body.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-
-  const { name, email, phone, password } = parsed.data;
-
-  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
-  if (existing) {
-    res.status(400).json({ error: "Email already registered" });
-    return;
-  }
-
-  const [user] = await db
-    .insert(usersTable)
-    .values({ name, email, phone, role: "driver", passwordHash: hashPassword(password) })
-    .returning();
-
-  const [driver] = await db
-    .insert(driversTable)
-    .values({ userId: user.id, name, email, phone, approvalStatus: "pending", status: "pending" })
-    .returning();
-
-  const token = generateToken(user.id);
-  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
-
-  res.status(201).json({
-    token,
-    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role },
-    driverId: driver.id,
-  });
-});
-
 const DriverRegisterBody = z.object({
   name: z.string().min(2),
   email: z.string().email(),

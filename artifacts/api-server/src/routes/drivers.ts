@@ -54,7 +54,7 @@ router.post("/drivers", async (req, res): Promise<void> => {
   res.status(201).json(GetDriverResponse.parse(parseDriver(driver)));
 });
 
-router.get("/drivers/:id", async (req, res): Promise<void> => {
+router.get("/drivers/:id", requireAuth, async (req, res): Promise<void> => {
   const params = GetDriverParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -67,10 +67,16 @@ router.get("/drivers/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== driver.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
   res.json(GetDriverResponse.parse(parseDriver(driver)));
 });
 
-router.patch("/drivers/:id", async (req, res): Promise<void> => {
+router.patch("/drivers/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = UpdateDriverParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -148,55 +154,6 @@ router.get("/drivers/by-user/:userId", requireAuth, async (req, res): Promise<vo
   }
 
   res.json(parseDriver(driver));
-});
-
-// Onboarding profile update (Steps 2-4): authenticated driver updates their own record
-router.patch("/drivers/:id/profile", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
-  if (!id) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
-
-  const caller = req.currentUser!;
-  // Must be same driver (by driverId lookup) or admin
-  const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
-  if (!driver) {
-    res.status(404).json({ error: "Driver not found" });
-    return;
-  }
-  if (caller.role !== "admin" && caller.userId !== driver.userId) {
-    res.status(403).json({ error: "Access denied" });
-    return;
-  }
-
-  const allowed = [
-    "serviceArea", "vehicleYear", "vehicleMake", "vehicleModel", "vehicleColor",
-    "passengerCapacity", "luggageCapacity", "hasCarSeat",
-    "licenseNumber", "licenseExpiry", "licenseDoc",
-    "regVin", "regPlate", "regExpiry", "regDoc",
-    "insuranceExpiry", "insuranceDoc",
-  ] as const;
-
-  const updateData: Record<string, unknown> = {};
-  for (const field of allowed) {
-    if (req.body[field] !== undefined) {
-      updateData[field] = req.body[field];
-    }
-  }
-
-  if (Object.keys(updateData).length === 0) {
-    res.status(400).json({ error: "No valid fields to update" });
-    return;
-  }
-
-  const [updated] = await db
-    .update(driversTable)
-    .set(updateData)
-    .where(eq(driversTable.id, id))
-    .returning();
-
-  res.json(parseDriver(updated));
 });
 
 router.patch("/drivers/:id/approve", requireAdmin, async (req, res): Promise<void> => {
