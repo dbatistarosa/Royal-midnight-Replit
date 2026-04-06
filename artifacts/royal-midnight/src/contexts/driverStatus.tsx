@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { useAuth } from "./auth";
 import { API_BASE } from "@/lib/constants";
 
@@ -29,7 +29,7 @@ interface DriverStatusContextValue {
   driverRecord: DriverRecord | null;
   isLoading: boolean;
   refetch: () => void;
-  setDriverRecord: (d: DriverRecord | null) => void;
+  setDriverRecord: Dispatch<SetStateAction<DriverRecord | null>>;
 }
 
 const DriverStatusContext = createContext<DriverStatusContextValue | null>(null);
