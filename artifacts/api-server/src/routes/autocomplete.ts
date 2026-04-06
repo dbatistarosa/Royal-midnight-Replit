@@ -42,7 +42,7 @@ router.get("/autocomplete", async (req, res): Promise<void> => {
     url.searchParams.set("location", "26.0,-80.1");
     url.searchParams.set("radius", "160000"); // ~100 miles around South Florida
     url.searchParams.set("strictbounds", "false");
-    url.searchParams.set("types", "geocode");
+    url.searchParams.set("types", "geocode|establishment");
 
     const response = await fetch(url.toString());
     const data = await response.json() as {

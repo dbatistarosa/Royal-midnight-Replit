@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
-import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock } from "lucide-react";
+import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock, Plane } from "lucide-react";
 
 import { useCreateBooking, useGetQuote } from "@workspace/api-client-react";
 import { QuoteRequestVehicleClass, CreateBookingBodyVehicleClass } from "@workspace/api-client-react/src/generated/api.schemas";
@@ -12,6 +12,7 @@ import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
 import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
+import { AIRLINES_BY_AIRPORT } from "@/data/airlines";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,16 @@ const STEPS = [
 
 type StepKey = 1 | 2 | 3;
 
+type AirportCode = "FLL" | "MIA" | "PBI";
+
+function detectAirportCode(address: string): AirportCode | null {
+  const upper = address.toUpperCase();
+  if (upper.startsWith("FLL") || upper.includes(" FLL ") || upper.includes("FLL -") || upper.includes("FLL—")) return "FLL";
+  if (upper.startsWith("MIA") || upper.includes(" MIA ") || upper.includes("MIA -") || upper.includes("MIA—")) return "MIA";
+  if (upper.startsWith("PBI") || upper.includes(" PBI ") || upper.includes("PBI -") || upper.includes("PBI—")) return "PBI";
+  return null;
+}
+
 export default function Book() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -91,6 +102,8 @@ export default function Book() {
   const [isConfirming, setIsConfirming] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [minBookingHours, setMinBookingHours] = useState(2);
+  const [pickupAirline, setPickupAirline] = useState("");
+  const [dropoffAirline, setDropoffAirline] = useState("");
 
   const getQuote = useGetQuote();
   const createBooking = useCreateBooking();
@@ -136,6 +149,17 @@ export default function Book() {
   const pickupTime = form.watch("pickupTime");
   const pickupAddress = form.watch("pickupAddress");
   const dropoffAddress = form.watch("dropoffAddress");
+
+  const pickupAirportCode = detectAirportCode(pickupAddress || "");
+  const dropoffAirportCode = detectAirportCode(dropoffAddress || "");
+
+  useEffect(() => {
+    if (!pickupAirportCode) setPickupAirline("");
+  }, [pickupAirportCode]);
+
+  useEffect(() => {
+    if (!dropoffAirportCode) setDropoffAirline("");
+  }, [dropoffAirportCode]);
 
   const showBusiness = Number(passengers) <= 3;
   const selectedQuote = selectedVehicle ? quotes[selectedVehicle] : null;
@@ -420,6 +444,46 @@ export default function Book() {
                       </FormItem>
                     )} />
                   </div>
+
+                  {/* Airline selectors — shown when airport detected */}
+                  {(pickupAirportCode || dropoffAirportCode) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {pickupAirportCode && (
+                        <div>
+                          <label className="text-gray-500 uppercase tracking-widest text-[10px] flex items-center gap-1.5 mb-2">
+                            <Plane className="w-3 h-3 text-primary" /> Pickup Airline <span className="normal-case text-gray-700 ml-1">optional</span>
+                          </label>
+                          <Select value={pickupAirline} onValueChange={setPickupAirline}>
+                            <SelectTrigger className={`${inputClass} [&>span]:text-white`}>
+                              <SelectValue placeholder="Select airline..." />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#0d0d0d] border-white/15 text-white max-h-64 overflow-y-auto">
+                              {AIRLINES_BY_AIRPORT[pickupAirportCode].map(a => (
+                                <SelectItem key={a.code} value={`${a.code} – ${a.name}`}>{a.code} — {a.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      {dropoffAirportCode && (
+                        <div>
+                          <label className="text-gray-500 uppercase tracking-widest text-[10px] flex items-center gap-1.5 mb-2">
+                            <Plane className="w-3 h-3 text-gray-500" /> Dropoff Airline <span className="normal-case text-gray-700 ml-1">optional</span>
+                          </label>
+                          <Select value={dropoffAirline} onValueChange={setDropoffAirline}>
+                            <SelectTrigger className={`${inputClass} [&>span]:text-white`}>
+                              <SelectValue placeholder="Select airline..." />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#0d0d0d] border-white/15 text-white max-h-64 overflow-y-auto">
+                              {AIRLINES_BY_AIRPORT[dropoffAirportCode].map(a => (
+                                <SelectItem key={a.code} value={`${a.code} – ${a.name}`}>{a.code} — {a.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Date / Time / Passengers / Luggage */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2">
@@ -776,6 +840,8 @@ export default function Book() {
                         { label: "Email", value: form.getValues("passengerEmail") },
                         { label: "Phone", value: form.getValues("passengerPhone") },
                         ...(form.getValues("flightNumber") ? [{ label: "Flight", value: form.getValues("flightNumber")! }] : []),
+                        ...(pickupAirline ? [{ label: "Pickup Airline", value: pickupAirline }] : []),
+                        ...(dropoffAirline ? [{ label: "Dropoff Airline", value: dropoffAirline }] : []),
                       ].map(item => (
                         <div key={item.label}>
                           <p className="text-[10px] uppercase tracking-widest text-gray-600 mb-0.5">{item.label}</p>
