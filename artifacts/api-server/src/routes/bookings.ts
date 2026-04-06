@@ -32,10 +32,14 @@ async function getCommissionPct(): Promise<number> {
   return row ? parseFloat(row.value) : 0.70;
 }
 
-function applyDriverEarnings<T extends { priceQuoted: number }>(booking: T, commissionPct: number): T & { driverEarnings: number } {
+function toDriverView<T extends { priceQuoted: number }>(
+  booking: T,
+  commissionPct: number
+): Omit<T, "priceQuoted"> & { driverEarnings: number } {
+  const { priceQuoted, ...rest } = booking;
   return {
-    ...booking,
-    driverEarnings: Math.round(booking.priceQuoted * commissionPct * 100) / 100,
+    ...rest,
+    driverEarnings: Math.round(priceQuoted * commissionPct * 100) / 100,
   };
 }
 
@@ -93,7 +97,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
 
   if (caller.role === "driver") {
     const commissionPct = await getCommissionPct();
-    res.json(parsed2.map(b => applyDriverEarnings(b, commissionPct)));
+    res.json(parsed2.map(b => toDriverView(b, commissionPct)));
     return;
   }
 
@@ -122,7 +126,7 @@ router.post("/bookings", async (req, res): Promise<void> => {
   res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
 });
 
-router.get("/bookings/:id", async (req, res): Promise<void> => {
+router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
   const params = GetBookingParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -135,7 +139,27 @@ router.get("/bookings/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(GetBookingResponse.parse(parseBooking(booking)));
+  const caller = req.currentUser!;
+
+  // Drivers can only access their assigned bookings
+  if (caller.role === "driver") {
+    const [driverRow] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId));
+    if (!driverRow || booking.driverId !== driverRow.id) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+    const commissionPct = await getCommissionPct();
+    res.json(toDriverView(parseBooking(booking), commissionPct));
+    return;
+  }
+
+  // Passengers can only access their own bookings
+  if (caller.role === "passenger" && booking.userId !== caller.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  res.json(parseBooking(booking));
 });
 
 router.patch("/bookings/:id", async (req, res): Promise<void> => {
