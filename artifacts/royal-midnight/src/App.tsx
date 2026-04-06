@@ -97,6 +97,26 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
   );
 }
 
+function DriverRoute({ component: Component }: { component: React.ComponentType }) {
+  return (
+    <PortalWrapper>
+      <AuthGuard requiredRole="driver">
+        <Component />
+      </AuthGuard>
+    </PortalWrapper>
+  );
+}
+
+function PassengerRoute({ component: Component }: { component: React.ComponentType }) {
+  return (
+    <PortalWrapper>
+      <AuthGuard requiredRole="passenger">
+        <Component />
+      </AuthGuard>
+    </PortalWrapper>
+  );
+}
+
 function Router() {
   return (
     <Switch>
@@ -110,42 +130,42 @@ function Router() {
 
       {/* Passenger Portal */}
       <Route path="/passenger/dashboard">
-        <PortalWrapper><PassengerDashboard /></PortalWrapper>
+        <PassengerRoute component={PassengerDashboard} />
       </Route>
       <Route path="/passenger/rides/:id">
-        <PortalWrapper><PassengerRideDetail /></PortalWrapper>
+        <PassengerRoute component={PassengerRideDetail} />
       </Route>
       <Route path="/passenger/rides">
-        <PortalWrapper><PassengerRides /></PortalWrapper>
+        <PassengerRoute component={PassengerRides} />
       </Route>
       <Route path="/passenger/addresses">
-        <PortalWrapper><PassengerAddresses /></PortalWrapper>
+        <PassengerRoute component={PassengerAddresses} />
       </Route>
       <Route path="/passenger/profile">
-        <PortalWrapper><PassengerProfile /></PortalWrapper>
+        <PassengerRoute component={PassengerProfile} />
       </Route>
       <Route path="/passenger/support">
-        <PortalWrapper><PassengerSupport /></PortalWrapper>
+        <PassengerRoute component={PassengerSupport} />
       </Route>
 
       {/* Driver Portal */}
       <Route path="/driver/onboarding">
-        <PortalWrapper><DriverOnboarding /></PortalWrapper>
+        <DriverRoute component={DriverOnboarding} />
       </Route>
       <Route path="/driver/earnings">
-        <PortalWrapper><DriverEarnings /></PortalWrapper>
+        <DriverRoute component={DriverEarnings} />
       </Route>
       <Route path="/driver/history">
-        <PortalWrapper><DriverHistory /></PortalWrapper>
+        <DriverRoute component={DriverHistory} />
       </Route>
       <Route path="/driver/profile">
-        <PortalWrapper><DriverProfile /></PortalWrapper>
+        <DriverRoute component={DriverProfile} />
       </Route>
       <Route path="/driver/dashboard">
-        <PortalWrapper><DriverDashboard /></PortalWrapper>
+        <DriverRoute component={DriverDashboard} />
       </Route>
       <Route path="/driver">
-        <PortalWrapper><DriverDashboard /></PortalWrapper>
+        <DriverRoute component={DriverDashboard} />
       </Route>
 
       {/* Admin Portal */}
@@ -180,7 +200,7 @@ function Router() {
         <AdminRoute component={AdminSettings} />
       </Route>
       <Route path="/admin">
-        <PortalWrapper><AdminDashboard /></PortalWrapper>
+        <AdminRoute component={AdminDashboard} />
       </Route>
 
       {/* Public Marketing + Booking */}
