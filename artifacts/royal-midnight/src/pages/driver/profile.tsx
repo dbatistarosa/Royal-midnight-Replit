@@ -7,6 +7,15 @@ import { useToast } from "@/hooks/use-toast";
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { format } from "date-fns";
+
+type Review = {
+  id: number;
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+  bookingId: number;
+};
 
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
@@ -23,12 +32,24 @@ export default function DriverProfile() {
   const { user, token } = useAuth();
   const { toast } = useToast();
   const [isSaving, setIsSaving] = useState(false);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
 
   const [phone, setPhone] = useState("");
 
   useEffect(() => {
     if (driverRecord?.phone) setPhone(driverRecord.phone);
   }, [driverRecord?.phone]);
+
+  useEffect(() => {
+    if (!driverRecord?.id) return;
+    setReviewsLoading(true);
+    fetch(`${API_BASE}/reviews?driverId=${driverRecord.id}`)
+      .then(r => r.ok ? r.json() as Promise<Review[]> : Promise.resolve([]))
+      .then(data => setReviews(Array.isArray(data) ? data : []))
+      .catch(() => setReviews([]))
+      .finally(() => setReviewsLoading(false));
+  }, [driverRecord?.id]);
 
   const handleSave = async () => {
     if (!driverRecord?.id || !token) return;
@@ -162,6 +183,41 @@ export default function DriverProfile() {
               <div className="text-xs text-muted-foreground uppercase tracking-widest">Status</div>
             </div>
           </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-none p-8">
+          <h2 className="font-serif text-lg mb-6 text-muted-foreground uppercase tracking-widest text-sm">Customer Reviews</h2>
+          {reviewsLoading ? (
+            <div className="space-y-3">
+              {[1, 2].map(i => <div key={i} className="h-16 bg-muted/20 animate-pulse rounded-none" />)}
+            </div>
+          ) : reviews.length > 0 ? (
+            <div className="space-y-4">
+              {reviews.slice(0, 10).map(review => (
+                <div key={review.id} className="border border-border/50 p-4 rounded-none">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map(star => (
+                        <Star
+                          key={star}
+                          className={`w-3.5 h-3.5 ${star <= review.rating ? "text-primary fill-primary" : "text-muted-foreground/30"}`}
+                        />
+                      ))}
+                      <span className="text-xs text-muted-foreground ml-1">{review.rating}/5</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {format(new Date(review.createdAt), "MMM d, yyyy")}
+                    </span>
+                  </div>
+                  {review.comment && (
+                    <p className="text-sm text-foreground/80 italic">"{review.comment}"</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">No reviews yet. Complete your first ride to receive feedback.</p>
+          )}
         </div>
       </div>
     </PortalLayout>

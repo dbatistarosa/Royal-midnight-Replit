@@ -29,7 +29,8 @@ function parseBooking(b: typeof bookingsTable.$inferSelect) {
 
 async function getCommissionPct(): Promise<number> {
   const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct"));
-  return row ? parseFloat(row.value) : 0.70;
+  // Stored as whole percent (e.g. "70" = 70%); divide by 100 to get multiplier
+  return row ? parseFloat(row.value) / 100 : 0.70;
 }
 
 function toDriverView<T extends { priceQuoted: number }>(
