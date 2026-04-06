@@ -3,6 +3,7 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/auth";
 import { Loader2, Save, Settings, LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,13 +65,16 @@ const SETTING_FIELDS: SettingField[] = [
 
 function AdminSettingsInner() {
   const { toast } = useToast();
+  const { token } = useAuth();
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+
   useEffect(() => {
-    fetch(`${API_BASE}/admin/settings`)
+    fetch(`${API_BASE}/admin/settings`, { headers: authHeader })
       .then(r => r.json())
       .then((data: Record<string, string>) => {
         setSettings(data);
@@ -87,7 +91,8 @@ function AdminSettingsInner() {
       })
       .catch(() => toast({ title: "Error", description: "Could not load settings.", variant: "destructive" }))
       .finally(() => setIsLoading(false));
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const handleSave = async (field: SettingField) => {
     const raw = editValues[field.key] ?? "";
@@ -104,7 +109,7 @@ function AdminSettingsInner() {
     try {
       const res = await fetch(`${API_BASE}/admin/settings/${field.key}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({ value: storedValue }),
       });
       if (!res.ok) throw new Error("Save failed");

@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
@@ -18,7 +19,7 @@ router.get("/settings/public", async (_req, res): Promise<void> => {
 });
 
 // Admin: get all settings
-router.get("/admin/settings", async (_req, res): Promise<void> => {
+router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => {
   const rows = await db.select().from(settingsTable);
   const map: Record<string, string> = {};
   for (const row of rows) {
@@ -28,7 +29,7 @@ router.get("/admin/settings", async (_req, res): Promise<void> => {
 });
 
 // Admin: update a setting
-router.patch("/admin/settings/:key", async (req, res): Promise<void> => {
+router.patch("/admin/settings/:key", requireAdmin, async (req, res): Promise<void> => {
   const key = req.params["key"];
   const value = req.body?.value;
   if (typeof value !== "string" || !value.trim()) {

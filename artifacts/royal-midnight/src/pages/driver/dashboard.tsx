@@ -5,7 +5,6 @@ import { LayoutDashboard, History, DollarSign, User, Loader2, Clock, XCircle } f
 import { format } from "date-fns";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
-
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
   { label: "History", href: "/driver/history", icon: History },
@@ -77,21 +76,23 @@ function ApprovedDashboard({ driverId }: { driverId: number }) {
 }
 
 export default function DriverDashboard() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [driverRecord, setDriverRecord] = useState<DriverRecord | null>(null);
   const [driverLoading, setDriverLoading] = useState(true);
 
   useEffect(() => {
-    if (!user?.id) {
+    if (!user?.id || !token) {
       setDriverLoading(false);
       return;
     }
-    fetch(`${API_BASE}/drivers/by-user/${user.id}`)
+    fetch(`${API_BASE}/drivers/by-user/${user.id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
       .then(r => r.json())
       .then((d: DriverRecord) => setDriverRecord(d))
       .catch(() => setDriverRecord(null))
       .finally(() => setDriverLoading(false));
-  }, [user?.id]);
+  }, [user?.id, token]);
 
   if (driverLoading) {
     return (

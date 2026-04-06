@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, driversTable, bookingsTable } from "@workspace/db";
-import { requireAdmin } from "../middleware/auth.js";
+import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import {
   ListDriversQueryParams,
   ListDriversResponse,
@@ -28,7 +28,7 @@ function parseDriver(d: typeof driversTable.$inferSelect) {
   };
 }
 
-router.get("/drivers", async (req, res): Promise<void> => {
+router.get("/drivers", requireAdmin, async (req, res): Promise<void> => {
   const parsed = ListDriversQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -128,10 +128,16 @@ router.patch("/drivers/:id/toggle-availability", async (req, res): Promise<void>
   res.json(ToggleDriverAvailabilityResponse.parse(parseDriver(driver)));
 });
 
-router.get("/drivers/by-user/:userId", async (req, res): Promise<void> => {
+router.get("/drivers/by-user/:userId", requireAuth, async (req, res): Promise<void> => {
   const userId = parseInt(req.params["userId"] || "0", 10);
   if (!userId) {
     res.status(400).json({ error: "Invalid userId" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== userId) {
+    res.status(403).json({ error: "Access denied" });
     return;
   }
 
