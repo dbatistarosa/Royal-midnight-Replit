@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, and, isNull } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable } from "@workspace/db";
-import { requireAuth, optionalAuth } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
   ListBookingsQueryParams,
   ListBookingsResponse,
@@ -117,6 +117,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
 });
 
 router.post("/bookings", async (req, res): Promise<void> => {
+  // public endpoint — allows anonymous booking creation from the booking form
   const parsed = CreateBookingBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -200,7 +201,7 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
   res.json(parseBooking(booking));
 });
 
-router.patch("/bookings/:id", async (req, res): Promise<void> => {
+router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = UpdateBookingParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });

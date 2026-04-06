@@ -43,14 +43,22 @@ router.get("/drivers", requireAdmin, async (req, res): Promise<void> => {
   res.json(drivers.map(parseDriver));
 });
 
-router.post("/drivers", async (req, res): Promise<void> => {
+router.post("/drivers", requireAdmin, async (req, res): Promise<void> => {
   const parsed = CreateDriverBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
-  const [driver] = await db.insert(driversTable).values(parsed.data).returning();
+  // Admin-created drivers are immediately active — no approval flow required
+  const [driver] = await db
+    .insert(driversTable)
+    .values({
+      ...parsed.data,
+      approvalStatus: "approved",
+      status: "available",
+    })
+    .returning();
   res.status(201).json(GetDriverResponse.parse(parseDriver(driver)));
 });
 

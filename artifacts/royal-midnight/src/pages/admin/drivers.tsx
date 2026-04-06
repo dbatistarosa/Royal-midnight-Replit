@@ -1,11 +1,19 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, Plus, X } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
+const LABEL = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
+const FINPUT = "bg-white/5 border-white/10 text-white rounded-none h-10 text-sm";
+
+type AddDriverForm = {
+  name: string; email: string; phone: string; licenseNumber: string;
+};
+const EMPTY_DRIVER: AddDriverForm = { name: "", email: "", phone: "", licenseNumber: "" };
 
 const adminNavItems = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
@@ -77,6 +85,9 @@ export default function AdminDrivers() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState<Record<number, string>>({});
   const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState<AddDriverForm>(EMPTY_DRIVER);
+  const [addSaving, setAddSaving] = useState(false);
 
   const authHeaders: Record<string, string> = {
     "Content-Type": "application/json",
@@ -142,6 +153,29 @@ export default function AdminDrivers() {
     setActionLoading(null);
   };
 
+  const handleAddDriver = async () => {
+    if (!addForm.name || !addForm.email || !addForm.phone || !addForm.licenseNumber) {
+      toast({ title: "Missing fields", description: "All fields are required.", variant: "destructive" });
+      return;
+    }
+    setAddSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/drivers`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(addForm),
+      });
+      if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
+      toast({ title: "Driver created", description: `${addForm.name} has been added and is immediately active.` });
+      setShowAdd(false);
+      setAddForm(EMPTY_DRIVER);
+      refetch();
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not create driver.", variant: "destructive" });
+    }
+    setAddSaving(false);
+  };
+
   const pendingCount = drivers?.filter(d => !d.approvalStatus || d.approvalStatus === "pending").length ?? 0;
 
   return (
@@ -153,7 +187,15 @@ export default function AdminDrivers() {
             <p className="text-sm text-yellow-400">{pendingCount} application{pendingCount > 1 ? "s" : ""} pending review</p>
           )}
         </div>
-        <span className="text-xs text-muted-foreground">{drivers?.length ?? 0} total</span>
+        <div className="flex items-center gap-4">
+          <span className="text-xs text-muted-foreground">{drivers?.length ?? 0} total</span>
+          <Button
+            onClick={() => setShowAdd(true)}
+            className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-5 h-10"
+          >
+            <Plus className="w-4 h-4 mr-2" />Add Driver
+          </Button>
+        </div>
       </div>
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
@@ -340,6 +382,42 @@ export default function AdminDrivers() {
           </table>
         </div>
       </div>
+
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-card border border-border w-full max-w-lg">
+            <div className="flex items-center justify-between px-7 py-5 border-b border-border">
+              <h2 className="font-serif text-xl">Add Driver</h2>
+              <button onClick={() => { setShowAdd(false); setAddForm(EMPTY_DRIVER); }} className="text-muted-foreground hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-7 space-y-5">
+              <p className="text-xs text-muted-foreground">Admin-created drivers bypass the approval flow and are immediately active.</p>
+              <div>
+                <label className={LABEL}>Full Name *</label>
+                <Input value={addForm.name} onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))} className={FINPUT} placeholder="James Williams" />
+              </div>
+              <div>
+                <label className={LABEL}>Email Address *</label>
+                <Input type="email" value={addForm.email} onChange={e => setAddForm(p => ({ ...p, email: e.target.value }))} className={FINPUT} placeholder="driver@royalmidnight.com" />
+              </div>
+              <div>
+                <label className={LABEL}>Phone Number *</label>
+                <Input value={addForm.phone} onChange={e => setAddForm(p => ({ ...p, phone: e.target.value }))} className={FINPUT} placeholder="+1 (305) 555-0000" />
+              </div>
+              <div>
+                <label className={LABEL}>License Number *</label>
+                <Input value={addForm.licenseNumber} onChange={e => setAddForm(p => ({ ...p, licenseNumber: e.target.value }))} className={FINPUT} placeholder="FL-D12345678" />
+              </div>
+            </div>
+            <div className="px-7 py-5 border-t border-border flex justify-end gap-3">
+              <Button variant="outline" onClick={() => { setShowAdd(false); setAddForm(EMPTY_DRIVER); }} className="rounded-none border-white/20 text-white hover:bg-white/10 text-xs uppercase tracking-widest">Cancel</Button>
+              <Button onClick={handleAddDriver} disabled={addSaving} className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-6">
+                {addSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</> : "Create Driver"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </PortalLayout>
   );
 }

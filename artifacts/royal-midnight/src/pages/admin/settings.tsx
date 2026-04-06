@@ -4,7 +4,7 @@ import { AuthGuard } from "@/components/layout/AuthGuard";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
-import { Loader2, Save, Settings, LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart } from "lucide-react";
+import { Loader2, Save, Settings, LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, UserPlus, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +63,9 @@ const SETTING_FIELDS: SettingField[] = [
   },
 ];
 
+type AdminForm = { name: string; email: string; password: string; confirmPassword: string; phone: string };
+const EMPTY_ADMIN: AdminForm = { name: "", email: "", password: "", confirmPassword: "", phone: "" };
+
 function AdminSettingsInner() {
   const { toast } = useToast();
   const { token } = useAuth();
@@ -70,6 +73,9 @@ function AdminSettingsInner() {
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [adminForm, setAdminForm] = useState<AdminForm>(EMPTY_ADMIN);
+  const [adminSaving, setAdminSaving] = useState(false);
+  const [adminCreated, setAdminCreated] = useState<{ email: string; name: string } | null>(null);
 
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -119,6 +125,36 @@ function AdminSettingsInner() {
       toast({ title: "Error", description: "Could not save setting.", variant: "destructive" });
     }
     setSaving(null);
+  };
+
+  const handleCreateAdmin = async () => {
+    if (!adminForm.name || !adminForm.email || !adminForm.password) {
+      toast({ title: "Missing fields", description: "Name, email, and password are required.", variant: "destructive" });
+      return;
+    }
+    if (adminForm.password !== adminForm.confirmPassword) {
+      toast({ title: "Passwords do not match", description: "Please re-enter matching passwords.", variant: "destructive" });
+      return;
+    }
+    if (adminForm.password.length < 8) {
+      toast({ title: "Password too short", description: "Password must be at least 8 characters.", variant: "destructive" });
+      return;
+    }
+    setAdminSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/admin-register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ name: adminForm.name, email: adminForm.email, password: adminForm.password, phone: adminForm.phone || null }),
+      });
+      if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
+      setAdminCreated({ name: adminForm.name, email: adminForm.email });
+      setAdminForm(EMPTY_ADMIN);
+      toast({ title: "Admin account created", description: `${adminForm.name} can now sign in.` });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not create admin.", variant: "destructive" });
+    }
+    setAdminSaving(false);
   };
 
   return (
@@ -183,6 +219,89 @@ function AdminSettingsInner() {
           </div>
         </div>
       )}
+
+      {/* Create Admin Account Section */}
+      <div className="mt-12">
+        <div className="flex items-center gap-3 mb-6">
+          <UserPlus className="w-5 h-5 text-primary" />
+          <h2 className="font-serif text-2xl">Create Admin Account</h2>
+        </div>
+
+        {adminCreated && (
+          <div className="bg-green-400/10 border border-green-400/20 rounded-none p-5 mb-6 flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />
+            <div className="text-sm">
+              <strong className="text-green-400">{adminCreated.name}</strong>
+              <span className="text-muted-foreground"> ({adminCreated.email}) can now sign in to the admin portal.</span>
+            </div>
+            <button onClick={() => setAdminCreated(null)} className="ml-auto text-muted-foreground hover:text-white text-xs uppercase tracking-widest">Dismiss</button>
+          </div>
+        )}
+
+        <div className="bg-card border border-border rounded-none p-7">
+          <p className="text-sm text-muted-foreground mb-6">Admin accounts have full access to this portal, including booking management, driver oversight, and settings changes.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Full Name *</Label>
+              <Input
+                value={adminForm.name}
+                onChange={e => setAdminForm(p => ({ ...p, name: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="Sarah Martinez"
+              />
+            </div>
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Email Address *</Label>
+              <Input
+                type="email"
+                value={adminForm.email}
+                onChange={e => setAdminForm(p => ({ ...p, email: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="sarah@royalmidnight.com"
+              />
+            </div>
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Phone (Optional)</Label>
+              <Input
+                value={adminForm.phone}
+                onChange={e => setAdminForm(p => ({ ...p, phone: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="+1 (305) 555-0000"
+              />
+            </div>
+            <div />
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Password *</Label>
+              <Input
+                type="password"
+                value={adminForm.password}
+                onChange={e => setAdminForm(p => ({ ...p, password: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="Min. 8 characters"
+              />
+            </div>
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Confirm Password *</Label>
+              <Input
+                type="password"
+                value={adminForm.confirmPassword}
+                onChange={e => setAdminForm(p => ({ ...p, confirmPassword: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="Repeat password"
+              />
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end">
+            <Button
+              onClick={handleCreateAdmin}
+              disabled={adminSaving}
+              className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-8 h-10"
+            >
+              {adminSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</> : <><UserPlus className="w-4 h-4 mr-2" />Create Admin</>}
+            </Button>
+          </div>
+        </div>
+      </div>
     </PortalLayout>
   );
 }

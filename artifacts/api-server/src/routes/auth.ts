@@ -4,6 +4,7 @@ import { db, usersTable, driversTable, sessionsTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
@@ -236,6 +237,52 @@ router.post("/auth/driver-register", async (req, res): Promise<void> => {
       createdAt: result.user.createdAt.toISOString(),
     },
     driverId: result.driver.id,
+  });
+});
+
+// Admin-only: create another admin account
+const CreateAdminBody = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  password: z.string().min(8),
+  phone: z.string().nullish(),
+});
+
+router.post("/auth/admin-register", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = CreateAdminBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const { name, email, password, phone } = parsed.data;
+
+  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  if (existing) {
+    res.status(400).json({ error: "Email already registered" });
+    return;
+  }
+
+  const [user] = await db
+    .insert(usersTable)
+    .values({
+      name,
+      email,
+      phone: phone ?? null,
+      role: "admin",
+      passwordHash: hashPassword(password),
+    })
+    .returning();
+
+  res.status(201).json({
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      createdAt: user.createdAt.toISOString(),
+    },
   });
 });
 
