@@ -57,3 +57,16 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   req.currentUser = { userId: session.userId, role: session.role };
   next();
 }
+
+// Optional auth — sets currentUser if a valid token is present, but does not block unauthenticated requests
+export async function optionalAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.token, token));
+    if (session) {
+      req.currentUser = { userId: session.userId, role: session.role };
+    }
+  }
+  next();
+}

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, and } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable } from "@workspace/db";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, optionalAuth } from "../middleware/auth.js";
 import {
   ListBookingsQueryParams,
   ListBookingsResponse,
@@ -126,7 +126,7 @@ router.post("/bookings", async (req, res): Promise<void> => {
   res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
 });
 
-router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
+router.get("/bookings/:id", optionalAuth, async (req, res): Promise<void> => {
   const params = GetBookingParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -139,10 +139,10 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const caller = req.currentUser!;
+  const caller = req.currentUser;
 
-  // Drivers can only access their assigned bookings
-  if (caller.role === "driver") {
+  // Authenticated driver: can only access their own assigned bookings; receive driver-view (no priceQuoted)
+  if (caller?.role === "driver") {
     const [driverRow] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId));
     if (!driverRow || booking.driverId !== driverRow.id) {
       res.status(403).json({ error: "Access denied" });
@@ -153,12 +153,13 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // Passengers can only access their own bookings
-  if (caller.role === "passenger" && booking.userId !== caller.userId) {
+  // Authenticated passenger: can only access their own bookings
+  if (caller?.role === "passenger" && booking.userId !== caller.userId) {
     res.status(403).json({ error: "Access denied" });
     return;
   }
 
+  // Unauthenticated (public track page) and admin: return full booking data
   res.json(parseBooking(booking));
 });
 
