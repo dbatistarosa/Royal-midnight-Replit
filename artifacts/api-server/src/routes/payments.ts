@@ -22,28 +22,34 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
 });
 
 router.post("/payments/create-intent", async (req, res): Promise<void> => {
-  const { bookingId, amount } = req.body as { bookingId: number; amount: number };
-  if (!bookingId || !amount) {
-    res.status(400).json({ error: "bookingId and amount are required" });
+  const { bookingId, amount } = req.body as { bookingId?: number; amount: number };
+  if (!amount || amount <= 0) {
+    res.status(400).json({ error: "amount is required" });
     return;
   }
   try {
     const stripe = getStripe();
-    const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
-    if (!booking) {
-      res.status(404).json({ error: "Booking not found" });
-      return;
+    let metadata: Record<string, string> = {};
+    let description = "Royal Midnight — Reservation";
+
+    if (bookingId) {
+      const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
+      if (booking) {
+        metadata = {
+          bookingId: String(bookingId),
+          passengerName: booking.passengerName,
+          pickupAddress: booking.pickupAddress,
+          dropoffAddress: booking.dropoffAddress,
+        };
+        description = `Royal Midnight — Booking #RM-${String(bookingId).padStart(4, "0")}`;
+      }
     }
+
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
       currency: "usd",
-      metadata: {
-        bookingId: String(bookingId),
-        passengerName: booking.passengerName,
-        pickupAddress: booking.pickupAddress,
-        dropoffAddress: booking.dropoffAddress,
-      },
-      description: `Royal Midnight — Booking #RM-${String(bookingId).padStart(4, "0")}`,
+      metadata,
+      description,
     });
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (err: any) {
