@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
-import { db, driversTable, bookingsTable } from "@workspace/db";
+import { db, driversTable, bookingsTable, settingsTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import {
   ListDriversQueryParams,
@@ -168,6 +168,82 @@ router.get("/drivers/by-user/:userId", requireAuth, async (req, res): Promise<vo
   res.json(parseDriver(driver));
 });
 
+// Driver self-service contact info update (phone only)
+router.patch("/drivers/:id/contact", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== driver.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  const phone = req.body?.phone as string | undefined;
+  if (typeof phone !== "string" || phone.trim().length < 7) {
+    res.status(400).json({ error: "Invalid phone number" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(driversTable)
+    .set({ phone: phone.trim() })
+    .where(eq(driversTable.id, id))
+    .returning();
+
+  res.json(parseDriver(updated));
+});
+
+// Driver self-service status update (available / on_break / unavailable)
+router.patch("/drivers/:id/status", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const allowed = ["available", "on_break", "unavailable"] as const;
+  const newStatus = req.body?.status as string;
+  if (!allowed.includes(newStatus as typeof allowed[number])) {
+    res.status(400).json({ error: `status must be one of: ${allowed.join(", ")}` });
+    return;
+  }
+
+  const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== driver.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  if (driver.approvalStatus !== "approved") {
+    res.status(403).json({ error: "Driver must be approved to change availability" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(driversTable)
+    .set({ status: newStatus, isOnline: newStatus === "available" })
+    .where(eq(driversTable.id, id))
+    .returning();
+
+  res.json(parseDriver(updated));
+});
+
 router.patch("/drivers/:id/approve", requireAdmin, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);
   if (!id) {
@@ -212,7 +288,7 @@ router.patch("/drivers/:id/reject", requireAdmin, async (req, res): Promise<void
   res.json({ success: true, driver: parseDriver(driver) });
 });
 
-router.get("/drivers/:id/earnings", async (req, res): Promise<void> => {
+router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void> => {
   const params = GetDriverEarningsParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -220,6 +296,21 @@ router.get("/drivers/:id/earnings", async (req, res): Promise<void> => {
   }
 
   const driverId = params.data.id;
+  const caller = req.currentUser!;
+
+  const [driver] = await db.select({ id: driversTable.id, userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+  if (caller.role !== "admin" && caller.userId !== driver.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  // Fetch commission rate from settings (stored as decimal e.g. 0.70 = 70%)
+  const [commissionRow] = await db.select().from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct"));
+  const commissionPct = commissionRow ? parseFloat(commissionRow.value) : 0.70;
 
   const [stats] = await db
     .select({
@@ -244,17 +335,19 @@ router.get("/drivers/:id/earnings", async (req, res): Promise<void> => {
     .orderBy(sql`date(created_at)`);
 
   const totalRides = stats?.totalRides ?? 0;
-  const totalEarnings = stats?.totalEarnings ?? 0;
+  const totalEarnings = (stats?.totalEarnings ?? 0) * commissionPct;
+
+  const recentPayouts = dailyRaw.map(d => ({ ...d, amount: d.amount * commissionPct }));
 
   res.json(
     GetDriverEarningsResponse.parse({
-      totalEarnings,
-      thisMonth: stats?.thisMonth ?? 0,
-      thisWeek: stats?.thisWeek ?? 0,
-      today: stats?.today ?? 0,
+      totalEarnings: Math.round(totalEarnings * 100) / 100,
+      thisMonth: Math.round((stats?.thisMonth ?? 0) * commissionPct * 100) / 100,
+      thisWeek: Math.round((stats?.thisWeek ?? 0) * commissionPct * 100) / 100,
+      today: Math.round((stats?.today ?? 0) * commissionPct * 100) / 100,
       totalRides,
       avgPerRide: totalRides > 0 ? Math.round((totalEarnings / totalRides) * 100) / 100 : 0,
-      recentPayouts: dailyRaw,
+      recentPayouts,
     })
   );
 });

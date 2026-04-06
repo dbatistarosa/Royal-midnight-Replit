@@ -84,6 +84,12 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   const token = generateToken(user.id);
   await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
 
+  let driverId: number | null = null;
+  if (user.role === "driver") {
+    const [driver] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, user.id));
+    driverId = driver?.id ?? null;
+  }
+
   res.json({
     token,
     user: {
@@ -94,6 +100,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       role: user.role,
       createdAt: user.createdAt.toISOString(),
     },
+    ...(driverId != null ? { driverId } : {}),
   });
 });
 

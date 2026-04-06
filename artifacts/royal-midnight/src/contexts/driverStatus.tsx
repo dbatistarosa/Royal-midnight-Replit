@@ -8,12 +8,28 @@ export interface DriverRecord {
   rejectionReason?: string | null;
   name: string;
   status: string;
+  isOnline: boolean;
+  rating: number | null;
+  totalRides: number;
+  email: string;
+  phone: string;
+  vehicleYear?: string | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehicleColor?: string | null;
+  passengerCapacity?: number | null;
+  luggageCapacity?: number | null;
+  hasCarSeat?: boolean | null;
+  serviceArea?: string | null;
+  licenseNumber?: string | null;
+  licenseExpiry?: string | null;
 }
 
 interface DriverStatusContextValue {
   driverRecord: DriverRecord | null;
   isLoading: boolean;
   refetch: () => void;
+  setDriverRecord: (d: DriverRecord | null) => void;
 }
 
 const DriverStatusContext = createContext<DriverStatusContextValue | null>(null);
@@ -44,7 +60,7 @@ export function DriverStatusProvider({ children }: { children: ReactNode }) {
   const refetch = () => setTick(t => t + 1);
 
   return (
-    <DriverStatusContext.Provider value={{ driverRecord, isLoading, refetch }}>
+    <DriverStatusContext.Provider value={{ driverRecord, isLoading, refetch, setDriverRecord }}>
       {children}
     </DriverStatusContext.Provider>
   );
