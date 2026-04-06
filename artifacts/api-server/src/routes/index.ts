@@ -13,6 +13,8 @@ import supportRouter from "./support";
 import notificationsRouter from "./notifications";
 import promosRouter from "./promos";
 import pricingRouter from "./pricing";
+import paymentsRouter from "./payments";
+import githubRouter from "./github";
 
 const router: IRouter = Router();
 
@@ -30,5 +32,7 @@ router.use(supportRouter);
 router.use(notificationsRouter);
 router.use(promosRouter);
 router.use(pricingRouter);
+router.use(paymentsRouter);
+router.use(githubRouter);
 
 export default router;

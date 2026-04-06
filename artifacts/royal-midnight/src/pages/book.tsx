@@ -8,8 +8,10 @@ import { CalendarIcon, Loader2, CheckCircle2, Tag, X } from "lucide-react";
 
 import { useCreateBooking, useGetQuote, useValidatePromo } from "@workspace/api-client-react";
 import { QuoteRequestVehicleClass, CreateBookingBodyVehicleClass } from "@workspace/api-client-react/src/generated/api.schemas";
-import { VEHICLE_CLASSES } from "@/lib/constants";
+import { VEHICLE_CLASSES, API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
+import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
+import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,11 +42,15 @@ export default function Book() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [quoteData, setQuoteData] = useState<{ price: number; duration: number; distance: number } | null>(null);
   const [promoCode, setPromoCode] = useState("");
   const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountAmount: number; finalAmount: number } | null>(null);
   const [promoError, setPromoError] = useState("");
+  const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null);
+  const [paymentPublishableKey, setPaymentPublishableKey] = useState<string | null>(null);
+  const [confirmedBookingId, setConfirmedBookingId] = useState<number | null>(null);
+  const [paymentError, setPaymentError] = useState("");
 
   const getQuote = useGetQuote();
   const createBooking = useCreateBooking();
@@ -102,7 +108,8 @@ export default function Book() {
   };
 
   const handleGetQuote = async () => {
-    const { pickupAddress, dropoffAddress, vehicleClass, passengers, pickupDate, pickupTime } = form.getValues();
+    const { pickupAddress, dropoffAddress, vehicleClass, pickupDate, pickupTime } = form.getValues();
+    const passengers = Number(form.getValues("passengers")) || 1;
     
     // Validate first step fields
     if (!pickupAddress || !dropoffAddress || !pickupDate || !pickupTime) {
@@ -157,8 +164,27 @@ export default function Book() {
           userId: user?.id || undefined
         }
       });
-      
-      toast({ title: "Booking Confirmed", description: "Your vehicle has been reserved." });
+
+      setConfirmedBookingId(result.id);
+
+      const configRes = await fetch(`${API_BASE}/payments/config`);
+      if (configRes.ok) {
+        const { publishableKey } = await configRes.json() as { publishableKey: string };
+        const intentRes = await fetch(`${API_BASE}/payments/create-intent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bookingId: result.id, amount: finalPrice }),
+        });
+        if (intentRes.ok) {
+          const { clientSecret } = await intentRes.json() as { clientSecret: string };
+          setPaymentClientSecret(clientSecret);
+          setPaymentPublishableKey(publishableKey);
+          setStep(4);
+          return;
+        }
+      }
+
+      toast({ title: "Booking Created", description: "Proceeding without online payment." });
       setLocation(`/booking-confirmation/${result.id}`);
     } catch (err: any) {
       toast({ title: "Booking Failed", description: err?.message || "An error occurred.", variant: "destructive" });
@@ -177,6 +203,8 @@ export default function Book() {
           <span className={step >= 2 ? "text-primary" : "text-gray-600"}>Details</span>
           <span className="text-gray-600">→</span>
           <span className={step >= 3 ? "text-primary" : "text-gray-600"}>Review & Confirm</span>
+          <span className="text-gray-600">→</span>
+          <span className={step >= 4 ? "text-primary" : "text-gray-600"}>Payment</span>
         </div>
 
         <Form {...form}>
@@ -191,7 +219,13 @@ export default function Book() {
                   <FormItem>
                     <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Pickup Location</FormLabel>
                     <FormControl>
-                      <Input placeholder="FLL, MIA, PBI or Address" className="bg-white/5 border-white/10 text-white rounded-none h-12" {...field} />
+                      <PlacesAutocomplete
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder="FLL, MIA, PBI or any address"
+                        className="w-full bg-white/5 border border-white/10 text-white rounded-none h-12 px-4 text-sm focus:outline-none focus:border-primary"
+                        id="pickupAddress"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -200,7 +234,13 @@ export default function Book() {
                   <FormItem>
                     <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Dropoff Location</FormLabel>
                     <FormControl>
-                      <Input placeholder="Address or Airport Code" className="bg-white/5 border-white/10 text-white rounded-none h-12" {...field} />
+                      <PlacesAutocomplete
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder="Address or Airport Code"
+                        className="w-full bg-white/5 border border-white/10 text-white rounded-none h-12 px-4 text-sm focus:outline-none focus:border-primary"
+                        id="dropoffAddress"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -445,6 +485,52 @@ export default function Book() {
 
           </form>
         </Form>
+
+        {/* STEP 4: PAYMENT */}
+        {step === 4 && paymentClientSecret && paymentPublishableKey && (
+          <div className="space-y-8 bg-black border border-white/10 p-8 md:p-12 shadow-2xl relative">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-30"></div>
+            <div>
+              <h2 className="text-2xl font-serif text-white border-b border-white/10 pb-4 mb-6">Secure Payment</h2>
+              <div className="flex items-center justify-between mb-6 bg-white/5 border border-white/10 px-6 py-4">
+                <div>
+                  <div className="text-xs uppercase tracking-widest text-gray-400 mb-1">Booking Reference</div>
+                  <div className="font-mono text-primary text-sm">
+                    RM-{String(confirmedBookingId).padStart(4, "0")}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs uppercase tracking-widest text-gray-400 mb-1">Amount Due</div>
+                  <div className="text-2xl font-serif text-white">
+                    ${finalPrice.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+              {paymentError && (
+                <div className="mb-4 p-4 border border-red-500/30 bg-red-500/10 text-red-400 text-sm">
+                  {paymentError}
+                </div>
+              )}
+              <StripePaymentForm
+                clientSecret={paymentClientSecret}
+                publishableKey={paymentPublishableKey}
+                amount={finalPrice}
+                onSuccess={async (paymentIntentId) => {
+                  try {
+                    await fetch(`${API_BASE}/payments/confirm/${confirmedBookingId}`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ paymentIntentId }),
+                    });
+                  } catch {}
+                  toast({ title: "Payment Successful", description: "Your reservation is confirmed." });
+                  setLocation(`/booking-confirmation/${confirmedBookingId}`);
+                }}
+                onError={(msg) => setPaymentError(msg)}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

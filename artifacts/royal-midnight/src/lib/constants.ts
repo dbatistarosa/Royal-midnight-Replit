@@ -1,3 +1,5 @@
+export const API_BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") + "/api";
+
 export const AIRPORTS = [
   { value: "FLL", label: "Fort Lauderdale-Hollywood Int. (FLL)" },
   { value: "MIA", label: "Miami International (MIA)" },
