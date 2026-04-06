@@ -1,47 +1,23 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
-import { MapPin, Loader2 } from "lucide-react";
+import { MapPin, Loader2, Plane } from "lucide-react";
+import { API_BASE } from "@/lib/constants";
 
-const AIRPORTS = [
-  { code: "FLL", name: "Fort Lauderdale-Hollywood International", address: "100 Terminal Dr, Fort Lauderdale, FL 33315" },
-  { code: "MIA", name: "Miami International Airport", address: "2100 NW 42nd Ave, Miami, FL 33142" },
-  { code: "PBI", name: "Palm Beach International Airport", address: "1000 James L Turnage Blvd, West Palm Beach, FL 33406" },
-];
-
-let mapsReady = false;
-let mapsReadyPromise: Promise<void> | null = null;
-let sessionToken: google.maps.places.AutocompleteSessionToken | null = null;
-
-function ensureMaps(): Promise<void> {
-  if (mapsReady) return Promise.resolve();
-  if (mapsReadyPromise) return mapsReadyPromise;
-
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return Promise.resolve();
-
-  setOptions({ apiKey, version: "weekly" });
-
-  mapsReadyPromise = importLibrary("places").then(() => {
-    mapsReady = true;
-  });
-
-  return mapsReadyPromise;
-}
-
-function getSessionToken(): google.maps.places.AutocompleteSessionToken {
-  if (!sessionToken) {
-    sessionToken = new google.maps.places.AutocompleteSessionToken();
-  }
-  return sessionToken;
-}
-
-function resetSessionToken() {
-  sessionToken = null;
+interface Airport {
+  code: string;
+  name: string;
+  address: string;
 }
 
 interface Suggestion {
   text: string;
+  mainText: string;
+  secondaryText: string;
   placeId: string;
+}
+
+interface AutocompleteResponse {
+  airports: Airport[];
+  suggestions: Suggestion[];
 }
 
 interface PlacesAutocompleteProps {
@@ -54,53 +30,36 @@ interface PlacesAutocompleteProps {
 
 export function PlacesAutocomplete({ value, onChange, placeholder, className, id }: PlacesAutocompleteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [inputValue, setInputValue] = useState(value);
+  const [airports, setAirports] = useState<Airport[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [focused, setFocused] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const isSelectingRef = useRef(false);
 
+  // Sync external value
   useEffect(() => {
     setInputValue(value);
   }, [value]);
 
   const fetchSuggestions = useCallback(async (query: string) => {
-    if (!apiKey || query.length < 2) {
-      setSuggestions([]);
-      return;
-    }
-    await ensureMaps();
-    if (!mapsReady) return;
-
     setLoading(true);
     try {
-      const { AutocompleteSuggestion } = google.maps.places as any;
-      const request = {
-        input: query,
-        sessionToken: getSessionToken(),
-        includedRegionCodes: ["us"],
-        locationBias: {
-          rectangle: {
-            low: { lat: 24.5, lng: -81.0 },
-            high: { lat: 27.5, lng: -79.5 },
-          },
-        },
-      };
-      const { suggestions: results } = await AutocompleteSuggestion.fetchAutocompleteSuggestions(request);
-      setSuggestions(
-        (results || []).slice(0, 5).map((s: any) => ({
-          text: s.placePrediction?.text?.toString() || s.placePrediction?.mainText?.toString() || "",
-          placeId: s.placePrediction?.placeId || "",
-        }))
-      );
+      const url = `${API_BASE}/autocomplete?q=${encodeURIComponent(query)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Network error");
+      const data = await res.json() as AutocompleteResponse;
+      setAirports(data.airports || []);
+      setSuggestions(data.suggestions || []);
     } catch {
+      setAirports([]);
       setSuggestions([]);
     } finally {
       setLoading(false);
     }
-  }, [apiKey]);
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -109,71 +68,96 @@ export function PlacesAutocomplete({ value, onChange, placeholder, className, id
     setShowDropdown(true);
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchSuggestions(val), 280);
+    debounceRef.current = setTimeout(() => fetchSuggestions(val), 250);
   };
 
-  const handleSelectSuggestion = useCallback(async (suggestion: Suggestion) => {
-    setInputValue(suggestion.text);
-    onChange(suggestion.text);
+  const handleFocus = () => {
+    setShowDropdown(true);
+    // Always fetch on focus (even empty = shows airports)
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchSuggestions(inputValue), 100);
+  };
+
+  const handleBlur = () => {
+    // Use a longer delay so touch events can fire first
+    setTimeout(() => {
+      if (!isSelectingRef.current) {
+        setShowDropdown(false);
+      }
+    }, 300);
+  };
+
+  const selectValue = useCallback((text: string) => {
+    isSelectingRef.current = true;
+    setInputValue(text);
+    onChange(text);
     setSuggestions([]);
+    setAirports([]);
     setShowDropdown(false);
-    resetSessionToken();
+    // Reset after a short delay
+    setTimeout(() => { isSelectingRef.current = false; }, 400);
   }, [onChange]);
 
-  const handleSelectAirport = useCallback((airport: typeof AIRPORTS[0]) => {
-    const val = `${airport.code} - ${airport.name}`;
-    setInputValue(val);
-    onChange(val);
-    setShowDropdown(false);
-    setSuggestions([]);
-  }, [onChange]);
+  const handleSelectAirport = (airport: Airport) => {
+    selectValue(`${airport.code} - ${airport.name}`);
+  };
 
-  const matchingAirports = AIRPORTS.filter(a =>
-    !inputValue ||
-    a.code.toLowerCase().includes(inputValue.toLowerCase()) ||
-    a.name.toLowerCase().includes(inputValue.toLowerCase()) ||
-    inputValue.toLowerCase().includes(a.code.toLowerCase())
-  );
+  const handleSelectSuggestion = (suggestion: Suggestion) => {
+    selectValue(suggestion.text);
+  };
 
-  const showAirports = focused && matchingAirports.length > 0 && suggestions.length === 0;
-  const hasDropdown = showDropdown && (showAirports || suggestions.length > 0 || loading);
+  const hasAirports = airports.length > 0;
+  const hasSuggestions = suggestions.length > 0;
+  const hasContent = hasAirports || hasSuggestions || loading;
+  const isOpen = showDropdown && hasContent;
 
   return (
-    <div className="relative">
-      <div className="relative">
-        <input
-          ref={inputRef}
-          id={id}
-          value={inputValue}
-          onChange={handleInputChange}
-          onFocus={() => { setFocused(true); setShowDropdown(true); }}
-          onBlur={() => setTimeout(() => { setFocused(false); setShowDropdown(false); }, 180)}
-          placeholder={placeholder}
-          className={className}
-          autoComplete="off"
-        />
-        {loading && (
-          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-primary pointer-events-none" />
-        )}
-      </div>
+    <div ref={containerRef} className="relative">
+      <input
+        ref={inputRef}
+        id={id}
+        value={inputValue}
+        onChange={handleInputChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        placeholder={placeholder}
+        className={className}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+      />
+      {loading && (
+        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-primary pointer-events-none" />
+      )}
 
-      {hasDropdown && (
-        <div className="absolute z-[200] top-full left-0 right-0 bg-[#0a0a0a] border border-white/15 shadow-2xl max-h-72 overflow-y-auto">
-
+      {isOpen && (
+        <div
+          className="absolute z-[9999] top-full left-0 right-0 bg-[#0d0d0d] border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.8)] overflow-hidden"
+          style={{ marginTop: "2px" }}
+          onPointerDown={(e) => {
+            // Prevent blur when interacting with dropdown
+            e.preventDefault();
+          }}
+        >
           {/* Airport shortcuts */}
-          {showAirports && (
+          {hasAirports && (
             <>
-              <div className="px-3 py-2 text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/8 bg-white/2">
+              <div className="px-3 py-1.5 text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10 bg-white/3">
                 South Florida Airports
               </div>
-              {matchingAirports.map(airport => (
+              {airports.map(airport => (
                 <button
                   key={airport.code}
                   type="button"
-                  className="w-full flex items-start gap-3 px-3 py-3 hover:bg-white/6 text-left transition-colors border-b border-white/5 last:border-0"
-                  onMouseDown={(e) => { e.preventDefault(); handleSelectAirport(airport); }}
+                  className="w-full flex items-start gap-3 px-3 py-3 hover:bg-white/8 active:bg-white/12 text-left transition-colors border-b border-white/5 last:border-0 cursor-pointer"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    handleSelectAirport(airport);
+                  }}
+                  onClick={() => handleSelectAirport(airport)}
                 >
-                  <MapPin className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                  <Plane className="w-4 h-4 text-primary mt-0.5 shrink-0" />
                   <div>
                     <div className="text-sm font-medium text-white">{airport.code} — {airport.name}</div>
                     <div className="text-xs text-gray-500 mt-0.5">{airport.address}</div>
@@ -183,24 +167,41 @@ export function PlacesAutocomplete({ value, onChange, placeholder, className, id
             </>
           )}
 
-          {/* Google Places suggestions */}
-          {suggestions.length > 0 && (
+          {/* Address suggestions */}
+          {hasSuggestions && (
             <>
-              <div className="px-3 py-2 text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/8 bg-white/2">
+              <div className="px-3 py-1.5 text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10 bg-white/3">
                 Addresses
               </div>
               {suggestions.map((s, i) => (
                 <button
                   key={i}
                   type="button"
-                  className="w-full flex items-center gap-3 px-3 py-3 hover:bg-white/6 text-left transition-colors border-b border-white/5 last:border-0"
-                  onMouseDown={(e) => { e.preventDefault(); handleSelectSuggestion(s); }}
+                  className="w-full flex items-start gap-3 px-3 py-3 hover:bg-white/8 active:bg-white/12 text-left transition-colors border-b border-white/5 last:border-0 cursor-pointer"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    handleSelectSuggestion(s);
+                  }}
+                  onClick={() => handleSelectSuggestion(s)}
                 >
-                  <MapPin className="w-4 h-4 text-gray-500 shrink-0" />
-                  <span className="text-sm text-white">{s.text}</span>
+                  <MapPin className="w-4 h-4 text-gray-500 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="text-sm text-white">{s.mainText}</div>
+                    {s.secondaryText && (
+                      <div className="text-xs text-gray-500 mt-0.5">{s.secondaryText}</div>
+                    )}
+                  </div>
                 </button>
               ))}
             </>
+          )}
+
+          {/* Loading state (no results yet) */}
+          {loading && !hasAirports && !hasSuggestions && (
+            <div className="px-3 py-4 flex items-center gap-2 text-gray-500 text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Searching addresses...
+            </div>
           )}
         </div>
       )}
