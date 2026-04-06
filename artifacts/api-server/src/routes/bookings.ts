@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, isNull } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable } from "@workspace/db";
 import { requireAuth, optionalAuth } from "../middleware/auth.js";
 import {
@@ -58,20 +58,29 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   if (parsed.data.driverId != null) conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
   if (parsed.data.userId != null) conditions.push(eq(bookingsTable.userId, parsed.data.userId));
 
-  // Non-admin drivers can only see their own bookings
+  // Non-admin drivers: either see their own assigned bookings, or unassigned open pool
   if (caller.role === "driver") {
     const [driverRow] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId));
     if (!driverRow) {
       res.json([]);
       return;
     }
-    // Allow driverId filter if it matches own record; otherwise force own
+
     const requestedDriverId = parsed.data.driverId;
-    if (requestedDriverId != null && requestedDriverId !== driverRow.id) {
-      res.status(403).json({ error: "Access denied" });
-      return;
-    }
-    if (requestedDriverId == null) {
+    const requestedStatus = parsed.data.status;
+
+    if (requestedDriverId != null) {
+      // Driver may only query their own driverId
+      if (requestedDriverId !== driverRow.id) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
+      // Already in conditions via parsed.data.driverId above — no extra condition needed
+    } else if (requestedStatus === "pending") {
+      // Requesting the open/unassigned pool — limit to bookings with no driver assigned
+      conditions.push(isNull(bookingsTable.driverId));
+    } else {
+      // Default: own assigned bookings only
       conditions.push(eq(bookingsTable.driverId, driverRow.id));
     }
   }

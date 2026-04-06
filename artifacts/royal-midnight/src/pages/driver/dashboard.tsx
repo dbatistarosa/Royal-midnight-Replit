@@ -156,10 +156,10 @@ function TabAvailable({ authHeader }: { authHeader: string }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Fetch unassigned open trips (no driverId) visible to any driver
+    // Fetch unassigned pending trips — backend scopes to driverId IS NULL for drivers
     fetch(`${API_BASE}/bookings?status=pending`, { headers: { Authorization: authHeader } })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
-      .then(data => setTrips(Array.isArray(data) ? data.filter(b => !b.passengerName || true) : []))
+      .then(data => setTrips(Array.isArray(data) ? data : []))
       .catch(() => setTrips([]))
       .finally(() => setLoading(false));
   }, [authHeader]);
@@ -476,6 +476,31 @@ export default function DriverDashboard() {
   const { driverRecord, isLoading } = useDriverStatus();
   const { user, token } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>("available");
+  const [earnings, setEarnings] = useState<EarningsData | null>(null);
+  const [upcomingCount, setUpcomingCount] = useState<number | null>(null);
+
+  const authHeader = `Bearer ${token ?? ""}`;
+
+  // Load headline stats once driver record is available
+  useEffect(() => {
+    if (!driverRecord?.id || !token) return;
+    const header = `Bearer ${token}`;
+
+    fetch(`${API_BASE}/drivers/${driverRecord.id}/earnings`, { headers: { Authorization: header } })
+      .then(r => r.ok ? r.json() as Promise<EarningsData> : Promise.resolve(null))
+      .then(data => setEarnings(data))
+      .catch(() => setEarnings(null));
+
+    fetch(`${API_BASE}/bookings?driverId=${driverRecord.id}`, { headers: { Authorization: header } })
+      .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
+      .then(data => {
+        const upcoming = Array.isArray(data)
+          ? data.filter(b => ["confirmed", "assigned", "in_progress"].includes(b.status)).length
+          : 0;
+        setUpcomingCount(upcoming);
+      })
+      .catch(() => setUpcomingCount(0));
+  }, [driverRecord?.id, token]);
 
   if (isLoading) {
     return (
@@ -487,7 +512,6 @@ export default function DriverDashboard() {
     );
   }
 
-  const authHeader = `Bearer ${token ?? ""}`;
   const initials = user?.name?.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() ?? "DR";
   const currentStatus = driverRecord?.status ?? "unavailable";
   const normalizedStatus: DriverAvailability = ["available", "on_break", "unavailable"].includes(currentStatus)
@@ -529,15 +553,21 @@ export default function DriverDashboard() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <div className="bg-card border border-border p-5">
               <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-2">Today's Earnings</h3>
-              <div className="text-3xl font-serif text-primary">—</div>
+              <div className="text-3xl font-serif text-primary">
+                {earnings ? fmt$(earnings.today) : <span className="text-muted-foreground text-xl">—</span>}
+              </div>
             </div>
             <div className="bg-card border border-border p-5">
               <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-2">Weekly Earnings</h3>
-              <div className="text-3xl font-serif text-foreground">—</div>
+              <div className="text-3xl font-serif text-foreground">
+                {earnings ? fmt$(earnings.thisWeek) : <span className="text-muted-foreground text-xl">—</span>}
+              </div>
             </div>
             <div className="bg-card border border-border p-5">
               <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-2">Upcoming Trips</h3>
-              <div className="text-3xl font-serif text-foreground">—</div>
+              <div className="text-3xl font-serif text-foreground">
+                {upcomingCount != null ? upcomingCount : <span className="text-muted-foreground text-xl">—</span>}
+              </div>
             </div>
             <div className="bg-card border border-border p-5">
               <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-2">Rating</h3>
