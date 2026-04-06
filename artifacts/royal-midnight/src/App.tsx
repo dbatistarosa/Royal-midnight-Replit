@@ -2,6 +2,8 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider } from "@/contexts/auth";
+import { AuthGuard } from "@/components/layout/AuthGuard";
 import NotFound from "@/pages/not-found";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
@@ -23,6 +25,10 @@ import Contact from "@/pages/contact";
 import FAQ from "@/pages/faq";
 import Terms from "@/pages/terms";
 import Privacy from "@/pages/privacy";
+
+// Auth
+import Login from "@/pages/auth/login";
+import Signup from "@/pages/auth/signup";
 
 // Passenger Portal
 import PassengerDashboard from "@/pages/passenger/dashboard";
@@ -51,7 +57,16 @@ import AdminPromos from "@/pages/admin/promos";
 import AdminSupport from "@/pages/admin/support";
 import AdminReports from "@/pages/admin/reports";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+const PORTAL_PATHS = ["/passenger", "/driver", "/admin", "/auth"];
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -63,73 +78,176 @@ function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+function PortalWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-black text-foreground font-sans">
+      <Navbar />
+      <main className="pt-20">{children}</main>
+    </div>
+  );
+}
+
+function AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  return (
+    <PortalWrapper>
+      <AuthGuard requiredRole="admin">
+        <Component />
+      </AuthGuard>
+    </PortalWrapper>
+  );
+}
+
 function Router() {
   return (
-    <Layout>
-      <Switch>
-        {/* Public Marketing */}
-        <Route path="/" component={Home} />
-        <Route path="/about" component={About} />
-        <Route path="/services" component={Services} />
-        <Route path="/services/airport-transfers" component={AirportTransfers} />
-        <Route path="/services/hourly-chauffeur" component={HourlyChauffeur} />
-        <Route path="/services/corporate" component={Corporate} />
-        <Route path="/services/events" component={Events} />
-        <Route path="/fleet" component={Fleet} />
-        <Route path="/pricing" component={Pricing} />
-        <Route path="/contact" component={Contact} />
-        <Route path="/faq" component={FAQ} />
-        <Route path="/terms" component={Terms} />
-        <Route path="/privacy" component={Privacy} />
+    <Switch>
+      {/* Auth (no footer, minimal layout) */}
+      <Route path="/auth/login">
+        <PortalWrapper><Login /></PortalWrapper>
+      </Route>
+      <Route path="/auth/signup">
+        <PortalWrapper><Signup /></PortalWrapper>
+      </Route>
 
-        {/* Booking */}
-        <Route path="/book" component={Book} />
-        <Route path="/booking-confirmation/:id" component={BookingConfirmation} />
-        <Route path="/track/:id" component={Track} />
+      {/* Passenger Portal */}
+      <Route path="/passenger/dashboard">
+        <PortalWrapper><PassengerDashboard /></PortalWrapper>
+      </Route>
+      <Route path="/passenger/rides/:id">
+        <PortalWrapper><PassengerRideDetail /></PortalWrapper>
+      </Route>
+      <Route path="/passenger/rides">
+        <PortalWrapper><PassengerRides /></PortalWrapper>
+      </Route>
+      <Route path="/passenger/addresses">
+        <PortalWrapper><PassengerAddresses /></PortalWrapper>
+      </Route>
+      <Route path="/passenger/profile">
+        <PortalWrapper><PassengerProfile /></PortalWrapper>
+      </Route>
+      <Route path="/passenger/support">
+        <PortalWrapper><PassengerSupport /></PortalWrapper>
+      </Route>
 
-        {/* Passenger Portal */}
-        <Route path="/passenger/dashboard" component={PassengerDashboard} />
-        <Route path="/passenger/rides" component={PassengerRides} />
-        <Route path="/passenger/rides/:id" component={PassengerRideDetail} />
-        <Route path="/passenger/addresses" component={PassengerAddresses} />
-        <Route path="/passenger/profile" component={PassengerProfile} />
-        <Route path="/passenger/support" component={PassengerSupport} />
+      {/* Driver Portal */}
+      <Route path="/driver/onboarding">
+        <PortalWrapper><DriverOnboarding /></PortalWrapper>
+      </Route>
+      <Route path="/driver/earnings">
+        <PortalWrapper><DriverEarnings /></PortalWrapper>
+      </Route>
+      <Route path="/driver/history">
+        <PortalWrapper><DriverHistory /></PortalWrapper>
+      </Route>
+      <Route path="/driver/profile">
+        <PortalWrapper><DriverProfile /></PortalWrapper>
+      </Route>
+      <Route path="/driver/dashboard">
+        <PortalWrapper><DriverDashboard /></PortalWrapper>
+      </Route>
+      <Route path="/driver">
+        <PortalWrapper><DriverDashboard /></PortalWrapper>
+      </Route>
 
-        {/* Driver Portal */}
-        <Route path="/driver" component={DriverDashboard} />
-        <Route path="/driver/dashboard" component={DriverDashboard} />
-        <Route path="/driver/onboarding" component={DriverOnboarding} />
-        <Route path="/driver/history" component={DriverHistory} />
-        <Route path="/driver/earnings" component={DriverEarnings} />
-        <Route path="/driver/profile" component={DriverProfile} />
+      {/* Admin Portal */}
+      <Route path="/admin/bookings">
+        <AdminRoute component={AdminBookings} />
+      </Route>
+      <Route path="/admin/passengers">
+        <AdminRoute component={AdminPassengers} />
+      </Route>
+      <Route path="/admin/drivers">
+        <AdminRoute component={AdminDrivers} />
+      </Route>
+      <Route path="/admin/fleet">
+        <AdminRoute component={AdminFleet} />
+      </Route>
+      <Route path="/admin/dispatch">
+        <AdminRoute component={AdminDispatch} />
+      </Route>
+      <Route path="/admin/pricing">
+        <AdminRoute component={AdminPricing} />
+      </Route>
+      <Route path="/admin/promos">
+        <AdminRoute component={AdminPromos} />
+      </Route>
+      <Route path="/admin/support">
+        <AdminRoute component={AdminSupport} />
+      </Route>
+      <Route path="/admin/reports">
+        <AdminRoute component={AdminReports} />
+      </Route>
+      <Route path="/admin">
+        <PortalWrapper><AdminDashboard /></PortalWrapper>
+      </Route>
 
-        {/* Admin Portal */}
-        <Route path="/admin" component={AdminDashboard} />
-        <Route path="/admin/bookings" component={AdminBookings} />
-        <Route path="/admin/passengers" component={AdminPassengers} />
-        <Route path="/admin/drivers" component={AdminDrivers} />
-        <Route path="/admin/fleet" component={AdminFleet} />
-        <Route path="/admin/dispatch" component={AdminDispatch} />
-        <Route path="/admin/pricing" component={AdminPricing} />
-        <Route path="/admin/promos" component={AdminPromos} />
-        <Route path="/admin/support" component={AdminSupport} />
-        <Route path="/admin/reports" component={AdminReports} />
+      {/* Public Marketing + Booking */}
+      <Route path="/">
+        <Layout><Home /></Layout>
+      </Route>
+      <Route path="/about">
+        <Layout><About /></Layout>
+      </Route>
+      <Route path="/services/airport-transfers">
+        <Layout><AirportTransfers /></Layout>
+      </Route>
+      <Route path="/services/hourly-chauffeur">
+        <Layout><HourlyChauffeur /></Layout>
+      </Route>
+      <Route path="/services/corporate">
+        <Layout><Corporate /></Layout>
+      </Route>
+      <Route path="/services/events">
+        <Layout><Events /></Layout>
+      </Route>
+      <Route path="/services">
+        <Layout><Services /></Layout>
+      </Route>
+      <Route path="/fleet">
+        <Layout><Fleet /></Layout>
+      </Route>
+      <Route path="/pricing">
+        <Layout><Pricing /></Layout>
+      </Route>
+      <Route path="/contact">
+        <Layout><Contact /></Layout>
+      </Route>
+      <Route path="/faq">
+        <Layout><FAQ /></Layout>
+      </Route>
+      <Route path="/terms">
+        <Layout><Terms /></Layout>
+      </Route>
+      <Route path="/privacy">
+        <Layout><Privacy /></Layout>
+      </Route>
+      <Route path="/book">
+        <Layout><Book /></Layout>
+      </Route>
+      <Route path="/booking-confirmation/:id">
+        <Layout><BookingConfirmation /></Layout>
+      </Route>
+      <Route path="/track/:id">
+        <Layout><Track /></Layout>
+      </Route>
 
-        <Route component={NotFound} />
-      </Switch>
-    </Layout>
+      <Route>
+        <Layout><NotFound /></Layout>
+      </Route>
+    </Switch>
   );
 }
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
+      <AuthProvider>
+        <TooltipProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <Router />
+          </WouterRouter>
+          <Toaster />
+        </TooltipProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

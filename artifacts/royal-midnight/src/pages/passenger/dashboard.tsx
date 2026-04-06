@@ -1,5 +1,7 @@
 import { useGetUserBookings } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { AuthGuard } from "@/components/layout/AuthGuard";
+import { useAuth } from "@/contexts/auth";
 import { LayoutDashboard, Car, MapPin, User, MessageSquare, Plus } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
@@ -12,16 +14,17 @@ const passengerNavItems = [
   { label: "Support", href: "/passenger/support", icon: MessageSquare },
 ];
 
-export default function PassengerDashboard() {
-  const userId = 1; // Mock session
-  const { data: bookings, isLoading } = useGetUserBookings(userId, { query: { enabled: true } });
+function PassengerDashboardInner() {
+  const { user } = useAuth();
+  const userId = user?.id ?? 0;
+  const { data: bookings, isLoading } = useGetUserBookings(userId, { query: { enabled: !!userId } });
 
   const upcomingBookings = bookings?.filter(b => ['pending', 'confirmed'].includes(b.status)) || [];
 
   return (
     <PortalLayout title="Passenger Portal" navItems={passengerNavItems}>
       <div className="flex justify-between items-center mb-8">
-        <h1 className="font-serif text-3xl">Welcome Back, James</h1>
+        <h1 className="font-serif text-3xl">Welcome Back, {user?.name?.split(" ")[0] ?? "Guest"}</h1>
         <Link 
           href="/book" 
           className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90"
@@ -86,5 +89,13 @@ export default function PassengerDashboard() {
         </div>
       )}
     </PortalLayout>
+  );
+}
+
+export default function PassengerDashboard() {
+  return (
+    <AuthGuard requiredRole="passenger">
+      <PassengerDashboardInner />
+    </AuthGuard>
   );
 }

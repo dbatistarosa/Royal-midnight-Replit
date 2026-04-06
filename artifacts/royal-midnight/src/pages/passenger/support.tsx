@@ -1,5 +1,7 @@
 import { useListTickets, useCreateTicket } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { AuthGuard } from "@/components/layout/AuthGuard";
+import { useAuth } from "@/contexts/auth";
 import { LayoutDashboard, Car, MapPin, User, MessageSquare, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,9 +19,10 @@ const passengerNavItems = [
   { label: "Support", href: "/passenger/support", icon: MessageSquare },
 ];
 
-export default function PassengerSupport() {
-  const userId = 1; // Mock session
-  const { data: tickets, isLoading } = useListTickets({ userId }, { query: { enabled: true, queryKey: ["tickets", userId] } });
+function PassengerSupportInner() {
+  const { user } = useAuth();
+  const userId = user?.id ?? 0;
+  const { data: tickets, isLoading } = useListTickets({ userId }, { query: { enabled: !!userId, queryKey: ["tickets", userId] } });
   const createTicket = useCreateTicket();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -117,5 +120,13 @@ export default function PassengerSupport() {
         </div>
       )}
     </PortalLayout>
+  );
+}
+
+export default function PassengerSupport() {
+  return (
+    <AuthGuard requiredRole="passenger">
+      <PassengerSupportInner />
+    </AuthGuard>
   );
 }

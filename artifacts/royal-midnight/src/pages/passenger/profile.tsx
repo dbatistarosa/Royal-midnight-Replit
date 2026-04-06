@@ -1,5 +1,7 @@
 import { useGetUser, useUpdateUser, getGetUserQueryKey } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { AuthGuard } from "@/components/layout/AuthGuard";
+import { useAuth } from "@/contexts/auth";
 import { LayoutDashboard, Car, MapPin, User, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,9 +17,10 @@ const passengerNavItems = [
   { label: "Support", href: "/passenger/support", icon: MessageSquare },
 ];
 
-export default function PassengerProfile() {
-  const userId = 1; // Mock session
-  const { data: user, isLoading } = useGetUser(userId, { query: { enabled: true, queryKey: getGetUserQueryKey(userId) } });
+function PassengerProfileInner() {
+  const { user: authUser, login } = useAuth();
+  const userId = authUser?.id ?? 0;
+  const { data: user, isLoading } = useGetUser(userId, { query: { enabled: !!userId, queryKey: getGetUserQueryKey(userId) } });
   const updateUser = useUpdateUser();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -78,5 +81,13 @@ export default function PassengerProfile() {
         </div>
       )}
     </PortalLayout>
+  );
+}
+
+export default function PassengerProfile() {
+  return (
+    <AuthGuard requiredRole="passenger">
+      <PassengerProfileInner />
+    </AuthGuard>
   );
 }

@@ -1,5 +1,6 @@
 import { useGetBooking, getGetBookingQueryKey } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { AuthGuard } from "@/components/layout/AuthGuard";
 import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, MapPin as MapPinIcon, Calendar as CalendarIcon, CreditCard, ChevronLeft } from "lucide-react";
 import { Link, useParams } from "wouter";
 import { format } from "date-fns";
@@ -12,7 +13,7 @@ const passengerNavItems = [
   { label: "Support", href: "/passenger/support", icon: MessageSquare },
 ];
 
-export default function PassengerRideDetail() {
+function PassengerRideDetailInner() {
   const params = useParams();
   const id = parseInt(params.id || "0", 10);
   const { data: booking, isLoading } = useGetBooking(id, { query: { enabled: !!id, queryKey: getGetBookingQueryKey(id) } });
@@ -147,5 +148,13 @@ export default function PassengerRideDetail() {
         <div className="text-center py-12 text-muted-foreground">Ride not found.</div>
       )}
     </PortalLayout>
+  );
+}
+
+export default function PassengerRideDetail() {
+  return (
+    <AuthGuard requiredRole="passenger">
+      <PassengerRideDetailInner />
+    </AuthGuard>
   );
 }

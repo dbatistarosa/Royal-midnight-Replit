@@ -119,10 +119,28 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - `artifacts/royal-midnight: web` — Vite dev server
 - `artifacts/mockup-sandbox: Component Preview Server` — Canvas component previews
 
+## Auth System
+- Custom SHA-256 password hashing with salt "royal_midnight_salt"
+- Token-based auth (SHA-256 of userId + timestamp) stored in localStorage
+- `AuthProvider` context (`src/contexts/auth.tsx`) wraps the entire app
+- `AuthGuard` component redirects unauthenticated users to /auth/login
+- Role-based access: passenger, driver, admin
+- Admin routes protected via `AdminRoute` wrapper in App.tsx (requires role=admin)
+- Navbar shows "SIGN IN" button when logged out; user name dropdown when logged in
+
 ## Seed Data
 - 5 vehicles (standard through van)
 - 3 active drivers (Marcus Williams, Sofia Rodriguez, James Carter)
 - 6 bookings in various statuses
 - 5 pricing rules (one per vehicle class)
-- 3 promo codes (ROYAL10, WELCOME25, CORPORATE15)
-- Test passenger: alex@example.com / password123 (userId=1)
+- 3 promo codes (ROYAL10/10% off, WELCOME25/$25 off, CORPORATE15/15% off)
+- Test passenger: alex@example.com / password123 (userId=1, role=passenger)
+- Test admin: admin@royalmidnight.com / admin2024! (userId=2, role=admin)
+
+## Booking Flow Features
+- 3-step booking: Route & Vehicle → Passenger Details → Review & Confirm
+- Quote via POST /api/quote
+- Promo code validation in Step 3 (useValidatePromo hook)
+- Auto-prefills passenger info from auth context if logged in
+- Passes promoCode, promoDiscount, userId to createBooking
+- Promo codes: ROYAL10 (10% off), WELCOME25 ($25 off), CORPORATE15 (15% off)

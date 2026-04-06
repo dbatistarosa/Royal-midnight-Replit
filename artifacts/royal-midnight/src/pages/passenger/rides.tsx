@@ -1,5 +1,7 @@
 import { useGetUserBookings } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { AuthGuard } from "@/components/layout/AuthGuard";
+import { useAuth } from "@/contexts/auth";
 import { LayoutDashboard, Car, MapPin, User, MessageSquare } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
@@ -12,9 +14,10 @@ const passengerNavItems = [
   { label: "Support", href: "/passenger/support", icon: MessageSquare },
 ];
 
-export default function PassengerRides() {
-  const userId = 1; // Mock session
-  const { data: bookings, isLoading } = useGetUserBookings(userId, { query: { enabled: true } });
+function PassengerRidesInner() {
+  const { user } = useAuth();
+  const userId = user?.id ?? 0;
+  const { data: bookings, isLoading } = useGetUserBookings(userId, { query: { enabled: !!userId } });
 
   const upcomingBookings = bookings?.filter(b => ['pending', 'confirmed'].includes(b.status)) || [];
   const pastBookings = bookings?.filter(b => ['completed', 'cancelled'].includes(b.status)) || [];
@@ -97,5 +100,13 @@ export default function PassengerRides() {
         </section>
       </div>
     </PortalLayout>
+  );
+}
+
+export default function PassengerRides() {
+  return (
+    <AuthGuard requiredRole="passenger">
+      <PassengerRidesInner />
+    </AuthGuard>
   );
 }

@@ -1,11 +1,13 @@
 import { useListAddresses, useCreateAddress, useDeleteAddress } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { AuthGuard } from "@/components/layout/AuthGuard";
+import { useAuth } from "@/contexts/auth";
 import { LayoutDashboard, Car, MapPin, User, MessageSquare, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { QueryClient, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -15,11 +17,12 @@ const passengerNavItems = [
   { label: "Support", href: "/passenger/support", icon: MessageSquare },
 ];
 
-export default function PassengerAddresses() {
-  const userId = 1; // Mock session
-  const { data: addresses, isLoading } = useListAddresses({ userId }, { query: { enabled: true, queryKey: ["addresses", userId] } });
+function PassengerAddressesInner() {
+  const { user } = useAuth();
+  const userId = user?.id ?? 0;
+  const { data: addresses, isLoading } = useListAddresses({ userId }, { query: { enabled: !!userId, queryKey: ["addresses", userId] } });
   const createAddress = useCreateAddress();
-  // Mock delete address hook
+  const deleteAddress = useDeleteAddress();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -88,10 +91,18 @@ export default function PassengerAddresses() {
                 <h3 className="font-medium text-lg mb-1">{addr.label}</h3>
                 <p className="text-muted-foreground">{addr.address}</p>
               </div>
-              <button 
+              <button
                 className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
                 onClick={() => {
-                  toast({ title: "Mock: Address deleted" });
+                  deleteAddress.mutate(
+                    { id: addr.id },
+                    {
+                      onSuccess: () => {
+                        toast({ title: "Address removed" });
+                        queryClient.invalidateQueries({ queryKey: ["addresses", userId] });
+                      },
+                    }
+                  );
                 }}
               >
                 <Trash2 className="w-5 h-5" />
@@ -105,5 +116,13 @@ export default function PassengerAddresses() {
         </div>
       )}
     </PortalLayout>
+  );
+}
+
+export default function PassengerAddresses() {
+  return (
+    <AuthGuard requiredRole="passenger">
+      <PassengerAddressesInner />
+    </AuthGuard>
   );
 }

@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
-import { CalendarIcon, Loader2, CheckCircle2 } from "lucide-react";
+import { CalendarIcon, Loader2, CheckCircle2, Tag, X } from "lucide-react";
 
-import { useCreateBooking, useGetQuote } from "@workspace/api-client-react";
+import { useCreateBooking, useGetQuote, useValidatePromo } from "@workspace/api-client-react";
 import { QuoteRequestVehicleClass, CreateBookingBodyVehicleClass } from "@workspace/api-client-react/src/generated/api.schemas";
 import { VEHICLE_CLASSES } from "@/lib/constants";
+import { useAuth } from "@/contexts/auth";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,11 +39,16 @@ type BookingFormValues = z.infer<typeof bookingSchema>;
 export default function Book() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [quoteData, setQuoteData] = useState<{ price: number; duration: number; distance: number } | null>(null);
+  const [promoCode, setPromoCode] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<{ code: string; discountAmount: number; finalAmount: number } | null>(null);
+  const [promoError, setPromoError] = useState("");
 
   const getQuote = useGetQuote();
   const createBooking = useCreateBooking();
+  const validatePromo = useValidatePromo();
 
   const searchParams = new URLSearchParams(window.location.search);
   
@@ -53,14 +59,47 @@ export default function Book() {
       dropoffAddress: searchParams.get("dropoff") || "",
       vehicleClass: (searchParams.get("class") as any) || "standard",
       passengers: 1,
-      passengerName: "",
-      passengerEmail: "",
-      passengerPhone: "",
+      passengerName: user?.name || "",
+      passengerEmail: user?.email || "",
+      passengerPhone: user?.phone || "",
       flightNumber: "",
       specialRequests: "",
       pickupTime: "12:00",
     }
   });
+
+  useEffect(() => {
+    if (user) {
+      form.setValue("passengerName", user.name || "");
+      form.setValue("passengerEmail", user.email || "");
+      form.setValue("passengerPhone", user.phone || "");
+    }
+  }, [user]);
+
+  const finalPrice = appliedPromo?.finalAmount ?? quoteData?.price ?? 0;
+
+  const handleApplyPromo = async () => {
+    if (!promoCode.trim()) return;
+    setPromoError("");
+    try {
+      const result = await validatePromo.mutateAsync({
+        data: { code: promoCode.trim().toUpperCase(), bookingAmount: quoteData?.price ?? 0 }
+      });
+      if (!result.valid) {
+        setPromoError(result.message || "Invalid or expired promo code.");
+        return;
+      }
+      setAppliedPromo({
+        code: promoCode.trim().toUpperCase(),
+        discountAmount: result.discountAmount ?? 0,
+        finalAmount: result.finalAmount ?? quoteData?.price ?? 0
+      });
+      setPromoCode("");
+    } catch {
+      setPromoError("Invalid or expired promo code.");
+      setAppliedPromo(null);
+    }
+  };
 
   const handleGetQuote = async () => {
     const { pickupAddress, dropoffAddress, vehicleClass, passengers, pickupDate, pickupTime } = form.getValues();
@@ -112,7 +151,10 @@ export default function Book() {
           passengerPhone: data.passengerPhone,
           flightNumber: data.flightNumber || undefined,
           specialRequests: data.specialRequests || undefined,
-          priceQuoted: quoteData.price
+          priceQuoted: finalPrice,
+          promoCode: appliedPromo?.code || undefined,
+          promoDiscount: appliedPromo?.discountAmount || undefined,
+          userId: user?.id || undefined
         }
       });
       
@@ -215,7 +257,7 @@ export default function Book() {
               </div>
 
               <div className="space-y-4">
-                <FormLabel className="text-gray-400 uppercase tracking-widest text-xs block">Vehicle Class</FormLabel>
+                <p className="text-gray-400 uppercase tracking-widest text-xs block">Vehicle Class</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {VEHICLE_CLASSES.map(vehicle => (
                     <div 
@@ -314,9 +356,59 @@ export default function Book() {
                   <p className="text-sm text-gray-400">Estimated Duration: <span className="text-white">{quoteData?.duration} minutes</span></p>
                 </div>
                 <div className="mt-4 md:mt-0 text-right">
-                  <p className="text-4xl font-serif text-primary">${quoteData?.price.toFixed(2)}</p>
-                  <p className="text-xs text-gray-500 uppercase tracking-widest mt-1">All Inclusive</p>
+                  {appliedPromo && (
+                    <p className="text-sm text-gray-500 line-through mb-1">${quoteData?.price.toFixed(2)}</p>
+                  )}
+                  <p className="text-4xl font-serif text-primary">${finalPrice.toFixed(2)}</p>
+                  {appliedPromo && (
+                    <p className="text-xs text-green-400 uppercase tracking-widest mt-1">
+                      ${appliedPromo.discountAmount.toFixed(2)} discount applied
+                    </p>
+                  )}
+                  {!appliedPromo && (
+                    <p className="text-xs text-gray-500 uppercase tracking-widest mt-1">All Inclusive</p>
+                  )}
                 </div>
+              </div>
+
+              {/* Promo Code */}
+              <div className="border border-white/10 p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <Tag className="w-4 h-4 text-primary" />
+                  <span className="text-sm uppercase tracking-widest text-gray-400">Promo Code</span>
+                </div>
+                {appliedPromo ? (
+                  <div className="flex items-center justify-between bg-primary/10 border border-primary/30 px-4 py-3">
+                    <span className="text-primary font-mono text-sm">{appliedPromo.code}</span>
+                    <button
+                      type="button"
+                      onClick={() => setAppliedPromo(null)}
+                      className="text-gray-500 hover:text-white transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Input
+                      value={promoCode}
+                      onChange={e => { setPromoCode(e.target.value.toUpperCase()); setPromoError(""); }}
+                      placeholder="ROYAL10"
+                      className="bg-white/5 border-white/10 text-white rounded-none h-11 font-mono uppercase placeholder:normal-case placeholder:font-sans"
+                      onKeyDown={e => e.key === "Enter" && (e.preventDefault(), handleApplyPromo())}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleApplyPromo}
+                      disabled={validatePromo.isPending || !promoCode.trim()}
+                      className="border-white/20 text-white hover:bg-white hover:text-black rounded-none uppercase tracking-widest text-xs px-6 whitespace-nowrap"
+                    >
+                      {validatePromo.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Apply"}
+                    </Button>
+                  </div>
+                )}
+                {promoError && <p className="text-xs text-red-400 mt-2">{promoError}</p>}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
