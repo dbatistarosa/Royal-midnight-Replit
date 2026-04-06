@@ -157,8 +157,8 @@ router.post("/quote", async (req, res): Promise<void> => {
     mapsResult ?? fallbackDistance(pickupAddress, dropoffAddress);
 
   const distanceCharge = Math.round(estimatedDistance * ratePerMile * 100) / 100;
-  const airportFee = isAirportTrip(pickupAddress) || isAirportTrip(dropoffAddress) ? 15 : 0;
-  const subtotal = Math.round((baseFare + distanceCharge + airportFee) * 100) / 100;
+  const airportFee = 0;
+  const subtotal = Math.round((baseFare + distanceCharge) * 100) / 100;
   const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
   const totalWithTax = Math.round((subtotal + taxAmount) * 100) / 100;
 

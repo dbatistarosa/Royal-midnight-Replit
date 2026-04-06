@@ -20,7 +20,6 @@ import AirportTransfers from "@/pages/services/airport-transfers";
 import HourlyChauffeur from "@/pages/services/hourly-chauffeur";
 import Corporate from "@/pages/services/corporate";
 import Events from "@/pages/services/events";
-import Pricing from "@/pages/pricing";
 import Contact from "@/pages/contact";
 import FAQ from "@/pages/faq";
 import Terms from "@/pages/terms";
@@ -208,9 +207,6 @@ function Router() {
       </Route>
       <Route path="/fleet">
         <Layout><Fleet /></Layout>
-      </Route>
-      <Route path="/pricing">
-        <Layout><Pricing /></Layout>
       </Route>
       <Route path="/contact">
         <Layout><Contact /></Layout>

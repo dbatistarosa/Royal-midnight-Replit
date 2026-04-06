@@ -3,12 +3,12 @@ import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { format, addHours } from "date-fns";
-import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft } from "lucide-react";
+import { format } from "date-fns";
+import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock } from "lucide-react";
 
 import { useCreateBooking, useGetQuote } from "@workspace/api-client-react";
 import { QuoteRequestVehicleClass, CreateBookingBodyVehicleClass } from "@workspace/api-client-react/src/generated/api.schemas";
-import { VEHICLE_CLASSES, API_BASE } from "@/lib/constants";
+import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
 import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
@@ -43,7 +43,6 @@ interface QuoteResult {
   vehicleClass: string;
   baseFare: number;
   distanceCharge: number;
-  airportFee: number;
   taxRate: number;
   taxAmount: number;
   totalWithTax: number;
@@ -54,28 +53,30 @@ interface QuoteResult {
 const VEHICLE_INFO = {
   business: {
     name: "Business Class Sedan",
-    description: "Elevated executive comfort for the discerning professional.",
+    tagline: "Refined executive travel",
+    description: "Elevated executive comfort for the discerning professional. Professional chauffeur, premium amenities.",
     maxPassengers: 3,
     maxBags: 3,
-    class: 1,
+    class: "CLASS 1",
   },
   suv: {
     name: "Premium SUV",
     subtitle: "2026 Chevrolet Suburban",
-    description: "Commanding presence and expansive cabin for groups and families.",
+    tagline: "Space, presence & luxury",
+    description: "Commanding presence and expansive cabin for groups and families. Maximum space with no compromise on luxury.",
     maxPassengers: 6,
     maxBags: 6,
-    class: 2,
+    class: "CLASS 2",
   },
 };
-
-type StepKey = 1 | 2 | 3;
 
 const STEPS = [
   { num: 1, label: "Trip Details" },
   { num: 2, label: "Select Vehicle" },
   { num: 3, label: "Review & Pay" },
 ];
+
+type StepKey = 1 | 2 | 3;
 
 export default function Book() {
   const [, setLocation] = useLocation();
@@ -110,7 +111,7 @@ export default function Book() {
       specialRequests: "",
       password: "",
       pickupTime: "12:00",
-    }
+    },
   });
 
   useEffect(() => {
@@ -121,28 +122,35 @@ export default function Book() {
     }
   }, [user]);
 
-  // Fetch public settings (min booking hours)
   useEffect(() => {
     fetch(`${API_BASE}/settings/public`)
       .then(r => r.json())
       .then((data: Record<string, string>) => {
-        if (data.min_booking_hours) {
-          setMinBookingHours(parseFloat(data.min_booking_hours));
-        }
+        if (data.min_booking_hours) setMinBookingHours(parseFloat(data.min_booking_hours));
       })
       .catch(() => {});
   }, []);
 
   const passengers = form.watch("passengers");
-  const showBusiness = Number(passengers) <= 3;
+  const pickupDate = form.watch("pickupDate");
+  const pickupTime = form.watch("pickupTime");
+  const pickupAddress = form.watch("pickupAddress");
+  const dropoffAddress = form.watch("dropoffAddress");
 
+  const showBusiness = Number(passengers) <= 3;
   const selectedQuote = selectedVehicle ? quotes[selectedVehicle] : null;
 
-  // Step 1 → Step 2: Get quotes for both vehicle types
+  const formattedDateTime = pickupDate && pickupTime
+    ? `${format(pickupDate, "EEEE, MMMM d, yyyy")} at ${pickupTime} EST`
+    : null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
   const handleGetQuotes = async () => {
     const valid = await form.trigger([
       "pickupAddress", "dropoffAddress", "pickupDate", "pickupTime",
-      "passengers", "luggage", "passengerName", "passengerEmail", "passengerPhone"
+      "passengers", "luggage", "passengerName", "passengerEmail", "passengerPhone",
     ]);
     if (!valid) return;
 
@@ -166,7 +174,6 @@ export default function Book() {
           vehicleClass: r.vehicleClass,
           baseFare: r.baseFare,
           distanceCharge: r.distanceCharge,
-          airportFee: (r as any).airportFee ?? 0,
           taxRate: (r as any).taxRate ?? 0.07,
           taxAmount: (r as any).taxAmount ?? 0,
           totalWithTax: (r as any).totalWithTax ?? r.estimatedPrice,
@@ -183,7 +190,6 @@ export default function Book() {
           vehicleClass: r.vehicleClass,
           baseFare: r.baseFare,
           distanceCharge: r.distanceCharge,
-          airportFee: (r as any).airportFee ?? 0,
           taxRate: (r as any).taxRate ?? 0.07,
           taxAmount: (r as any).taxAmount ?? 0,
           totalWithTax: (r as any).totalWithTax ?? r.estimatedPrice,
@@ -201,23 +207,19 @@ export default function Book() {
       }
 
       setQuotes(newQuotes);
-      // Auto-select the appropriate vehicle
       setSelectedVehicle(showBusiness && newQuotes.business ? "business" : "suv");
       setStep(2);
     } catch (err: any) {
-      const msg = err?.message || "Could not retrieve pricing.";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast({ title: "Error", description: err?.message || "Could not retrieve pricing.", variant: "destructive" });
     }
     setIsGettingQuotes(false);
   };
 
-  // Register or login during booking
   const ensureAccount = useCallback(async (name: string, email: string, phone: string, password: string): Promise<number | null> => {
     if (user) return user.id;
 
     type AuthResponse = { token: string; user: { id: number; name: string; email: string; phone: string | null; role: "passenger" | "driver" | "admin" } };
 
-    // Try to register first
     const regRes = await fetch(`${API_BASE}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -233,11 +235,7 @@ export default function Book() {
     const regData = await regRes.json() as { error?: string };
     if (regData.error?.includes("already registered")) {
       if (!password) {
-        toast({
-          title: "Account exists",
-          description: "An account with this email already exists. Please enter your existing password.",
-          variant: "destructive",
-        });
+        toast({ title: "Account exists", description: "An account with this email already exists. Please enter your existing password.", variant: "destructive" });
         return null;
       }
       const loginRes = await fetch(`${API_BASE}/auth/login`, {
@@ -250,11 +248,7 @@ export default function Book() {
         login(data.user, data.token);
         return data.user.id;
       }
-      toast({
-        title: "Incorrect password",
-        description: "An account exists with this email. The password you entered is incorrect.",
-        variant: "destructive",
-      });
+      toast({ title: "Incorrect password", description: "An account exists with this email. The password you entered is incorrect.", variant: "destructive" });
       return null;
     }
 
@@ -262,31 +256,21 @@ export default function Book() {
     return null;
   }, [user, login, toast]);
 
-  // Step 3: Initiate payment
   const handleConfirmAndPay = async () => {
     if (!selectedQuote || !selectedVehicle) return;
-
     const values = form.getValues();
-    const { passengerName, passengerEmail, passengerPhone, password } = values;
 
-    // Validate password if not logged in
-    if (!user && (!password || password.length < 6)) {
+    if (!user && (!values.password || values.password.length < 6)) {
       toast({ title: "Password required", description: "Please create a password (min 6 characters) to track your booking.", variant: "destructive" });
       return;
     }
 
     setIsConfirming(true);
     setPaymentError("");
-
     try {
-      // 1. Ensure user account
-      const userId = await ensureAccount(passengerName, passengerEmail, passengerPhone, password || "");
-      if (userId === null) {
-        setIsConfirming(false);
-        return;
-      }
+      const userId = await ensureAccount(values.passengerName, values.passengerEmail, values.passengerPhone, values.password || "");
+      if (userId === null) { setIsConfirming(false); return; }
 
-      // 2. Create payment intent first
       const configRes = await fetch(`${API_BASE}/payments/config`);
       if (!configRes.ok) throw new Error("Payment configuration failed.");
       const { publishableKey } = await configRes.json() as { publishableKey: string };
@@ -303,20 +287,16 @@ export default function Book() {
       setPaymentPublishableKey(publishableKey);
     } catch (err: any) {
       setPaymentError(err?.message || "Could not initiate payment. Please try again.");
-      toast({ title: "Payment Error", description: err?.message || "Could not initiate payment.", variant: "destructive" });
+      toast({ title: "Payment Error", description: err?.message, variant: "destructive" });
     }
     setIsConfirming(false);
   };
 
-  // Called by Stripe after successful payment
   const handlePaymentSuccess = async (paymentIntentId: string) => {
     if (!selectedQuote || !selectedVehicle) return;
-
     const values = form.getValues();
     const isoDate = new Date(`${format(values.pickupDate, "yyyy-MM-dd")}T${values.pickupTime}:00`).toISOString();
-
     try {
-      const userId = user?.id ?? undefined;
       const result = await createBooking.mutateAsync({
         data: {
           pickupAddress: values.pickupAddress,
@@ -332,10 +312,9 @@ export default function Book() {
           specialRequests: values.specialRequests || undefined,
           priceQuoted: selectedQuote.totalWithTax,
           taxAmount: selectedQuote.taxAmount,
-          userId: userId as any,
-        }
+          userId: user?.id as any,
+        },
       });
-
       setLocation(`/booking-confirmation/${result.id}`);
     } catch (err: any) {
       toast({ title: "Booking Error", description: err?.message || "Payment received but booking failed. Please contact support.", variant: "destructive" });
@@ -348,352 +327,406 @@ export default function Book() {
     setPaymentPublishableKey(null);
   };
 
-  const pickupDate = form.watch("pickupDate");
-  const pickupTime = form.watch("pickupTime");
-
-  // Min date for calendar: today
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const formattedDateTime = pickupDate && pickupTime
-    ? `${format(pickupDate, "MMMM d, yyyy")} at ${pickupTime}`
-    : null;
+  const inputClass = "w-full bg-white/4 border border-white/12 text-white rounded-none h-12 px-4 text-sm focus:outline-none focus:border-primary/60 transition-colors placeholder:text-gray-600";
 
   return (
-    <div className="min-h-screen bg-[#050505] pt-28 pb-24">
-      <div className="container mx-auto px-4 max-w-5xl">
-        {/* Header */}
-        <div className="text-center mb-10">
-          <h1 className="text-4xl font-serif text-white uppercase tracking-widest mb-3">Reserve Vehicle</h1>
-          {/* Step Indicators */}
-          <div className="flex items-center justify-center gap-0 mt-6">
+    <div className="min-h-screen bg-[#050505]">
+      {/* Hero banner */}
+      <div className="relative pt-28 pb-12 overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-b from-black via-[#050505] to-[#050505]" />
+        <div className="absolute inset-0 opacity-30" style={{ backgroundImage: "radial-gradient(ellipse at 50% 0%, rgba(201,168,76,0.12) 0%, transparent 70%)" }} />
+        <div className="relative container mx-auto px-4 max-w-4xl text-center">
+          <p className="text-xs uppercase tracking-[0.4em] text-primary mb-3">South Florida Luxury Transportation</p>
+          <h1 className="text-5xl md:text-6xl font-serif text-white mb-4">Reserve Your Ride</h1>
+          <p className="text-gray-500 text-sm tracking-wide">Professional chauffeur service — FLL, MIA &amp; PBI</p>
+
+          {/* Step indicators */}
+          <div className="flex items-center justify-center mt-10 gap-0">
             {STEPS.map((s, i) => (
               <div key={s.num} className="flex items-center">
-                <div className="flex flex-col items-center">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium border transition-all
-                    ${step > s.num ? "bg-primary border-primary text-black" : step === s.num ? "border-primary text-primary" : "border-white/20 text-white/30"}`}>
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-medium transition-all duration-300
+                    ${step > s.num ? "bg-primary text-black" : step === s.num ? "border-2 border-primary text-primary bg-primary/10" : "border border-white/15 text-white/25 bg-white/3"}`}>
                     {step > s.num ? <CheckCircle2 className="w-4 h-4" /> : s.num}
                   </div>
-                  <span className={`text-[10px] uppercase tracking-widest mt-1 whitespace-nowrap ${step === s.num ? "text-primary" : "text-white/30"}`}>{s.label}</span>
+                  <span className={`text-[10px] uppercase tracking-[0.15em] transition-colors ${step === s.num ? "text-primary" : step > s.num ? "text-white/50" : "text-white/20"}`}>
+                    {s.label}
+                  </span>
                 </div>
                 {i < STEPS.length - 1 && (
-                  <div className={`h-px w-16 md:w-24 mx-2 mb-5 transition-all ${step > s.num ? "bg-primary" : "bg-white/10"}`} />
+                  <div className={`h-px w-20 md:w-32 mx-3 mb-5 transition-colors duration-500 ${step > s.num ? "bg-primary/50" : "bg-white/8"}`} />
                 )}
               </div>
             ))}
           </div>
         </div>
+      </div>
 
+      <div className="container mx-auto px-4 max-w-5xl pb-24">
         <Form {...form}>
           <form className="space-y-0">
 
             {/* ─── STEP 1: TRIP DETAILS ─── */}
             {step === 1 && (
-              <div className="bg-black border border-white/10 shadow-2xl relative">
-                <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-primary to-transparent opacity-40" />
-                <div className="p-8 md:p-10 space-y-8">
-                  <h2 className="text-2xl font-serif text-white border-b border-white/10 pb-4">Trip & Passenger Details</h2>
+              <div className="space-y-px">
+                {/* Route section */}
+                <div className="bg-[#0a0a0a] border border-white/8 p-7 md:p-10 space-y-6">
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="w-5 h-px bg-primary" />
+                    <p className="text-xs uppercase tracking-[0.3em] text-primary">Your Route</p>
+                  </div>
 
-                  {/* Route */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4 items-start">
                     <FormField control={form.control} name="pickupAddress" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Pickup Location</FormLabel>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px] flex items-center gap-1.5 mb-2">
+                          <MapPin className="w-3 h-3 text-primary" /> Pickup Location
+                        </FormLabel>
                         <FormControl>
                           <PlacesAutocomplete
                             value={field.value}
                             onChange={field.onChange}
                             placeholder="FLL, MIA, PBI or any address"
-                            className="w-full bg-white/5 border border-white/10 text-white rounded-none h-12 px-4 text-sm focus:outline-none focus:border-primary"
+                            className={inputClass}
                             id="pickupAddress"
                           />
                         </FormControl>
-                        <FormMessage />
+                        <FormMessage className="text-red-400 text-xs mt-1" />
                       </FormItem>
                     )} />
+
+                    <div className="hidden md:flex items-center justify-center pt-8">
+                      <div className="flex items-center gap-1 text-white/15">
+                        <div className="w-6 h-px bg-white/15" />
+                        <ArrowRight className="w-4 h-4" />
+                      </div>
+                    </div>
+
                     <FormField control={form.control} name="dropoffAddress" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Dropoff Location</FormLabel>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px] flex items-center gap-1.5 mb-2">
+                          <MapPin className="w-3 h-3 text-gray-600" /> Dropoff Location
+                        </FormLabel>
                         <FormControl>
                           <PlacesAutocomplete
                             value={field.value}
                             onChange={field.onChange}
                             placeholder="Destination or Airport Code"
-                            className="w-full bg-white/5 border border-white/10 text-white rounded-none h-12 px-4 text-sm focus:outline-none focus:border-primary"
+                            className={inputClass}
                             id="dropoffAddress"
                           />
                         </FormControl>
-                        <FormMessage />
+                        <FormMessage className="text-red-400 text-xs mt-1" />
                       </FormItem>
                     )} />
                   </div>
 
                   {/* Date / Time / Passengers / Luggage */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2">
                     <FormField control={form.control} name="pickupDate" render={({ field }) => (
                       <FormItem className="flex flex-col col-span-2 md:col-span-1">
-                        <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Date</FormLabel>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px] flex items-center gap-1.5 mb-2">
+                          <CalendarIcon className="w-3 h-3" /> Date
+                        </FormLabel>
                         <Popover>
                           <PopoverTrigger asChild>
                             <FormControl>
-                              <Button variant="outline" className={`w-full bg-white/5 border-white/10 text-white rounded-none h-12 justify-start text-left font-normal ${!field.value && "text-muted-foreground"}`}>
-                                {field.value ? format(field.value, "MMM d, yyyy") : <span className="text-gray-500">Pick a date</span>}
-                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                              <Button variant="outline" className={`w-full ${inputClass} justify-start font-normal border-white/12 bg-white/4 hover:bg-white/8`}>
+                                {field.value ? format(field.value, "MMM d, yyyy") : <span className="text-gray-600">Pick a date</span>}
+                                <CalendarIcon className="ml-auto h-3.5 w-3.5 text-gray-600" />
                               </Button>
                             </FormControl>
                           </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0 bg-black border-white/20" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={field.value}
-                              onSelect={field.onChange}
-                              disabled={(date) => date < today}
-                              initialFocus
-                            />
+                          <PopoverContent className="w-auto p-0 bg-[#0d0d0d] border-white/15" align="start">
+                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} disabled={(date) => date < today} initialFocus />
                           </PopoverContent>
                         </Popover>
-                        <FormMessage />
+                        <FormMessage className="text-red-400 text-xs" />
                       </FormItem>
                     )} />
 
                     <FormField control={form.control} name="pickupTime" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Time (EST)</FormLabel>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px] flex items-center gap-1.5 mb-2">
+                          <Clock className="w-3 h-3" /> Time (EST)
+                        </FormLabel>
                         <FormControl>
-                          <Input type="time" className="bg-white/5 border-white/10 text-white rounded-none h-12" {...field} />
+                          <Input type="time" className={inputClass} {...field} />
                         </FormControl>
-                        <FormMessage />
+                        <FormMessage className="text-red-400 text-xs" />
                       </FormItem>
                     )} />
 
                     <FormField control={form.control} name="passengers" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Passengers</FormLabel>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px] flex items-center gap-1.5 mb-2">
+                          <Users className="w-3 h-3" /> Passengers
+                        </FormLabel>
                         <Select onValueChange={field.onChange} value={String(field.value)}>
                           <FormControl>
-                            <SelectTrigger className="bg-white/5 border-white/10 text-white rounded-none h-12">
+                            <SelectTrigger className={`${inputClass} [&>span]:text-white`}>
                               <SelectValue placeholder="1" />
                             </SelectTrigger>
                           </FormControl>
-                          <SelectContent className="bg-black border-white/20 text-white">
-                            {[1,2,3,4,5,6].map(n => (
-                              <SelectItem key={n} value={String(n)}>{n}</SelectItem>
-                            ))}
+                          <SelectContent className="bg-[#0d0d0d] border-white/15 text-white">
+                            {[1,2,3,4,5,6].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
                           </SelectContent>
                         </Select>
-                        <FormMessage />
+                        <FormMessage className="text-red-400 text-xs" />
                       </FormItem>
                     )} />
 
                     <FormField control={form.control} name="luggage" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Luggage</FormLabel>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px] flex items-center gap-1.5 mb-2">
+                          <Briefcase className="w-3 h-3" /> Luggage
+                        </FormLabel>
                         <Select onValueChange={field.onChange} value={String(field.value)}>
                           <FormControl>
-                            <SelectTrigger className="bg-white/5 border-white/10 text-white rounded-none h-12">
+                            <SelectTrigger className={`${inputClass} [&>span]:text-white`}>
                               <SelectValue placeholder="0" />
                             </SelectTrigger>
                           </FormControl>
-                          <SelectContent className="bg-black border-white/20 text-white">
-                            {[0,1,2,3,4,5,6].map(n => (
-                              <SelectItem key={n} value={String(n)}>{n} {n === 1 ? "bag" : "bags"}</SelectItem>
-                            ))}
+                          <SelectContent className="bg-[#0d0d0d] border-white/15 text-white">
+                            {[0,1,2,3,4,5,6].map(n => <SelectItem key={n} value={String(n)}>{n} {n === 1 ? "bag" : "bags"}</SelectItem>)}
                           </SelectContent>
                         </Select>
-                        <FormMessage />
+                        <FormMessage className="text-red-400 text-xs" />
+                      </FormItem>
+                    )} />
+                  </div>
+                </div>
+
+                {/* Passenger info section */}
+                <div className="bg-[#0a0a0a] border border-white/8 border-t-0 p-7 md:p-10 space-y-6">
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="w-5 h-px bg-primary" />
+                    <p className="text-xs uppercase tracking-[0.3em] text-primary">Passenger Information</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <FormField control={form.control} name="passengerName" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px]">Full Name</FormLabel>
+                        <FormControl><Input placeholder="John Smith" className={inputClass} {...field} /></FormControl>
+                        <FormMessage className="text-red-400 text-xs" />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="passengerEmail" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px]">Email Address</FormLabel>
+                        <FormControl><Input type="email" placeholder="john@example.com" className={inputClass} {...field} /></FormControl>
+                        <FormMessage className="text-red-400 text-xs" />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="passengerPhone" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px]">Phone Number</FormLabel>
+                        <FormControl><Input type="tel" placeholder="+1 (305) 000-0000" className={inputClass} {...field} /></FormControl>
+                        <FormMessage className="text-red-400 text-xs" />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="flightNumber" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px]">
+                          Flight Number <span className="normal-case text-gray-700 ml-1">optional</span>
+                        </FormLabel>
+                        <FormControl><Input placeholder="AA1234" className={inputClass} {...field} /></FormControl>
+                        <FormMessage className="text-red-400 text-xs" />
                       </FormItem>
                     )} />
                   </div>
 
-                  <div className="border-t border-white/10 pt-6">
-                    <h3 className="text-sm font-medium text-gray-400 uppercase tracking-widest mb-4">Passenger Information</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                      <FormField control={form.control} name="passengerName" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Full Name</FormLabel>
-                          <FormControl>
-                            <Input placeholder="John Smith" className="bg-white/5 border-white/10 text-white rounded-none h-12" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                      <FormField control={form.control} name="passengerEmail" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Email Address</FormLabel>
-                          <FormControl>
-                            <Input type="email" placeholder="john@example.com" className="bg-white/5 border-white/10 text-white rounded-none h-12" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                      <FormField control={form.control} name="passengerPhone" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Phone Number</FormLabel>
-                          <FormControl>
-                            <Input placeholder="+1 (305) 000-0000" className="bg-white/5 border-white/10 text-white rounded-none h-12" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                      <FormField control={form.control} name="flightNumber" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Flight Number <span className="normal-case text-gray-600">(optional)</span></FormLabel>
-                          <FormControl>
-                            <Input placeholder="e.g. AA1234" className="bg-white/5 border-white/10 text-white rounded-none h-12" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                    </div>
+                  <FormField control={form.control} name="specialRequests" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px]">
+                        Special Requests <span className="normal-case text-gray-700 ml-1">optional</span>
+                      </FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="Child seat, water preference, meet & greet instructions..."
+                          className="bg-white/4 border border-white/12 text-white rounded-none min-h-[90px] resize-none focus:outline-none focus:border-primary/60 text-sm placeholder:text-gray-600"
+                          {...field}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )} />
+                </div>
 
-                    <div className="mt-5">
-                      <FormField control={form.control} name="specialRequests" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Special Requests <span className="normal-case text-gray-600">(optional)</span></FormLabel>
-                          <FormControl>
-                            <Textarea placeholder="Child seat, water preference, meet & greet instructions..." className="bg-white/5 border-white/10 text-white rounded-none min-h-[90px] resize-none" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                    </div>
-                  </div>
-
-                  {/* Account Creation - only if not logged in */}
-                  {!user && (
-                    <div className="border border-primary/20 bg-primary/5 p-5 space-y-3">
-                      <div>
-                        <p className="text-sm text-white font-medium">Create your account to track bookings</p>
-                        <p className="text-xs text-gray-500 mt-0.5">A Royal Midnight account will be created with your email so you can track your booking status.</p>
+                {/* Account creation */}
+                {!user && (
+                  <div className="bg-[#0d0a04] border border-primary/15 border-t-0 p-7 md:p-10">
+                    <div className="flex items-start gap-4">
+                      <Lock className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 space-y-4">
+                        <div>
+                          <p className="text-sm text-white font-medium">Create your account to track your ride</p>
+                          <p className="text-xs text-gray-600 mt-1">A Royal Midnight account will be linked to your booking so you can track your driver in real time.</p>
+                        </div>
+                        <FormField control={form.control} name="password" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px]">Create Password</FormLabel>
+                            <FormControl>
+                              <Input type="password" placeholder="Minimum 6 characters" className={`${inputClass} max-w-sm`} {...field} />
+                            </FormControl>
+                            <FormMessage className="text-red-400 text-xs" />
+                          </FormItem>
+                        )} />
                       </div>
-                      <FormField control={form.control} name="password" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-gray-400 uppercase tracking-widest text-xs">Create Password</FormLabel>
-                          <FormControl>
-                            <Input type="password" placeholder="Minimum 6 characters" className="bg-white/5 border-white/10 text-white rounded-none h-12" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
                     </div>
-                  )}
-
-                  <div className="flex justify-end pt-2">
-                    <Button
-                      type="button"
-                      onClick={handleGetQuotes}
-                      disabled={isGettingQuotes}
-                      className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm px-12 h-12 rounded-none"
-                    >
-                      {isGettingQuotes ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Getting Pricing...</> : "Get Pricing"}
-                    </Button>
                   </div>
+                )}
+
+                <div className="flex justify-end pt-5">
+                  <Button
+                    type="button"
+                    onClick={handleGetQuotes}
+                    disabled={isGettingQuotes}
+                    className="bg-primary text-black hover:bg-primary/90 font-semibold uppercase tracking-[0.2em] text-xs px-14 h-13 rounded-none h-[52px] shadow-[0_0_30px_rgba(201,168,76,0.2)]"
+                  >
+                    {isGettingQuotes
+                      ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Getting Pricing...</>
+                      : <>View Pricing <ArrowRight className="w-4 h-4 ml-2" /></>}
+                  </Button>
                 </div>
               </div>
             )}
 
             {/* ─── STEP 2: VEHICLE SELECTION ─── */}
             {step === 2 && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-4">
-                  {(["business", "suv"] as const).map((vc) => {
-                    const info = VEHICLE_INFO[vc];
-                    const quote = quotes[vc];
-                    const pax = Number(passengers);
-                    const isDisabled = vc === "business" && pax > 3;
-                    const isSelected = selectedVehicle === vc;
-
-                    if (isDisabled) return null;
-
-                    return (
-                      <div
-                        key={vc}
-                        onClick={() => !isDisabled && setSelectedVehicle(vc)}
-                        className={`cursor-pointer border bg-black transition-all relative ${isSelected ? "border-primary" : "border-white/10 hover:border-white/30"}`}
-                      >
-                        <div className="absolute top-0 left-0 w-full h-0.5 transition-all" style={{ background: isSelected ? "linear-gradient(90deg, transparent, #c9a84c, transparent)" : "none" }} />
-                        <div className="p-6 md:p-8 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                          {/* Left: info */}
-                          <div className="md:col-span-2">
-                            <div className="flex items-start justify-between mb-1">
-                              <div>
-                                <p className="text-xs text-primary uppercase tracking-widest mb-1">Class {info.class}</p>
-                                <h3 className="text-xl font-serif text-white">{info.name}</h3>
-                                {"subtitle" in info && <p className="text-xs text-gray-500 mt-0.5">{info.subtitle}</p>}
-                              </div>
-                              {isSelected && <CheckCircle2 className="text-primary w-6 h-6 flex-shrink-0" />}
-                            </div>
-                            <p className="text-sm text-gray-400 mt-2">{info.description}</p>
-                            <div className="flex gap-6 mt-3">
-                              <div>
-                                <p className="text-xs text-gray-600 uppercase tracking-widest">Capacity</p>
-                                <p className="text-sm text-white mt-0.5">Up to {info.maxPassengers} passengers</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-600 uppercase tracking-widest">Luggage</p>
-                                <p className="text-sm text-white mt-0.5">Up to {info.maxBags} bags</p>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Right: price breakdown */}
-                          {quote ? (
-                            <div className="border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-8">
-                              <div className="space-y-1.5 text-sm">
-                                <div className="flex justify-between text-gray-400">
-                                  <span>Base fare</span>
-                                  <span className="text-white">${quote.baseFare.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between text-gray-400">
-                                  <span>Distance ({quote.estimatedDistance.toFixed(1)} mi)</span>
-                                  <span className="text-white">${quote.distanceCharge.toFixed(2)}</span>
-                                </div>
-                                {quote.airportFee > 0 && (
-                                  <div className="flex justify-between text-gray-400">
-                                    <span>Airport fee</span>
-                                    <span className="text-white">${quote.airportFee.toFixed(2)}</span>
-                                  </div>
-                                )}
-                                <div className="flex justify-between text-gray-400">
-                                  <span>Florida tax ({(quote.taxRate * 100).toFixed(0)}%)</span>
-                                  <span className="text-white">${quote.taxAmount.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between pt-2 border-t border-white/10 font-medium">
-                                  <span className="text-white">Total</span>
-                                  <span className="text-primary text-lg font-serif">${quote.totalWithTax.toFixed(2)}</span>
-                                </div>
-                              </div>
-                              <p className="text-xs text-gray-600 mt-2">{quote.estimatedDuration} min estimated</p>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-center text-gray-600 text-sm">
-                              <Loader2 className="w-4 h-4 animate-spin mr-2" /> Calculating...
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {/* Note if only SUV available */}
-                  {Number(passengers) > 3 && (
-                    <div className="border border-white/5 bg-white/3 p-4">
-                      <p className="text-xs text-gray-500 text-center">For groups of 4 or more passengers, the Premium SUV is the required vehicle.</p>
-                    </div>
+              <div className="space-y-5">
+                {/* Route banner */}
+                <div className="bg-[#0a0a0a] border border-white/8 px-6 py-4 flex items-center gap-3 text-sm">
+                  <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                  <span className="text-gray-400 truncate">{pickupAddress}</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-white/20 flex-shrink-0" />
+                  <span className="text-gray-400 truncate">{dropoffAddress}</span>
+                  {quotes.business && (
+                    <span className="ml-auto flex items-center gap-1 text-gray-600 text-xs whitespace-nowrap">
+                      <Clock className="w-3 h-3" /> ~{quotes.business.estimatedDuration} min · {quotes.business.estimatedDistance} mi
+                    </span>
                   )}
                 </div>
 
-                <div className="flex justify-between pt-2">
-                  <Button type="button" variant="outline" onClick={() => setStep(1)} className="border-white/20 text-white hover:bg-white hover:text-black rounded-none uppercase tracking-widest text-xs px-6 h-11">
+                <p className="text-center text-xs uppercase tracking-[0.3em] text-gray-600 py-1">Select your vehicle</p>
+
+                {(["business", "suv"] as const).map((vc) => {
+                  const info = VEHICLE_INFO[vc];
+                  const quote = quotes[vc];
+                  const isDisabled = vc === "business" && Number(passengers) > 3;
+                  const isSelected = selectedVehicle === vc;
+
+                  if (isDisabled) return null;
+
+                  return (
+                    <div
+                      key={vc}
+                      onClick={() => !isDisabled && setSelectedVehicle(vc)}
+                      className={`cursor-pointer relative overflow-hidden transition-all duration-300 ${
+                        isSelected
+                          ? "border border-primary/60 shadow-[0_0_40px_rgba(201,168,76,0.12)]"
+                          : "border border-white/8 hover:border-white/20"
+                      }`}
+                    >
+                      {/* Top accent line */}
+                      <div className={`absolute top-0 left-0 right-0 h-px transition-all duration-300 ${isSelected ? "bg-gradient-to-r from-transparent via-primary to-transparent" : "bg-transparent"}`} />
+
+                      <div className="grid grid-cols-1 md:grid-cols-[1fr_280px]">
+                        {/* Left: Vehicle info */}
+                        <div className={`p-8 md:p-10 relative ${isSelected ? "bg-gradient-to-br from-[#0d0b06] to-[#080808]" : "bg-[#080808]"}`}>
+                          <div className="flex items-start justify-between mb-6">
+                            <div>
+                              <p className="text-[10px] uppercase tracking-[0.35em] text-primary mb-2">{info.class}</p>
+                              <h3 className="text-2xl md:text-3xl font-serif text-white leading-tight">{info.name}</h3>
+                              {"subtitle" in info && <p className="text-xs text-gray-600 mt-1">{info.subtitle}</p>}
+                              <p className="text-xs text-gray-500 mt-1 italic">{info.tagline}</p>
+                            </div>
+                            <div className={`w-8 h-8 rounded-full border flex items-center justify-center flex-shrink-0 transition-all ${isSelected ? "border-primary bg-primary/10" : "border-white/15"}`}>
+                              {isSelected && <CheckCircle2 className="w-5 h-5 text-primary" />}
+                            </div>
+                          </div>
+
+                          <p className="text-sm text-gray-500 leading-relaxed mb-6 max-w-md">{info.description}</p>
+
+                          <div className="flex gap-8">
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest text-gray-700 mb-1">Passengers</p>
+                              <p className="text-sm text-white flex items-center gap-1.5">
+                                <Users className="w-3.5 h-3.5 text-gray-500" /> Up to {info.maxPassengers}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest text-gray-700 mb-1">Luggage</p>
+                              <p className="text-sm text-white flex items-center gap-1.5">
+                                <Briefcase className="w-3.5 h-3.5 text-gray-500" /> Up to {info.maxBags} bags
+                              </p>
+                            </div>
+                            {quote && (
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-gray-700 mb-1">Est. Time</p>
+                                <p className="text-sm text-white flex items-center gap-1.5">
+                                  <Clock className="w-3.5 h-3.5 text-gray-500" /> {quote.estimatedDuration} min
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Right: Price */}
+                        {quote ? (
+                          <div className={`border-t md:border-t-0 md:border-l ${isSelected ? "border-primary/20 bg-[#0d0b04]" : "border-white/8 bg-[#060606]"} p-8 md:p-10 flex flex-col justify-between`}>
+                            <div className="space-y-3 text-sm">
+                              <div className="flex justify-between items-center text-gray-500">
+                                <span>Base fare</span>
+                                <span className="text-gray-300">${quote.baseFare.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-gray-500">
+                                <span>Distance ({quote.estimatedDistance.toFixed(1)} mi)</span>
+                                <span className="text-gray-300">${quote.distanceCharge.toFixed(2)}</span>
+                              </div>
+                              <div className="h-px bg-white/8 my-1" />
+                              <div className="flex justify-between items-center text-gray-500">
+                                <span>Subtotal</span>
+                                <span className="text-gray-300">${(quote.baseFare + quote.distanceCharge).toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-gray-500">
+                                <span>Florida tax ({(quote.taxRate * 100).toFixed(0)}%)</span>
+                                <span className="text-gray-300">${quote.taxAmount.toFixed(2)}</span>
+                              </div>
+                            </div>
+                            <div className="mt-6 pt-4 border-t border-white/10">
+                              <p className="text-[10px] uppercase tracking-widest text-gray-600 mb-1">Total</p>
+                              <p className={`text-4xl font-serif transition-colors ${isSelected ? "text-primary" : "text-white"}`}>
+                                ${quote.totalWithTax.toFixed(2)}
+                              </p>
+                              <p className="text-xs text-gray-700 mt-1">All inclusive</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center p-8 text-gray-600 text-sm">
+                            <Loader2 className="w-4 h-4 animate-spin mr-2" /> Calculating...
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {Number(passengers) > 3 && (
+                  <p className="text-xs text-gray-600 text-center py-2">For groups of 4 or more, the Premium SUV is required.</p>
+                )}
+
+                <div className="flex justify-between pt-3">
+                  <Button type="button" variant="outline" onClick={() => setStep(1)} className="border-white/15 text-white/60 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs px-6 h-11">
                     <ChevronLeft className="w-4 h-4 mr-1" /> Back
                   </Button>
                   <Button
                     type="button"
                     onClick={() => selectedVehicle && setStep(3)}
                     disabled={!selectedVehicle}
-                    className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm px-12 h-12 rounded-none"
+                    className="bg-primary text-black hover:bg-primary/90 font-semibold uppercase tracking-[0.2em] text-xs px-12 h-[52px] rounded-none shadow-[0_0_30px_rgba(201,168,76,0.2)]"
                   >
-                    Continue to Review
+                    Continue to Review <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 </div>
               </div>
@@ -701,112 +734,102 @@ export default function Book() {
 
             {/* ─── STEP 3: REVIEW & PAY ─── */}
             {step === 3 && selectedQuote && selectedVehicle && (
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                {/* Summary - Left */}
-                <div className="lg:col-span-3 bg-black border border-white/10 shadow-2xl relative">
-                  <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-primary to-transparent opacity-40" />
-                  <div className="p-7 space-y-5">
-                    <h2 className="text-xl font-serif text-white border-b border-white/10 pb-3">Booking Summary</h2>
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+                {/* Summary */}
+                <div className="lg:col-span-3 bg-[#0a0a0a] border border-white/8">
+                  <div className="h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
+                  <div className="p-8 space-y-7">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-1">Booking Summary</p>
+                      <h2 className="text-xl font-serif text-white">{VEHICLE_INFO[selectedVehicle].name}</h2>
+                    </div>
 
-                    <div className="space-y-4 text-sm">
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                        <div>
-                          <p className="text-xs text-gray-600 uppercase tracking-widest mb-1">Pickup</p>
-                          <p className="text-gray-300 leading-snug">{form.getValues("pickupAddress")}</p>
+                    {/* Route */}
+                    <div className="space-y-4">
+                      <div className="flex gap-4">
+                        <div className="flex flex-col items-center pt-1">
+                          <div className="w-2 h-2 rounded-full bg-primary" />
+                          <div className="w-px flex-1 bg-white/10 my-1" />
+                          <div className="w-2 h-2 rounded-full border border-white/30" />
                         </div>
-                        <div>
-                          <p className="text-xs text-gray-600 uppercase tracking-widest mb-1">Dropoff</p>
-                          <p className="text-gray-300 leading-snug">{form.getValues("dropoffAddress")}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600 uppercase tracking-widest mb-1">Date & Time</p>
-                          <p className="text-white">{formattedDateTime} EST</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600 uppercase tracking-widest mb-1">Vehicle</p>
-                          <p className="text-white">{VEHICLE_INFO[selectedVehicle].name}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600 uppercase tracking-widest mb-1">Passengers</p>
-                          <p className="text-white">{form.getValues("passengers")}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600 uppercase tracking-widest mb-1">Luggage</p>
-                          <p className="text-white">{form.getValues("luggage")} {Number(form.getValues("luggage")) === 1 ? "bag" : "bags"}</p>
+                        <div className="flex-1 space-y-4">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest text-gray-600 mb-0.5">Pickup</p>
+                            <p className="text-sm text-white leading-snug">{form.getValues("pickupAddress")}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase tracking-widest text-gray-600 mb-0.5">Dropoff</p>
+                            <p className="text-sm text-white leading-snug">{form.getValues("dropoffAddress")}</p>
+                          </div>
                         </div>
                       </div>
+                    </div>
 
-                      <div className="border-t border-white/10 pt-4 space-y-2">
-                        <p className="text-xs text-gray-600 uppercase tracking-widest mb-2">Passenger Details</p>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Name</span>
-                          <span className="text-white">{form.getValues("passengerName")}</span>
+                    {/* Trip details grid */}
+                    <div className="grid grid-cols-2 gap-4 border-t border-white/8 pt-5">
+                      {[
+                        { label: "Date & Time", value: formattedDateTime || "—" },
+                        { label: "Vehicle", value: VEHICLE_INFO[selectedVehicle].name },
+                        { label: "Passengers", value: String(form.getValues("passengers")) },
+                        { label: "Luggage", value: `${form.getValues("luggage")} ${Number(form.getValues("luggage")) === 1 ? "bag" : "bags"}` },
+                        { label: "Name", value: form.getValues("passengerName") },
+                        { label: "Email", value: form.getValues("passengerEmail") },
+                        { label: "Phone", value: form.getValues("passengerPhone") },
+                        ...(form.getValues("flightNumber") ? [{ label: "Flight", value: form.getValues("flightNumber")! }] : []),
+                      ].map(item => (
+                        <div key={item.label}>
+                          <p className="text-[10px] uppercase tracking-widest text-gray-600 mb-0.5">{item.label}</p>
+                          <p className="text-sm text-gray-300 leading-snug">{item.value}</p>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Email</span>
-                          <span className="text-white">{form.getValues("passengerEmail")}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Phone</span>
-                          <span className="text-white">{form.getValues("passengerPhone")}</span>
-                        </div>
-                        {form.getValues("flightNumber") && (
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Flight</span>
-                            <span className="text-white">{form.getValues("flightNumber")}</span>
-                          </div>
-                        )}
-                        {form.getValues("specialRequests") && (
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Requests</span>
-                            <span className="text-white text-right max-w-[60%]">{form.getValues("specialRequests")}</span>
-                          </div>
-                        )}
+                      ))}
+                    </div>
+
+                    {form.getValues("specialRequests") && (
+                      <div className="border-t border-white/8 pt-4">
+                        <p className="text-[10px] uppercase tracking-widest text-gray-600 mb-1">Special Requests</p>
+                        <p className="text-sm text-gray-400 italic">{form.getValues("specialRequests")}</p>
                       </div>
+                    )}
 
-                      {/* Price Breakdown */}
-                      <div className="border-t border-white/10 pt-4 space-y-2">
-                        <p className="text-xs text-gray-600 uppercase tracking-widest mb-2">Price Breakdown</p>
-                        <div className="flex justify-between text-gray-400">
-                          <span>Base fare</span>
-                          <span>${selectedQuote.baseFare.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-gray-400">
-                          <span>Distance ({selectedQuote.estimatedDistance.toFixed(1)} mi)</span>
-                          <span>${selectedQuote.distanceCharge.toFixed(2)}</span>
-                        </div>
-                        {selectedQuote.airportFee > 0 && (
-                          <div className="flex justify-between text-gray-400">
-                            <span>Airport fee</span>
-                            <span>${selectedQuote.airportFee.toFixed(2)}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between text-gray-400">
-                          <span>Subtotal</span>
-                          <span>${(selectedQuote.baseFare + selectedQuote.distanceCharge + selectedQuote.airportFee).toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-gray-400">
-                          <span>Florida tax ({(selectedQuote.taxRate * 100).toFixed(0)}%)</span>
-                          <span>${selectedQuote.taxAmount.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between pt-3 border-t border-white/20 text-lg font-medium">
-                          <span className="text-white font-serif">Total Due</span>
-                          <span className="text-primary font-serif text-2xl">${selectedQuote.totalWithTax.toFixed(2)}</span>
-                        </div>
+                    {/* Price breakdown */}
+                    <div className="border-t border-white/8 pt-5 space-y-2.5">
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-gray-600 mb-3">Price Breakdown</p>
+                      <div className="flex justify-between text-sm text-gray-500">
+                        <span>Base fare</span>
+                        <span>${selectedQuote.baseFare.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm text-gray-500">
+                        <span>Distance ({selectedQuote.estimatedDistance.toFixed(1)} mi)</span>
+                        <span>${selectedQuote.distanceCharge.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm text-gray-500 border-t border-white/8 pt-2">
+                        <span>Subtotal</span>
+                        <span>${(selectedQuote.baseFare + selectedQuote.distanceCharge).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm text-gray-500">
+                        <span>Florida tax ({(selectedQuote.taxRate * 100).toFixed(0)}%)</span>
+                        <span>${selectedQuote.taxAmount.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-baseline pt-3 border-t border-white/15">
+                        <span className="text-base text-white font-serif">Total Due</span>
+                        <span className="text-3xl font-serif text-primary">${selectedQuote.totalWithTax.toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Payment - Right */}
-                <div className="lg:col-span-2 bg-black border border-white/10 shadow-2xl relative">
-                  <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-primary to-transparent opacity-40" />
-                  <div className="p-7 space-y-6">
-                    <h2 className="text-xl font-serif text-white border-b border-white/10 pb-3">Payment</h2>
+                {/* Payment */}
+                <div className="lg:col-span-2 bg-[#0a0a0a] border border-white/8">
+                  <div className="h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
+                  <div className="p-8 space-y-6">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-1">Secure Payment</p>
+                      <h2 className="text-xl font-serif text-white">Complete Your Reservation</h2>
+                    </div>
 
                     {paymentClientSecret && paymentPublishableKey ? (
                       <div className="space-y-4">
-                        <p className="text-xs text-gray-500 uppercase tracking-widest">Secure payment powered by Stripe</p>
+                        <p className="text-xs text-gray-600 uppercase tracking-widest">Powered by Stripe</p>
                         <StripePaymentForm
                           clientSecret={paymentClientSecret}
                           publishableKey={paymentPublishableKey}
@@ -814,71 +837,55 @@ export default function Book() {
                           onSuccess={handlePaymentSuccess}
                           onError={handlePaymentError}
                         />
-                        {paymentError && (
-                          <p className="text-red-400 text-sm border border-red-900/50 bg-red-900/10 p-3">{paymentError}</p>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => { setPaymentClientSecret(null); setPaymentPublishableKey(null); setPaymentError(""); }}
-                          className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
-                        >
+                        {paymentError && <p className="text-red-400 text-sm p-3 border border-red-900/40 bg-red-900/8">{paymentError}</p>}
+                        <button type="button" onClick={() => { setPaymentClientSecret(null); setPaymentPublishableKey(null); setPaymentError(""); }} className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
                           Cancel
                         </button>
                       </div>
                     ) : (
-                      <div className="space-y-6">
-                        <div className="bg-white/3 border border-white/10 p-4 flex items-start gap-3">
+                      <div className="space-y-5">
+                        {/* Amount callout */}
+                        <div className="bg-primary/5 border border-primary/15 p-5 text-center">
+                          <p className="text-[10px] uppercase tracking-[0.3em] text-gray-600 mb-1">You will be charged</p>
+                          <p className="text-4xl font-serif text-primary">${selectedQuote.totalWithTax.toFixed(2)}</p>
+                          <p className="text-xs text-gray-700 mt-1">All inclusive — no hidden fees</p>
+                        </div>
+
+                        <div className="bg-white/3 border border-white/8 p-4 flex gap-3 items-start">
                           <Lock className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
                           <div>
-                            <p className="text-sm text-white font-medium">Secure Checkout</p>
-                            <p className="text-xs text-gray-500 mt-0.5">Your reservation is confirmed immediately upon payment. We accept all major credit cards via Stripe.</p>
+                            <p className="text-xs text-white font-medium">256-bit SSL Encryption</p>
+                            <p className="text-xs text-gray-600 mt-0.5">Payment secured by Stripe. Your card information is never stored on our servers.</p>
                           </div>
                         </div>
 
-                        <div className="bg-white/3 border border-white/10 p-4">
-                          <p className="text-xs text-gray-600 uppercase tracking-widest mb-2">You will be charged</p>
-                          <p className="text-3xl font-serif text-primary">${selectedQuote.totalWithTax.toFixed(2)}</p>
-                          <p className="text-xs text-gray-600 mt-1">All inclusive — no surprise fees</p>
-                        </div>
+                        {paymentError && <p className="text-red-400 text-sm p-3 border border-red-900/40 bg-red-900/8">{paymentError}</p>}
 
-                        {paymentError && (
-                          <p className="text-red-400 text-sm border border-red-900/50 bg-red-900/10 p-3">{paymentError}</p>
-                        )}
+                        <Button
+                          type="button"
+                          onClick={handleConfirmAndPay}
+                          disabled={isConfirming}
+                          className="w-full bg-primary text-black hover:bg-primary/90 font-semibold uppercase tracking-[0.2em] text-xs h-[52px] rounded-none shadow-[0_0_30px_rgba(201,168,76,0.2)]"
+                        >
+                          {isConfirming
+                            ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Preparing...</>
+                            : `Pay $${selectedQuote.totalWithTax.toFixed(2)}`}
+                        </Button>
 
-                        <div className="space-y-3 pt-2">
-                          <Button
-                            type="button"
-                            onClick={handleConfirmAndPay}
-                            disabled={isConfirming}
-                            className="w-full bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm h-14 rounded-none"
-                          >
-                            {isConfirming ? (
-                              <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Preparing Payment...</>
-                            ) : (
-                              `Pay $${selectedQuote.totalWithTax.toFixed(2)}`
-                            )}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setStep(2)}
-                            className="w-full border-white/20 text-white hover:bg-white hover:text-black rounded-none uppercase tracking-widest text-xs h-11"
-                          >
-                            <ChevronLeft className="w-4 h-4 mr-1" /> Change Vehicle
-                          </Button>
-                        </div>
-
-                        <div className="flex items-center justify-center gap-2 pt-2">
-                          <Lock className="w-3 h-3 text-gray-600" />
-                          <p className="text-xs text-gray-600">256-bit SSL encryption. No reservation held without payment.</p>
-                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setStep(2)}
+                          className="w-full border-white/12 text-white/50 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs h-10"
+                        >
+                          <ChevronLeft className="w-4 h-4 mr-1" /> Change Vehicle
+                        </Button>
                       </div>
                     )}
                   </div>
                 </div>
               </div>
             )}
-
           </form>
         </Form>
       </div>
