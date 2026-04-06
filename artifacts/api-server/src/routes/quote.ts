@@ -4,19 +4,13 @@ import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
 const router: IRouter = Router();
 
 const BASE_FARES: Record<string, number> = {
-  standard: 35,
   business: 55,
-  first_class: 95,
   suv: 75,
-  van: 95,
 };
 
 const RATE_PER_MILE: Record<string, number> = {
-  standard: 2.5,
   business: 3.5,
-  first_class: 5.5,
   suv: 4.0,
-  van: 4.5,
 };
 
 const AIRPORTS = ["FLL", "MIA", "PBI", "Fort Lauderdale", "Miami International", "Palm Beach"];

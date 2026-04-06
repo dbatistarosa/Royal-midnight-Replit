@@ -27,7 +27,7 @@ const bookingSchema = z.object({
   dropoffAddress: z.string().min(3, "Dropoff is required"),
   pickupDate: z.date({ required_error: "Date is required" }),
   pickupTime: z.string().min(1, "Time is required"),
-  vehicleClass: z.enum(["standard", "business", "first_class", "suv", "van"]),
+  vehicleClass: z.enum(["business", "suv"]),
   passengers: z.coerce.number().min(1).max(10),
   passengerName: z.string().min(2, "Name is required"),
   passengerEmail: z.string().email("Invalid email"),
@@ -63,7 +63,7 @@ export default function Book() {
     defaultValues: {
       pickupAddress: searchParams.get("pickup") || "",
       dropoffAddress: searchParams.get("dropoff") || "",
-      vehicleClass: (searchParams.get("class") as any) || "standard",
+      vehicleClass: (searchParams.get("class") as any) || "business",
       passengers: 1,
       passengerName: user?.name || "",
       passengerEmail: user?.email || "",

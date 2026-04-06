@@ -29,7 +29,7 @@ title = "Luxury black sedan"
 id = "NI29xK-K-9yU3XkrKWSN1"
 uri = "file://artifacts/royal-midnight/public/business.png"
 type = "image"
-title = "Business class black sedan"
+title = "generated_image"
 
 [[generated]]
 id = "y8AiudgsYzhOQryvHJOMc"
@@ -41,7 +41,7 @@ title = "First class black limousine"
 id = "ITM4bZcpF2ZLrMZ14MG_m"
 uri = "file://artifacts/royal-midnight/public/suv.png"
 type = "image"
-title = "Premium black SUV"
+title = "generated_image"
 
 [[generated]]
 id = "TqmklCNMxfutd0P1sLbJL"
