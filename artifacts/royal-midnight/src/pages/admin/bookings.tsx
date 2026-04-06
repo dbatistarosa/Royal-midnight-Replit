@@ -135,8 +135,8 @@ export default function AdminBookings() {
   }, [refetch, token, authHdr]);
 
   const handleCreate = async () => {
-    if (!createForm.passengerName || !createForm.pickupAddress || !createForm.dropoffAddress || !createForm.pickupAt || !createForm.priceQuoted) {
-      toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
+    if (!createForm.passengerName || !createForm.passengerEmail || !createForm.passengerPhone || !createForm.pickupAddress || !createForm.dropoffAddress || !createForm.pickupAt || !createForm.priceQuoted) {
+      toast({ title: "Missing fields", description: "Name, email, phone, addresses, pickup time, and price are required.", variant: "destructive" });
       return;
     }
     setCreateSaving(true);
@@ -160,19 +160,22 @@ export default function AdminBookings() {
         body: JSON.stringify(body),
       });
 
+      const responseBody = await res.json() as BookingRow | { error?: string };
       if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        throw new Error(err.error ?? "Failed to create booking");
+        throw new Error((responseBody as { error?: string }).error ?? "Failed to create booking");
       }
+      const created = responseBody as BookingRow;
 
       // If driver was specified, assign immediately
       if (createForm.driverId) {
-        const created = await res.json() as BookingRow;
-        await fetch(`${API_BASE}/bookings/${created.id}`, {
+        const assignRes = await fetch(`${API_BASE}/bookings/${created.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json", Authorization: authHdr },
           body: JSON.stringify({ driverId: parseInt(createForm.driverId), status: "confirmed" }),
         });
+        if (!assignRes.ok) {
+          toast({ title: "Booking created but driver assignment failed", description: "You can assign a driver from the bookings table.", variant: "destructive" });
+        }
       }
 
       toast({ title: "Booking created", description: "The reservation has been created." });

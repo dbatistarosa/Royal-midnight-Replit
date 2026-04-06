@@ -138,11 +138,12 @@ export default function AdminPricing() {
   const handleDelete = async (id: number) => {
     setDeletingId(id);
     try {
-      await fetch(`${API_BASE}/pricing/${id}`, { method: "DELETE", headers: { Authorization: authHdr } });
+      const res = await fetch(`${API_BASE}/pricing/${id}`, { method: "DELETE", headers: { Authorization: authHdr } });
+      if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
       toast({ title: "Rule deleted" });
       refetch();
-    } catch {
-      toast({ title: "Error", description: "Could not delete rule.", variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not delete rule.", variant: "destructive" });
     }
     setDeletingId(null);
   };

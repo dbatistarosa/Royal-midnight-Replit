@@ -153,11 +153,11 @@ export default function AdminPromos() {
         headers: { "Content-Type": "application/json", Authorization: authHdr },
         body: JSON.stringify({ isActive: !p.isActive }),
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
       toast({ title: p.isActive ? "Promo deactivated" : "Promo activated" });
       refetch();
-    } catch {
-      toast({ title: "Error", description: "Could not update promo.", variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not update promo.", variant: "destructive" });
     }
     setActionId(null);
   };
@@ -165,11 +165,12 @@ export default function AdminPromos() {
   const handleDelete = async (id: number) => {
     setActionId(id);
     try {
-      await fetch(`${API_BASE}/promos/${id}`, { method: "DELETE", headers: { Authorization: authHdr } });
+      const res = await fetch(`${API_BASE}/promos/${id}`, { method: "DELETE", headers: { Authorization: authHdr } });
+      if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
       toast({ title: "Promo deleted" });
       refetch();
-    } catch {
-      toast({ title: "Error", description: "Could not delete promo.", variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not delete promo.", variant: "destructive" });
     }
     setActionId(null);
   };
