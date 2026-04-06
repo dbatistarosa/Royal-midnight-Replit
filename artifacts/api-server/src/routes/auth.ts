@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, driversTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
+import { z } from "zod";
 
 const router: IRouter = Router();
 
@@ -146,6 +147,79 @@ router.post("/auth/verify-otp", async (req, res): Promise<void> => {
       role: user.role,
       createdAt: user.createdAt.toISOString(),
     },
+  });
+});
+
+const DriverRegisterBody = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  phone: z.string().min(7),
+  password: z.string().min(6),
+  serviceArea: z.string().optional(),
+  vehicleYear: z.string().optional(),
+  vehicleMake: z.string().optional(),
+  vehicleModel: z.string().optional(),
+  vehicleColor: z.string().optional(),
+  passengerCapacity: z.coerce.number().optional(),
+  luggageCapacity: z.coerce.number().optional(),
+  hasCarSeat: z.boolean().optional(),
+  licenseNumber: z.string().optional(),
+  licenseExpiry: z.string().optional(),
+  licenseDoc: z.string().optional(),
+  regVin: z.string().optional(),
+  regPlate: z.string().optional(),
+  regExpiry: z.string().optional(),
+  regDoc: z.string().optional(),
+  insuranceExpiry: z.string().optional(),
+  insuranceDoc: z.string().optional(),
+});
+
+router.post("/auth/driver-register", async (req, res): Promise<void> => {
+  const parsed = DriverRegisterBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const { name, email, phone, password, ...driverFields } = parsed.data;
+
+  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  if (existing) {
+    res.status(400).json({ error: "Email already registered" });
+    return;
+  }
+
+  const [user] = await db
+    .insert(usersTable)
+    .values({ name, email, phone, role: "driver", passwordHash: hashPassword(password) })
+    .returning();
+
+  const [driver] = await db
+    .insert(driversTable)
+    .values({
+      userId: user.id,
+      name,
+      email,
+      phone,
+      approvalStatus: "pending",
+      status: "pending",
+      ...driverFields,
+    })
+    .returning();
+
+  const token = generateToken(user.id);
+
+  res.status(201).json({
+    token,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      createdAt: user.createdAt.toISOString(),
+    },
+    driverId: driver.id,
   });
 });
 

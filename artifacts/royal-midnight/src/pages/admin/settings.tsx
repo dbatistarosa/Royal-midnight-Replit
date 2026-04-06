@@ -51,6 +51,15 @@ const SETTING_FIELDS: SettingField[] = [
     max: 20,
     step: 0.1,
   },
+  {
+    key: "driver_commission_pct",
+    label: "Driver Commission Rate",
+    description: "Percentage of the trip subtotal that goes to the driver. For example, 70 means the driver earns 70% and Royal Midnight retains 30%.",
+    suffix: "%",
+    min: 0,
+    max: 100,
+    step: 1,
+  },
 ];
 
 function AdminSettingsInner() {

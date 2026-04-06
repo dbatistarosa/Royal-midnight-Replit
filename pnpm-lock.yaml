@@ -196,6 +196,9 @@ importers:
       stripe:
         specifier: ^22.0.0
         version: 22.0.0(@types/node@25.3.5)
+      zod:
+        specifier: 'catalog:'
+        version: 3.25.76
     devDependencies:
       '@types/cookie-parser':
         specifier: ^1.4.10

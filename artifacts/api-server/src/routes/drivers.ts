@@ -39,7 +39,7 @@ router.get("/drivers", async (req, res): Promise<void> => {
     .from(driversTable)
     .where(parsed.data.status ? eq(driversTable.status, parsed.data.status) : undefined);
 
-  res.json(ListDriversResponse.parse(drivers.map(parseDriver)));
+  res.json(drivers.map(parseDriver));
 });
 
 router.post("/drivers", async (req, res): Promise<void> => {
@@ -125,6 +125,66 @@ router.patch("/drivers/:id/toggle-availability", async (req, res): Promise<void>
   }
 
   res.json(ToggleDriverAvailabilityResponse.parse(parseDriver(driver)));
+});
+
+router.get("/drivers/by-user/:userId", async (req, res): Promise<void> => {
+  const userId = parseInt(req.params["userId"] || "0", 10);
+  if (!userId) {
+    res.status(400).json({ error: "Invalid userId" });
+    return;
+  }
+
+  const [driver] = await db.select().from(driversTable).where(eq(driversTable.userId, userId));
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  res.json(parseDriver(driver));
+});
+
+router.patch("/drivers/:id/approve", async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const [driver] = await db
+    .update(driversTable)
+    .set({ approvalStatus: "approved", status: "active" })
+    .where(eq(driversTable.id, id))
+    .returning();
+
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  res.json({ success: true, driver: parseDriver(driver) });
+});
+
+router.patch("/drivers/:id/reject", async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const reason = (req.body?.reason as string) || "";
+
+  const [driver] = await db
+    .update(driversTable)
+    .set({ approvalStatus: "rejected", status: "inactive", rejectionReason: reason || null })
+    .where(eq(driversTable.id, id))
+    .returning();
+
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  res.json({ success: true, driver: parseDriver(driver) });
 });
 
 router.get("/drivers/:id/earnings", async (req, res): Promise<void> => {

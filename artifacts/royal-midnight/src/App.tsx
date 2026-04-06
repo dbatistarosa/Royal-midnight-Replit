@@ -150,7 +150,7 @@ function Router() {
 
       {/* Driver Portal */}
       <Route path="/driver/onboarding">
-        <DriverRoute component={DriverOnboarding} />
+        <PortalWrapper><DriverOnboarding /></PortalWrapper>
       </Route>
       <Route path="/driver/earnings">
         <DriverRoute component={DriverEarnings} />
