@@ -32,7 +32,13 @@ export default function Login() {
   async function onSubmit(values: LoginFormValues) {
     try {
       const result = await loginMutation.mutateAsync({ data: values });
-      login(result.user as any, result.token);
+      login({
+        id: result.user.id,
+        name: result.user.name,
+        email: result.user.email,
+        phone: result.user.phone ?? null,
+        role: result.user.role as "passenger" | "driver" | "admin",
+      }, result.token);
       toast({ title: "Welcome back", description: `Signed in as ${result.user.name}` });
 
       if (result.user.role === "admin") setLocation("/admin");
