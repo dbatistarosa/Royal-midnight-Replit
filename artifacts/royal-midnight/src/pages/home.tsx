@@ -1,8 +1,8 @@
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { AIRPORTS, VEHICLE_CLASSES } from "@/lib/constants";
+import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
 
 export default function Home() {
   const [, setLocation] = useLocation();
@@ -49,20 +49,20 @@ export default function Home() {
               <form onSubmit={handleBook} className="space-y-4">
                 <div>
                   <label className="block text-xs uppercase tracking-widest text-gray-400 mb-2">Pick-up Location</label>
-                  <Input 
+                  <PlacesAutocomplete
                     value={pickup}
-                    onChange={(e) => setPickup(e.target.value)}
-                    placeholder="Address or Airport Code (FLL, MIA, PBI)"
-                    className="bg-white/5 border-white/10 text-white rounded-none h-12 placeholder:text-gray-600 focus-visible:ring-primary focus-visible:border-primary"
+                    onChange={setPickup}
+                    placeholder="FLL, MIA, PBI or any address"
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-none h-12 px-4 text-sm focus:outline-none focus:border-primary placeholder:text-gray-600"
                   />
                 </div>
                 <div>
                   <label className="block text-xs uppercase tracking-widest text-gray-400 mb-2">Drop-off Location</label>
-                  <Input 
+                  <PlacesAutocomplete
                     value={dropoff}
-                    onChange={(e) => setDropoff(e.target.value)}
+                    onChange={setDropoff}
                     placeholder="Address or Airport Code"
-                    className="bg-white/5 border-white/10 text-white rounded-none h-12 placeholder:text-gray-600 focus-visible:ring-primary focus-visible:border-primary"
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-none h-12 px-4 text-sm focus:outline-none focus:border-primary placeholder:text-gray-600"
                   />
                 </div>
                 <Button type="submit" className="w-full h-14 mt-4 bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm rounded-none">
