@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, and } from "drizzle-orm";
-import { db, bookingsTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, settingsTable } from "@workspace/db";
+import { requireAuth } from "../middleware/auth.js";
 import {
   ListBookingsQueryParams,
   ListBookingsResponse,
@@ -26,17 +27,61 @@ function parseBooking(b: typeof bookingsTable.$inferSelect) {
   };
 }
 
-router.get("/bookings", async (req, res): Promise<void> => {
+async function getCommissionPct(): Promise<number> {
+  const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct"));
+  return row ? parseFloat(row.value) : 0.70;
+}
+
+function applyDriverEarnings<T extends { priceQuoted: number }>(booking: T, commissionPct: number): T & { driverEarnings: number } {
+  return {
+    ...booking,
+    driverEarnings: Math.round(booking.priceQuoted * commissionPct * 100) / 100,
+  };
+}
+
+router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   const parsed = ListBookingsQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
+  const caller = req.currentUser!;
+
   const conditions = [];
   if (parsed.data.status) conditions.push(eq(bookingsTable.status, parsed.data.status));
   if (parsed.data.driverId != null) conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
   if (parsed.data.userId != null) conditions.push(eq(bookingsTable.userId, parsed.data.userId));
+
+  // Non-admin drivers can only see their own bookings
+  if (caller.role === "driver") {
+    const [driverRow] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId));
+    if (!driverRow) {
+      res.json([]);
+      return;
+    }
+    // Allow driverId filter if it matches own record; otherwise force own
+    const requestedDriverId = parsed.data.driverId;
+    if (requestedDriverId != null && requestedDriverId !== driverRow.id) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+    if (requestedDriverId == null) {
+      conditions.push(eq(bookingsTable.driverId, driverRow.id));
+    }
+  }
+
+  // Passengers can only see their own bookings
+  if (caller.role === "passenger") {
+    const requestedUserId = parsed.data.userId;
+    if (requestedUserId != null && requestedUserId !== caller.userId) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+    if (requestedUserId == null) {
+      conditions.push(eq(bookingsTable.userId, caller.userId));
+    }
+  }
 
   const bookings = await db
     .select()
@@ -44,7 +89,17 @@ router.get("/bookings", async (req, res): Promise<void> => {
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(bookingsTable.createdAt));
 
-  res.json(ListBookingsResponse.parse(bookings.map(parseBooking)));
+  const parsed2 = bookings.map(parseBooking);
+
+  if (caller.role === "driver") {
+    const commissionPct = await getCommissionPct();
+    res.json(parsed2.map(b => applyDriverEarnings(b, commissionPct)));
+    return;
+  }
+
+  // Return data as-is for admin/passenger — skip Zod re-validation to avoid
+  // enum mismatches from legacy seeded rows with old vehicleClass values
+  res.json(parsed2);
 });
 
 router.post("/bookings", async (req, res): Promise<void> => {

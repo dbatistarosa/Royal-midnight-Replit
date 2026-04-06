@@ -107,11 +107,38 @@ function StatusToggle({ driverId, currentStatus, authHeader }: { driverId: numbe
   );
 }
 
-function ApprovedDashboard({ driverId, authHeader }: { driverId: number; authHeader: string }) {
+type DashboardTab = "available" | "my_rides";
+
+function BookingCard({ booking }: { booking: BookingRow }) {
+  return (
+    <div className="bg-card border border-border rounded-none p-6">
+      <div className="flex justify-between items-start mb-4">
+        <div>
+          <div className="text-xs text-primary font-medium mb-1 uppercase tracking-widest">#{booking.id}</div>
+          <div className="font-medium">{booking.passengerName}</div>
+        </div>
+        <span className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20 capitalize">
+          {booking.status.replace("_", " ")}
+        </span>
+      </div>
+      <div className="text-sm text-muted-foreground">
+        {booking.pickupAddress} → {booking.dropoffAddress}
+      </div>
+      {booking.pickupAt && (
+        <div className="text-xs text-muted-foreground mt-1">
+          {format(new Date(booking.pickupAt), "MMM d, yyyy 'at' h:mm a")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApprovedDashboard({ driverId, authHeader, rating }: { driverId: number; authHeader: string; rating: number | null }) {
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [earnings, setEarnings] = useState<EarningsData | null>(null);
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [loadingEarnings, setLoadingEarnings] = useState(true);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("available");
 
   useEffect(() => {
     fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
@@ -127,77 +154,80 @@ function ApprovedDashboard({ driverId, authHeader }: { driverId: number; authHea
       .finally(() => setLoadingEarnings(false));
   }, [driverId, authHeader]);
 
-  const activeBookings = bookings.filter(b => ["confirmed", "in_progress"].includes(b.status));
+  const openTrips = bookings.filter(b => b.status === "pending" || b.status === "confirmed");
+  const myRides = bookings.filter(b => b.status === "in_progress" || b.status === "assigned");
 
   const fmt$ = (n: number) => `$${n.toFixed(2)}`;
 
+  const tabBookings = activeTab === "available" ? openTrips : myRides;
+  const tabEmptyText = activeTab === "available" ? "No open trips available right now." : "No rides in progress.";
+
   return (
     <>
-      <div className="grid md:grid-cols-4 gap-6 mb-12">
-        <div className="bg-card border border-border rounded-none p-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+        <div className="bg-card border border-border rounded-none p-5">
           <h3 className="text-muted-foreground text-xs uppercase tracking-widest font-medium mb-2">Today's Earnings</h3>
-          {loadingEarnings ? (
-            <div className="h-8 w-20 bg-muted/40 animate-pulse rounded" />
-          ) : (
+          {loadingEarnings ? <div className="h-8 w-20 bg-muted/40 animate-pulse rounded" /> : (
             <div className="text-3xl font-serif text-primary">{fmt$(earnings?.today ?? 0)}</div>
           )}
         </div>
-        <div className="bg-card border border-border rounded-none p-6">
-          <h3 className="text-muted-foreground text-xs uppercase tracking-widest font-medium mb-2">This Week</h3>
-          {loadingEarnings ? (
-            <div className="h-8 w-20 bg-muted/40 animate-pulse rounded" />
-          ) : (
+        <div className="bg-card border border-border rounded-none p-5">
+          <h3 className="text-muted-foreground text-xs uppercase tracking-widest font-medium mb-2">Weekly Earnings</h3>
+          {loadingEarnings ? <div className="h-8 w-20 bg-muted/40 animate-pulse rounded" /> : (
             <div className="text-3xl font-serif text-foreground">{fmt$(earnings?.thisWeek ?? 0)}</div>
           )}
         </div>
-        <div className="bg-card border border-border rounded-none p-6">
+        <div className="bg-card border border-border rounded-none p-5">
           <h3 className="text-muted-foreground text-xs uppercase tracking-widest font-medium mb-2">Upcoming Trips</h3>
-          {loadingBookings ? (
-            <div className="h-8 w-12 bg-muted/40 animate-pulse rounded" />
-          ) : (
-            <div className="text-3xl font-serif text-foreground">{activeBookings.length}</div>
+          {loadingBookings ? <div className="h-8 w-12 bg-muted/40 animate-pulse rounded" /> : (
+            <div className="text-3xl font-serif text-foreground">{openTrips.length}</div>
           )}
         </div>
-        <div className="bg-card border border-border rounded-none p-6">
-          <h3 className="text-muted-foreground text-xs uppercase tracking-widest font-medium mb-2">Avg / Ride</h3>
-          {loadingEarnings ? (
-            <div className="h-8 w-16 bg-muted/40 animate-pulse rounded" />
-          ) : (
-            <div className="text-3xl font-serif text-foreground">{fmt$(earnings?.avgPerRide ?? 0)}</div>
-          )}
+        <div className="bg-card border border-border rounded-none p-5">
+          <h3 className="text-muted-foreground text-xs uppercase tracking-widest font-medium mb-2">Rating</h3>
+          <div className="text-3xl font-serif text-foreground">
+            {rating != null ? rating.toFixed(1) : "—"}
+          </div>
         </div>
       </div>
 
-      <h2 className="font-serif text-2xl mb-6">Active & Upcoming Trips</h2>
+      <div className="flex border-b border-border mb-6">
+        {([["available", "Available Trips"], ["my_rides", "My Rides"]] as [DashboardTab, string][]).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`px-6 py-3 text-xs uppercase tracking-widest font-medium transition-colors border-b-2 -mb-px ${
+              activeTab === key
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {label}
+            {key === "available" && openTrips.length > 0 && (
+              <span className="ml-2 bg-primary/20 text-primary text-xs px-1.5 py-0.5 rounded-full">
+                {openTrips.length}
+              </span>
+            )}
+            {key === "my_rides" && myRides.length > 0 && (
+              <span className="ml-2 bg-amber-400/20 text-amber-400 text-xs px-1.5 py-0.5 rounded-full">
+                {myRides.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {loadingBookings ? (
-        <div className="h-32 bg-card/50 rounded-none animate-pulse border border-border" />
-      ) : activeBookings.length > 0 ? (
         <div className="space-y-4">
-          {activeBookings.map((booking) => (
-            <div key={booking.id} className="bg-card border border-border rounded-none p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <div className="text-sm text-primary font-medium mb-1 uppercase tracking-widest">#{booking.id}</div>
-                  <div className="font-medium">{booking.passengerName}</div>
-                </div>
-                <span className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20 capitalize">
-                  {booking.status.replace("_", " ")}
-                </span>
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {booking.pickupAddress} → {booking.dropoffAddress}
-              </div>
-              {booking.pickupAt && (
-                <div className="text-xs text-muted-foreground mt-1">
-                  {format(new Date(booking.pickupAt), "MMM d, yyyy 'at' h:mm a")}
-                </div>
-              )}
-            </div>
-          ))}
+          {[1, 2].map(i => <div key={i} className="h-28 bg-card/50 rounded-none animate-pulse border border-border" />)}
+        </div>
+      ) : tabBookings.length > 0 ? (
+        <div className="space-y-4">
+          {tabBookings.map(booking => <BookingCard key={booking.id} booking={booking} />)}
         </div>
       ) : (
         <div className="bg-card border border-border rounded-none p-8 text-center text-muted-foreground text-sm">
-          No active trips at this time.
+          {tabEmptyText}
         </div>
       )}
     </>
@@ -256,7 +286,7 @@ export default function DriverDashboard() {
         </div>
       )}
       {driverRecord && (
-        <ApprovedDashboard driverId={driverRecord.id} authHeader={authHeader} />
+        <ApprovedDashboard driverId={driverRecord.id} authHeader={authHeader} rating={driverRecord.rating ?? null} />
       )}
     </PortalLayout>
   );

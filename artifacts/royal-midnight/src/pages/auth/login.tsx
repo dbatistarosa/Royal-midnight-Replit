@@ -3,8 +3,8 @@ import { Link, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useLogin } from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/auth";
+import { API_BASE } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -18,11 +18,18 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
+type LoginResponse = {
+  token: string;
+  driverId?: number;
+  user: { id: number; name: string; email: string; phone: string | null; role: string };
+  error?: string;
+};
+
 export default function Login() {
   const [, setLocation] = useLocation();
   const { login } = useAuth();
   const { toast } = useToast();
-  const loginMutation = useLogin();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -30,22 +37,34 @@ export default function Login() {
   });
 
   async function onSubmit(values: LoginFormValues) {
+    setIsSubmitting(true);
     try {
-      const result = await loginMutation.mutateAsync({ data: values });
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values),
+      });
+      const result = await res.json() as LoginResponse;
+      if (!res.ok) {
+        toast({ title: "Sign in failed", description: result.error ?? "Invalid email or password.", variant: "destructive" });
+        return;
+      }
       login({
         id: result.user.id,
         name: result.user.name,
         email: result.user.email,
         phone: result.user.phone ?? null,
         role: result.user.role as "passenger" | "driver" | "admin",
-      }, result.token);
+      }, result.token, result.driverId ?? null);
       toast({ title: "Welcome back", description: `Signed in as ${result.user.name}` });
 
       if (result.user.role === "admin") setLocation("/admin");
       else if (result.user.role === "driver") setLocation("/driver/dashboard");
       else setLocation("/passenger/dashboard");
     } catch {
-      toast({ title: "Sign in failed", description: "Invalid email or password.", variant: "destructive" });
+      toast({ title: "Sign in failed", description: "Could not connect to server. Please try again.", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -97,10 +116,10 @@ export default function Login() {
 
               <Button
                 type="submit"
-                disabled={loginMutation.isPending}
+                disabled={isSubmitting}
                 className="w-full bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-widest text-xs py-6 font-medium"
               >
-                {loginMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sign In"}
+                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sign In"}
               </Button>
             </form>
           </Form>
