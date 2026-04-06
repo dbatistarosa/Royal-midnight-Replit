@@ -42,8 +42,6 @@ router.get("/autocomplete", async (req, res): Promise<void> => {
     url.searchParams.set("location", "26.0,-80.1");
     url.searchParams.set("radius", "160000"); // ~100 miles around South Florida
     url.searchParams.set("strictbounds", "false");
-    url.searchParams.set("types", "geocode|establishment");
-
     const response = await fetch(url.toString());
     const data = await response.json() as {
       status: string;
@@ -53,6 +51,12 @@ router.get("/autocomplete", async (req, res): Promise<void> => {
         structured_formatting: { main_text: string; secondary_text: string };
       }>;
     };
+
+    if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
+      req.log.warn({ status: data.status }, "Places Autocomplete returned non-OK status");
+      res.json({ airports: airportMatches, suggestions: [] });
+      return;
+    }
 
     const suggestions = (data.predictions || []).slice(0, 5).map(p => ({
       placeId: p.place_id,

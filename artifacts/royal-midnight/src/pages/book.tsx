@@ -154,11 +154,11 @@ export default function Book() {
   const dropoffAirportCode = detectAirportCode(dropoffAddress || "");
 
   useEffect(() => {
-    if (!pickupAirportCode) setPickupAirline("");
+    setPickupAirline("");
   }, [pickupAirportCode]);
 
   useEffect(() => {
-    if (!dropoffAirportCode) setDropoffAirline("");
+    setDropoffAirline("");
   }, [dropoffAirportCode]);
 
   const showBusiness = Number(passengers) <= 3;
