@@ -1,17 +1,37 @@
+import { useState, useEffect } from "react";
 import { useRoute } from "wouter";
 import { Link } from "wouter";
-import { useGetBooking } from "@workspace/api-client-react";
+import { API_BASE } from "@/lib/constants";
 import { format } from "date-fns";
 import { CheckCircle2, Loader2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+type PublicBooking = {
+  id: number;
+  status: string;
+  passengerName: string;
+  passengerEmail?: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  pickupAt: string;
+};
 
 export default function BookingConfirmation() {
   const [, params] = useRoute("/booking-confirmation/:id");
   const id = params?.id ? parseInt(params.id) : 0;
 
-  const { data: booking, isLoading, error } = useGetBooking(id, {
-    query: { enabled: !!id }
-  });
+  const [booking, setBooking] = useState<PublicBooking | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    fetch(`${API_BASE}/bookings/${id}/track`)
+      .then(r => r.ok ? r.json() as Promise<PublicBooking> : Promise.reject())
+      .then(data => setBooking(data))
+      .catch(() => setError(true))
+      .finally(() => setIsLoading(false));
+  }, [id]);
 
   if (isLoading) {
     return (

@@ -127,7 +127,8 @@ router.post("/bookings", async (req, res): Promise<void> => {
   res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
 });
 
-router.get("/bookings/:id", optionalAuth, async (req, res): Promise<void> => {
+// Public tracking endpoint — returns only non-sensitive status fields (no fare/PII)
+router.get("/bookings/:id/track", async (req, res): Promise<void> => {
   const params = GetBookingParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -140,10 +141,37 @@ router.get("/bookings/:id", optionalAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const caller = req.currentUser;
+  // Public view: only status, identity, and routing — no fare or full PII
+  res.json({
+    id: booking.id,
+    status: booking.status,
+    passengerName: booking.passengerName,
+    pickupAddress: booking.pickupAddress,
+    dropoffAddress: booking.dropoffAddress,
+    pickupAt: booking.pickupAt.toISOString(),
+    driverId: booking.driverId,
+    vehicleClass: booking.vehicleClass,
+  });
+});
+
+// Authenticated single-booking endpoint
+router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
+  const params = GetBookingParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, params.data.id));
+  if (!booking) {
+    res.status(404).json({ error: "Booking not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
 
   // Authenticated driver: can only access their own assigned bookings; receive driver-view (no priceQuoted)
-  if (caller?.role === "driver") {
+  if (caller.role === "driver") {
     const [driverRow] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId));
     if (!driverRow || booking.driverId !== driverRow.id) {
       res.status(403).json({ error: "Access denied" });
@@ -155,12 +183,11 @@ router.get("/bookings/:id", optionalAuth, async (req, res): Promise<void> => {
   }
 
   // Authenticated passenger: can only access their own bookings
-  if (caller?.role === "passenger" && booking.userId !== caller.userId) {
+  if (caller.role === "passenger" && booking.userId !== caller.userId) {
     res.status(403).json({ error: "Access denied" });
     return;
   }
 
-  // Unauthenticated (public track page) and admin: return full booking data
   res.json(parseBooking(booking));
 });
 
