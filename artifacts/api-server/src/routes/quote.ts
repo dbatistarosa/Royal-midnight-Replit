@@ -15,57 +15,100 @@ const RATE_PER_MILE: Record<string, number> = {
   suv: 4.0,
 };
 
-const AIRPORTS = ["FLL", "MIA", "PBI", "Fort Lauderdale", "Miami International", "Palm Beach"];
+// Canonical airport addresses for resolving shortcodes passed from the frontend
+const AIRPORT_ADDRESSES: Record<string, string> = {
+  FLL: "Fort Lauderdale-Hollywood International Airport, 100 Terminal Dr, Fort Lauderdale, FL 33315",
+  MIA: "Miami International Airport, 2100 NW 42nd Ave, Miami, FL 33142",
+  PBI: "Palm Beach International Airport, 1000 James L Turnage Blvd, West Palm Beach, FL 33406",
+};
+
+// AIRPORT_KEYWORDS is used only to decide whether to add the airport surcharge
+const AIRPORT_KEYWORDS = ["FLL", "MIA", "PBI", "Fort Lauderdale-Hollywood", "Miami International", "Palm Beach International"];
 
 function isAirportTrip(address: string): boolean {
-  return AIRPORTS.some((a) => address.toLowerCase().includes(a.toLowerCase()));
+  return AIRPORT_KEYWORDS.some((k) => address.toLowerCase().includes(k.toLowerCase()));
 }
 
-function fallbackDistance(pickup: string, dropoff: string): { distance: number; duration: number } {
-  const isPickupAirport = isAirportTrip(pickup);
-  const isDropoffAirport = isAirportTrip(dropoff);
-  if (isPickupAirport && isDropoffAirport) {
-    if (
-      (pickup.includes("FLL") || pickup.includes("Fort Lauderdale")) &&
-      (dropoff.includes("MIA") || dropoff.includes("Miami"))
-    ) return { distance: 32, duration: 45 };
-    if (
-      (pickup.includes("MIA") || pickup.includes("Miami")) &&
-      (dropoff.includes("FLL") || dropoff.includes("Fort Lauderdale"))
-    ) return { distance: 32, duration: 45 };
-    if (
-      (pickup.includes("PBI") || pickup.includes("Palm Beach")) &&
-      (dropoff.includes("MIA") || dropoff.includes("Miami"))
-    ) return { distance: 75, duration: 90 };
-    return { distance: 40, duration: 55 };
+/** Resolve an address entered by the user to a canonical geocodable string.
+ *  Airport shortcuts selected from the dropdown look like "FLL - Fort Lauderdale-Hollywood International Airport"
+ *  or the full Place description. We normalise both. */
+function resolveAddress(raw: string): string {
+  const upper = raw.trim().toUpperCase();
+  // Direct code match (e.g. "FLL", "MIA", "PBI")
+  if (AIRPORT_ADDRESSES[upper]) return AIRPORT_ADDRESSES[upper];
+  // Shortcut format "FLL - Fort Lauderdale-Hollywood International Airport"
+  for (const code of Object.keys(AIRPORT_ADDRESSES)) {
+    if (upper.startsWith(code + " -") || upper.startsWith(code + "-")) {
+      return AIRPORT_ADDRESSES[code];
+    }
   }
-  const dist = 18 + Math.random() * 15;
-  return { distance: Math.round(dist * 10) / 10, duration: Math.round(dist * 2.2) };
+  return raw.trim();
 }
 
-async function getGoogleMapsDistance(
+async function getDirectionsDistance(
   pickup: string,
-  dropoff: string
+  dropoff: string,
 ): Promise<{ distance: number; duration: number } | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return null;
+
+  const origin = resolveAddress(pickup);
+  const destination = resolveAddress(dropoff);
+
   try {
-    const url = new URL("https://maps.googleapis.com/maps/api/distancematrix/json");
-    url.searchParams.set("origins", pickup);
-    url.searchParams.set("destinations", dropoff);
+    // Directions API — returns actual driving route distance & duration
+    const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
+    url.searchParams.set("origin", origin);
+    url.searchParams.set("destination", destination);
+    url.searchParams.set("mode", "driving");
     url.searchParams.set("units", "imperial");
     url.searchParams.set("key", apiKey);
+
     const response = await fetch(url.toString());
-    const data = await response.json() as any;
-    if (data.status !== "OK") return null;
-    const element = data.rows?.[0]?.elements?.[0];
-    if (!element || element.status !== "OK") return null;
-    const distanceMiles = element.distance.value / 1609.34;
-    const durationMinutes = Math.round(element.duration.value / 60);
-    return { distance: Math.round(distanceMiles * 10) / 10, duration: durationMinutes };
+    const data = await response.json() as {
+      status: string;
+      routes?: Array<{
+        legs: Array<{
+          distance: { value: number; text: string };
+          duration: { value: number; text: string };
+        }>;
+      }>;
+    };
+
+    if (data.status !== "OK" || !data.routes?.length) return null;
+
+    const leg = data.routes[0].legs[0];
+    if (!leg) return null;
+
+    const distanceMiles = leg.distance.value / 1609.344;
+    const durationMinutes = Math.round(leg.duration.value / 60);
+
+    return {
+      distance: Math.round(distanceMiles * 10) / 10,
+      duration: durationMinutes,
+    };
   } catch {
     return null;
   }
+}
+
+// Fallback distances (road miles) — only used if Google API is unavailable
+function fallbackDistance(pickup: string, dropoff: string): { distance: number; duration: number } {
+  const pu = pickup.toUpperCase();
+  const do_ = dropoff.toUpperCase();
+  const hasFLL = (s: string) => s.includes("FLL") || s.includes("FORT LAUDERDALE");
+  const hasMIA = (s: string) => s.includes("MIA") || s.includes("MIAMI");
+  const hasPBI = (s: string) => s.includes("PBI") || s.includes("PALM BEACH");
+
+  if (hasFLL(pu) && hasMIA(do_)) return { distance: 35, duration: 45 };
+  if (hasMIA(pu) && hasFLL(do_)) return { distance: 35, duration: 45 };
+  if (hasPBI(pu) && hasFLL(do_)) return { distance: 56, duration: 65 };
+  if (hasFLL(pu) && hasPBI(do_)) return { distance: 56, duration: 65 };
+  if (hasPBI(pu) && hasMIA(do_)) return { distance: 80, duration: 90 };
+  if (hasMIA(pu) && hasPBI(do_)) return { distance: 80, duration: 90 };
+
+  // Generic South Florida point-to-point — rough estimate
+  return { distance: 25, duration: 40 };
 }
 
 async function getSetting(key: string, fallback: string): Promise<string> {
@@ -86,15 +129,12 @@ router.post("/quote", async (req, res): Promise<void> => {
 
   const { pickupAddress, dropoffAddress, vehicleClass, passengers, pickupAt } = parsed.data;
   const vc = vehicleClass as string;
-  const numPassengers = Number(passengers) || 1;
 
-  // Validate minimum lead time (EST = UTC-4 in summer, UTC-5 in winter — use UTC offset dynamically)
+  // Validate minimum lead time
   const minHoursStr = await getSetting("min_booking_hours", "2");
   const minHours = parseFloat(minHoursStr);
   const pickupDate = new Date(pickupAt);
-  const nowUtc = Date.now();
-  const leadTimeMs = pickupDate.getTime() - nowUtc;
-  const leadTimeHours = leadTimeMs / (1000 * 60 * 60);
+  const leadTimeHours = (pickupDate.getTime() - Date.now()) / (1000 * 60 * 60);
   if (leadTimeHours < minHours) {
     res.status(400).json({
       error: `Bookings require at least ${minHours} hour${minHours !== 1 ? "s" : ""} advance notice. Please select a later time.`,
@@ -111,7 +151,8 @@ router.post("/quote", async (req, res): Promise<void> => {
   const baseFare = BASE_FARES[vc] ?? 35;
   const ratePerMile = RATE_PER_MILE[vc] ?? 2.5;
 
-  const mapsResult = await getGoogleMapsDistance(pickupAddress, dropoffAddress);
+  // Driving route distance via Directions API (falls back to hardcoded estimates)
+  const mapsResult = await getDirectionsDistance(pickupAddress, dropoffAddress);
   const { distance: estimatedDistance, duration: estimatedDuration } =
     mapsResult ?? fallbackDistance(pickupAddress, dropoffAddress);
 
@@ -121,13 +162,10 @@ router.post("/quote", async (req, res): Promise<void> => {
   const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
   const totalWithTax = Math.round((subtotal + taxAmount) * 100) / 100;
 
-  // estimatedPrice = subtotal (pre-tax, for backward compat)
-  const estimatedPrice = subtotal;
-
   res.json(
     GetQuoteResponse.parse({
       vehicleClass: vc,
-      estimatedPrice,
+      estimatedPrice: subtotal,
       baseFare,
       distanceCharge,
       airportFee,
