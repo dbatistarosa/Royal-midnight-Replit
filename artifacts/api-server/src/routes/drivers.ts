@@ -56,7 +56,7 @@ router.post("/drivers", requireAdmin, async (req, res): Promise<void> => {
     .values({
       ...parsed.data,
       approvalStatus: "approved",
-      status: "available",
+      status: "active",
     })
     .returning();
   res.status(201).json(GetDriverResponse.parse(parseDriver(driver)));

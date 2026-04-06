@@ -245,21 +245,29 @@ export default function AdminPromos() {
       </div>
 
       {modalOpen && (
-        <Modal title={editPromo ? "Edit Promo Code" : "New Promo Code"} onClose={() => setModalOpen(false)} onSubmit={handleSubmit} submitting={saving}>
-          <div>
-            <label className={LABEL}>Code *</label>
-            <Input
-              value={form.code}
-              onChange={e => setField("code", e.target.value.toUpperCase())}
-              className={INPUT}
-              placeholder="WELCOME20"
-              disabled={!!editPromo}
-            />
-          </div>
-          <div>
-            <label className={LABEL}>Description *</label>
-            <Input value={form.description} onChange={e => setField("description", e.target.value)} className={INPUT} placeholder="Welcome discount for new passengers" />
-          </div>
+        <Modal title={editPromo ? `Edit Expiry — ${editPromo.code}` : "New Promo Code"} onClose={() => setModalOpen(false)} onSubmit={handleSubmit} submitting={saving}>
+          {editPromo && (
+            <div className="bg-white/5 border border-white/10 px-4 py-3 text-sm text-muted-foreground">
+              Only the expiry date can be changed for an existing code. To change discount terms, delete and recreate the promo.
+            </div>
+          )}
+          {!editPromo && (
+            <>
+              <div>
+                <label className={LABEL}>Code *</label>
+                <Input
+                  value={form.code}
+                  onChange={e => setField("code", e.target.value.toUpperCase())}
+                  className={INPUT}
+                  placeholder="WELCOME20"
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Description *</label>
+                <Input value={form.description} onChange={e => setField("description", e.target.value)} className={INPUT} placeholder="Welcome discount for new passengers" />
+              </div>
+            </>
+          )}
           {!editPromo && (
             <>
               <div className="grid grid-cols-2 gap-4">

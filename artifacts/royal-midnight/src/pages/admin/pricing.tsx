@@ -97,19 +97,31 @@ export default function AdminPricing() {
   };
 
   const handleSubmit = async () => {
-    if (!form.name || !form.baseFare || !form.ratePerMile || !form.airportSurcharge) {
+    if (!form.baseFare || !form.ratePerMile || !form.airportSurcharge) {
       toast({ title: "Missing fields", description: "All fare fields are required.", variant: "destructive" });
+      return;
+    }
+    if (!editRule && !form.name) {
+      toast({ title: "Missing fields", description: "Rule name is required.", variant: "destructive" });
       return;
     }
     setSaving(true);
     try {
-      const body = {
-        name: form.name,
-        vehicleClass: form.vehicleClass || null,
-        baseFare: parseFloat(form.baseFare),
-        ratePerMile: parseFloat(form.ratePerMile),
-        airportSurcharge: parseFloat(form.airportSurcharge),
-      };
+      // PATCH only accepts baseFare, ratePerMile, airportSurcharge, isActive
+      // POST accepts name, vehicleClass, baseFare, ratePerMile, airportSurcharge
+      const body = editRule
+        ? {
+            baseFare: parseFloat(form.baseFare),
+            ratePerMile: parseFloat(form.ratePerMile),
+            airportSurcharge: parseFloat(form.airportSurcharge),
+          }
+        : {
+            name: form.name,
+            vehicleClass: form.vehicleClass || null,
+            baseFare: parseFloat(form.baseFare),
+            ratePerMile: parseFloat(form.ratePerMile),
+            airportSurcharge: parseFloat(form.airportSurcharge),
+          };
       const res = editRule
         ? await fetch(`${API_BASE}/pricing/${editRule.id}`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: authHdr }, body: JSON.stringify(body) })
         : await fetch(`${API_BASE}/pricing`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: authHdr }, body: JSON.stringify(body) });
@@ -203,18 +215,27 @@ export default function AdminPricing() {
 
       {modalOpen && (
         <Modal title={editRule ? "Edit Pricing Rule" : "New Pricing Rule"} onClose={() => setModalOpen(false)} onSubmit={handleSubmit} submitting={saving}>
-          <div>
-            <label className={LABEL}>Rule Name *</label>
-            <Input value={form.name} onChange={e => setField("name", e.target.value)} className={INPUT} placeholder="e.g. Business Class Standard" />
-          </div>
-          <div>
-            <label className={LABEL}>Vehicle Class</label>
-            <select value={form.vehicleClass} onChange={e => setField("vehicleClass", e.target.value)} className="bg-white/5 border border-white/10 text-white rounded-none h-10 text-sm px-3 w-full">
-              <option value="">All Classes</option>
-              <option value="business">Business Class Sedan</option>
-              <option value="suv">Premium SUV</option>
-            </select>
-          </div>
+          {!editRule && (
+            <>
+              <div>
+                <label className={LABEL}>Rule Name *</label>
+                <Input value={form.name} onChange={e => setField("name", e.target.value)} className={INPUT} placeholder="e.g. Business Class Standard" />
+              </div>
+              <div>
+                <label className={LABEL}>Vehicle Class</label>
+                <select value={form.vehicleClass} onChange={e => setField("vehicleClass", e.target.value)} className="bg-white/5 border border-white/10 text-white rounded-none h-10 text-sm px-3 w-full">
+                  <option value="">All Classes</option>
+                  <option value="business">Business Class Sedan</option>
+                  <option value="suv">Premium SUV</option>
+                </select>
+              </div>
+            </>
+          )}
+          {editRule && (
+            <div className="bg-white/5 border border-white/10 px-4 py-3 text-sm text-muted-foreground">
+              Editing fares for: <strong className="text-white">{editRule.name}</strong>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className={LABEL}>Base Fare ($) *</label>
