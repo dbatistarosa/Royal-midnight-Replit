@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
-  version: 0.1.0
+  version: 0.2.0
   description: Royal Midnight luxury black car service API
 servers:
   - url: /api
@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
   - name: bookings
     description: Booking operations
   - name: vehicles
@@ -20,6 +22,18 @@ tags:
     description: Driver operations
   - name: users
     description: User operations
+  - name: addresses
+    description: Saved address operations
+  - name: reviews
+    description: Review operations
+  - name: support
+    description: Support ticket operations
+  - name: notifications
+    description: Notification operations
+  - name: promos
+    description: Promo code operations
+  - name: pricing
+    description: Pricing rule operations
   - name: admin
     description: Admin dashboard operations
 paths:
@@ -28,7 +42,6 @@ paths:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -37,6 +50,102 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
 
+  # ── AUTH ──────────────────────────────────────────────────────────────────
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterBody"
+      responses:
+        "201":
+          description: User registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/send-otp:
+    post:
+      operationId: sendOtp
+      tags: [auth]
+      summary: Send OTP to phone number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendOtpBody"
+      responses:
+        "200":
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/verify-otp:
+    post:
+      operationId: verifyOtp
+      tags: [auth]
+      summary: Verify OTP and get auth token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyOtpBody"
+      responses:
+        "200":
+          description: Verification successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid OTP
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── BOOKINGS ───────────────────────────────────────────────────────────────
   /bookings:
     get:
       operationId: listBookings
@@ -46,7 +155,7 @@ paths:
         - name: status
           in: query
           schema:
-            type: string
+            type: ["string", "null"]
         - name: userId
           in: query
           schema:
@@ -115,7 +224,7 @@ paths:
     patch:
       operationId: updateBooking
       tags: [bookings]
-      summary: Update booking status or details
+      summary: Update booking
       parameters:
         - name: id
           in: path
@@ -135,12 +244,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Booking"
-        "404":
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
     delete:
       operationId: cancelBooking
       tags: [bookings]
@@ -154,18 +257,13 @@ paths:
       responses:
         "204":
           description: Booking cancelled
-        "404":
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 
+  # ── QUOTE ─────────────────────────────────────────────────────────────────
   /quote:
     post:
       operationId: getQuote
       tags: [quote]
-      summary: Get upfront price quote for a trip
+      summary: Get upfront price quote
       requestBody:
         required: true
         content:
@@ -179,13 +277,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/QuoteResponse"
-        "400":
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 
+  # ── VEHICLES ───────────────────────────────────────────────────────────────
   /vehicles:
     get:
       operationId: listVehicles
@@ -274,7 +367,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Vehicle"
+    delete:
+      operationId: deleteVehicle
+      tags: [vehicles]
+      summary: Delete vehicle
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
 
+  # ── DRIVERS ────────────────────────────────────────────────────────────────
   /drivers:
     get:
       operationId: listDrivers
@@ -360,11 +467,74 @@ paths:
               schema:
                 $ref: "#/components/schemas/Driver"
 
+  /drivers/{id}/toggle-availability:
+    patch:
+      operationId: toggleDriverAvailability
+      tags: [drivers]
+      summary: Toggle driver online/offline status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToggleAvailabilityBody"
+      responses:
+        "200":
+          description: Driver updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Driver"
+
+  /drivers/{id}/earnings:
+    get:
+      operationId: getDriverEarnings
+      tags: [drivers]
+      summary: Get driver earnings summary
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Earnings summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverEarnings"
+
+  # ── USERS ──────────────────────────────────────────────────────────────────
   /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List users (admin)
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
     post:
       operationId: createUser
       tags: [users]
-      summary: Create or register a user (passenger)
+      summary: Create a user
       requestBody:
         required: true
         content:
@@ -427,6 +597,393 @@ paths:
               schema:
                 $ref: "#/components/schemas/User"
 
+  /users/{id}/bookings:
+    get:
+      operationId: getUserBookings
+      tags: [users]
+      summary: Get a user's booking history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Booking"
+
+  # ── SAVED ADDRESSES ────────────────────────────────────────────────────────
+  /addresses:
+    get:
+      operationId: listAddresses
+      tags: [addresses]
+      summary: List saved addresses for a user
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Saved addresses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SavedAddress"
+    post:
+      operationId: createAddress
+      tags: [addresses]
+      summary: Save a new address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAddressBody"
+      responses:
+        "201":
+          description: Address saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedAddress"
+
+  /addresses/{id}:
+    delete:
+      operationId: deleteAddress
+      tags: [addresses]
+      summary: Delete a saved address
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # ── REVIEWS ────────────────────────────────────────────────────────────────
+  /reviews:
+    get:
+      operationId: listReviews
+      tags: [reviews]
+      summary: List reviews
+      parameters:
+        - name: driverId
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: bookingId
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Review"
+    post:
+      operationId: createReview
+      tags: [reviews]
+      summary: Submit a review
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReviewBody"
+      responses:
+        "201":
+          description: Review submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+
+  # ── SUPPORT TICKETS ────────────────────────────────────────────────────────
+  /support:
+    get:
+      operationId: listTickets
+      tags: [support]
+      summary: List support tickets
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: userId
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Tickets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SupportTicket"
+    post:
+      operationId: createTicket
+      tags: [support]
+      summary: Submit a support ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketBody"
+      responses:
+        "201":
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportTicket"
+
+  /support/{id}:
+    patch:
+      operationId: updateTicket
+      tags: [support]
+      summary: Update ticket status (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTicketBody"
+      responses:
+        "200":
+          description: Updated ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupportTicket"
+
+  # ── NOTIFICATIONS ──────────────────────────────────────────────────────────
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List notifications for a user
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+
+  /notifications/{id}/read:
+    patch:
+      operationId: markNotificationRead
+      tags: [notifications]
+      summary: Mark notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Updated notification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+
+  # ── PROMO CODES ────────────────────────────────────────────────────────────
+  /promos:
+    get:
+      operationId: listPromos
+      tags: [promos]
+      summary: List promo codes
+      responses:
+        "200":
+          description: Promo codes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PromoCode"
+    post:
+      operationId: createPromo
+      tags: [promos]
+      summary: Create a promo code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePromoBody"
+      responses:
+        "201":
+          description: Promo created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromoCode"
+
+  /promos/{id}:
+    patch:
+      operationId: updatePromo
+      tags: [promos]
+      summary: Update promo code
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePromoBody"
+      responses:
+        "200":
+          description: Updated promo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromoCode"
+    delete:
+      operationId: deletePromo
+      tags: [promos]
+      summary: Delete promo code
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /promos/validate:
+    post:
+      operationId: validatePromo
+      tags: [promos]
+      summary: Validate and apply a promo code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidatePromoBody"
+      responses:
+        "200":
+          description: Promo validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromoValidationResult"
+
+  # ── PRICING RULES ──────────────────────────────────────────────────────────
+  /pricing:
+    get:
+      operationId: listPricingRules
+      tags: [pricing]
+      summary: List pricing rules
+      responses:
+        "200":
+          description: Pricing rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PricingRule"
+    post:
+      operationId: createPricingRule
+      tags: [pricing]
+      summary: Create a pricing rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePricingRuleBody"
+      responses:
+        "201":
+          description: Rule created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRule"
+
+  /pricing/{id}:
+    patch:
+      operationId: updatePricingRule
+      tags: [pricing]
+      summary: Update pricing rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePricingRuleBody"
+      responses:
+        "200":
+          description: Updated rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PricingRule"
+    delete:
+      operationId: deletePricingRule
+      tags: [pricing]
+      summary: Delete pricing rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  # ── ADMIN ──────────────────────────────────────────────────────────────────
   /admin/stats:
     get:
       operationId: getAdminStats
@@ -444,7 +1001,7 @@ paths:
     get:
       operationId: getRecentBookings
       tags: [admin]
-      summary: Get recent bookings for admin dashboard
+      summary: Get recent bookings
       parameters:
         - name: limit
           in: query
@@ -464,7 +1021,7 @@ paths:
     get:
       operationId: getRevenueStats
       tags: [admin]
-      summary: Revenue breakdown by period
+      summary: Revenue breakdown
       responses:
         "200":
           description: Revenue stats
@@ -473,6 +1030,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/RevenueStats"
 
+  /admin/dispatch:
+    get:
+      operationId: getDispatchBoard
+      tags: [admin]
+      summary: Get live dispatch board
+      responses:
+        "200":
+          description: Active trips and available drivers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchBoard"
+
 components:
   schemas:
     HealthStatus:
@@ -480,17 +1050,74 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
     ErrorResponse:
       type: object
       properties:
         error:
           type: string
-      required:
-        - error
+      required: [error]
 
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+
+    # ── AUTH SCHEMAS ──────────────────────────────────────────────────────────
+    RegisterBody:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        phone:
+          type: ["string", "null"]
+        role:
+          type: string
+          enum: [passenger, driver]
+      required: [name, email, password, role]
+
+    LoginBody:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+      required: [email, password]
+
+    SendOtpBody:
+      type: object
+      properties:
+        phone:
+          type: string
+      required: [phone]
+
+    VerifyOtpBody:
+      type: object
+      properties:
+        phone:
+          type: string
+        otp:
+          type: string
+      required: [phone, otp]
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+      required: [token, user]
+
+    # ── USER SCHEMAS ──────────────────────────────────────────────────────────
     User:
       type: object
       properties:
@@ -508,12 +1135,7 @@ components:
         createdAt:
           type: string
           format: date-time
-      required:
-        - id
-        - name
-        - email
-        - role
-        - createdAt
+      required: [id, name, email, role, createdAt]
 
     CreateUserBody:
       type: object
@@ -527,10 +1149,7 @@ components:
         role:
           type: string
           enum: [passenger, driver, admin]
-      required:
-        - name
-        - email
-        - role
+      required: [name, email, role]
 
     UpdateUserBody:
       type: object
@@ -540,6 +1159,7 @@ components:
         phone:
           type: ["string", "null"]
 
+    # ── VEHICLE SCHEMAS ───────────────────────────────────────────────────────
     Vehicle:
       type: object
       properties:
@@ -569,17 +1189,7 @@ components:
         createdAt:
           type: string
           format: date-time
-      required:
-        - id
-        - make
-        - model
-        - year
-        - color
-        - plate
-        - vehicleClass
-        - capacity
-        - isAvailable
-        - createdAt
+      required: [id, make, model, year, color, plate, vehicleClass, capacity, isAvailable, createdAt]
 
     CreateVehicleBody:
       type: object
@@ -603,14 +1213,7 @@ components:
           type: integer
         imageUrl:
           type: ["string", "null"]
-      required:
-        - make
-        - model
-        - year
-        - color
-        - plate
-        - vehicleClass
-        - capacity
+      required: [make, model, year, color, plate, vehicleClass, capacity]
 
     UpdateVehicleBody:
       type: object
@@ -621,7 +1224,10 @@ components:
           type: ["string", "null"]
         imageUrl:
           type: ["string", "null"]
+        driverId:
+          type: ["integer", "null"]
 
+    # ── DRIVER SCHEMAS ────────────────────────────────────────────────────────
     Driver:
       type: object
       properties:
@@ -640,6 +1246,8 @@ components:
         status:
           type: string
           enum: [pending, active, inactive, suspended]
+        isOnline:
+          type: boolean
         rating:
           type: ["number", "null"]
         totalRides:
@@ -647,15 +1255,7 @@ components:
         createdAt:
           type: string
           format: date-time
-      required:
-        - id
-        - name
-        - email
-        - phone
-        - licenseNumber
-        - status
-        - totalRides
-        - createdAt
+      required: [id, name, email, phone, licenseNumber, status, isOnline, totalRides, createdAt]
 
     CreateDriverBody:
       type: object
@@ -670,11 +1270,7 @@ components:
           type: string
         licenseNumber:
           type: string
-      required:
-        - name
-        - email
-        - phone
-        - licenseNumber
+      required: [name, email, phone, licenseNumber]
 
     UpdateDriverBody:
       type: object
@@ -685,6 +1281,46 @@ components:
         rating:
           type: ["number", "null"]
 
+    ToggleAvailabilityBody:
+      type: object
+      properties:
+        isOnline:
+          type: boolean
+      required: [isOnline]
+
+    DriverEarnings:
+      type: object
+      properties:
+        totalEarnings:
+          type: number
+        thisMonth:
+          type: number
+        thisWeek:
+          type: number
+        today:
+          type: number
+        totalRides:
+          type: integer
+        avgPerRide:
+          type: number
+        recentPayouts:
+          type: array
+          items:
+            $ref: "#/components/schemas/EarningsPeriod"
+      required: [totalEarnings, thisMonth, thisWeek, today, totalRides, avgPerRide, recentPayouts]
+
+    EarningsPeriod:
+      type: object
+      properties:
+        date:
+          type: string
+        amount:
+          type: number
+        rides:
+          type: integer
+      required: [date, amount, rides]
+
+    # ── BOOKING SCHEMAS ───────────────────────────────────────────────────────
     Booking:
       type: object
       properties:
@@ -717,9 +1353,15 @@ components:
           enum: [pending, confirmed, in_progress, completed, cancelled]
         priceQuoted:
           type: number
+        promoCode:
+          type: ["string", "null"]
+        discountAmount:
+          type: ["number", "null"]
         driverId:
           type: ["integer", "null"]
         vehicleId:
+          type: ["integer", "null"]
+        userId:
           type: ["integer", "null"]
         createdAt:
           type: string
@@ -727,20 +1369,7 @@ components:
         updatedAt:
           type: string
           format: date-time
-      required:
-        - id
-        - passengerName
-        - passengerEmail
-        - passengerPhone
-        - pickupAddress
-        - dropoffAddress
-        - pickupAt
-        - vehicleClass
-        - passengers
-        - status
-        - priceQuoted
-        - createdAt
-        - updatedAt
+      required: [id, passengerName, passengerEmail, passengerPhone, pickupAddress, dropoffAddress, pickupAt, vehicleClass, passengers, status, priceQuoted, createdAt, updatedAt]
 
     CreateBookingBody:
       type: object
@@ -768,16 +1397,13 @@ components:
           type: ["string", "null"]
         priceQuoted:
           type: number
-      required:
-        - passengerName
-        - passengerEmail
-        - passengerPhone
-        - pickupAddress
-        - dropoffAddress
-        - pickupAt
-        - vehicleClass
-        - passengers
-        - priceQuoted
+        promoCode:
+          type: ["string", "null"]
+        discountAmount:
+          type: ["number", "null"]
+        userId:
+          type: ["integer", "null"]
+      required: [passengerName, passengerEmail, passengerPhone, pickupAddress, dropoffAddress, pickupAt, vehicleClass, passengers, priceQuoted]
 
     UpdateBookingBody:
       type: object
@@ -792,6 +1418,7 @@ components:
         specialRequests:
           type: ["string", "null"]
 
+    # ── QUOTE SCHEMAS ─────────────────────────────────────────────────────────
     QuoteRequest:
       type: object
       properties:
@@ -806,12 +1433,9 @@ components:
           type: integer
         pickupAt:
           type: string
-      required:
-        - pickupAddress
-        - dropoffAddress
-        - vehicleClass
-        - passengers
-        - pickupAt
+        promoCode:
+          type: ["string", "null"]
+      required: [pickupAddress, dropoffAddress, vehicleClass, passengers, pickupAt]
 
     QuoteResponse:
       type: object
@@ -830,15 +1454,294 @@ components:
           type: number
         currency:
           type: string
-      required:
-        - vehicleClass
-        - estimatedPrice
-        - baseFare
-        - distanceCharge
-        - estimatedDuration
-        - estimatedDistance
-        - currency
+        promoDiscount:
+          type: ["number", "null"]
+        finalPrice:
+          type: ["number", "null"]
+      required: [vehicleClass, estimatedPrice, baseFare, distanceCharge, estimatedDuration, estimatedDistance, currency]
 
+    # ── ADDRESS SCHEMAS ───────────────────────────────────────────────────────
+    SavedAddress:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        label:
+          type: string
+        address:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, userId, label, address, createdAt]
+
+    CreateAddressBody:
+      type: object
+      properties:
+        userId:
+          type: integer
+        label:
+          type: string
+        address:
+          type: string
+      required: [userId, label, address]
+
+    # ── REVIEW SCHEMAS ────────────────────────────────────────────────────────
+    Review:
+      type: object
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+        driverId:
+          type: integer
+        userId:
+          type: ["integer", "null"]
+        rating:
+          type: integer
+        comment:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, bookingId, driverId, rating, createdAt]
+
+    CreateReviewBody:
+      type: object
+      properties:
+        bookingId:
+          type: integer
+        driverId:
+          type: integer
+        userId:
+          type: ["integer", "null"]
+        rating:
+          type: integer
+        comment:
+          type: ["string", "null"]
+      required: [bookingId, driverId, rating]
+
+    # ── SUPPORT SCHEMAS ───────────────────────────────────────────────────────
+    SupportTicket:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: ["integer", "null"]
+        name:
+          type: string
+        email:
+          type: string
+        subject:
+          type: string
+        message:
+          type: string
+        status:
+          type: string
+          enum: [open, in_progress, resolved, closed]
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        bookingId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, email, subject, message, status, priority, createdAt, updatedAt]
+
+    CreateTicketBody:
+      type: object
+      properties:
+        userId:
+          type: ["integer", "null"]
+        name:
+          type: string
+        email:
+          type: string
+        subject:
+          type: string
+        message:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        bookingId:
+          type: ["integer", "null"]
+      required: [name, email, subject, message, priority]
+
+    UpdateTicketBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [open, in_progress, resolved, closed]
+        priority:
+          type: ["string", "null"]
+          enum: [low, medium, high, urgent, null]
+
+    # ── NOTIFICATION SCHEMAS ──────────────────────────────────────────────────
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        title:
+          type: string
+        message:
+          type: string
+        type:
+          type: string
+          enum: [booking, driver, payment, system, promo]
+        isRead:
+          type: boolean
+        bookingId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, userId, title, message, type, isRead, createdAt]
+
+    # ── PROMO SCHEMAS ─────────────────────────────────────────────────────────
+    PromoCode:
+      type: object
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        description:
+          type: string
+        discountType:
+          type: string
+          enum: [percentage, fixed]
+        discountValue:
+          type: number
+        minBookingAmount:
+          type: ["number", "null"]
+        maxUses:
+          type: ["integer", "null"]
+        usedCount:
+          type: integer
+        isActive:
+          type: boolean
+        expiresAt:
+          type: ["string", "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, code, description, discountType, discountValue, usedCount, isActive, createdAt]
+
+    CreatePromoBody:
+      type: object
+      properties:
+        code:
+          type: string
+        description:
+          type: string
+        discountType:
+          type: string
+          enum: [percentage, fixed]
+        discountValue:
+          type: number
+        minBookingAmount:
+          type: ["number", "null"]
+        maxUses:
+          type: ["integer", "null"]
+        expiresAt:
+          type: ["string", "null"]
+      required: [code, description, discountType, discountValue]
+
+    UpdatePromoBody:
+      type: object
+      properties:
+        isActive:
+          type: ["boolean", "null"]
+        expiresAt:
+          type: ["string", "null"]
+
+    ValidatePromoBody:
+      type: object
+      properties:
+        code:
+          type: string
+        bookingAmount:
+          type: number
+      required: [code, bookingAmount]
+
+    PromoValidationResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        discountAmount:
+          type: ["number", "null"]
+        finalAmount:
+          type: ["number", "null"]
+        message:
+          type: string
+      required: [valid, message]
+
+    # ── PRICING RULE SCHEMAS ──────────────────────────────────────────────────
+    PricingRule:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        vehicleClass:
+          type: ["string", "null"]
+        baseFare:
+          type: number
+        ratePerMile:
+          type: number
+        airportSurcharge:
+          type: number
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, name, baseFare, ratePerMile, airportSurcharge, isActive, createdAt]
+
+    CreatePricingRuleBody:
+      type: object
+      properties:
+        name:
+          type: string
+        vehicleClass:
+          type: ["string", "null"]
+        baseFare:
+          type: number
+        ratePerMile:
+          type: number
+        airportSurcharge:
+          type: number
+      required: [name, baseFare, ratePerMile, airportSurcharge]
+
+    UpdatePricingRuleBody:
+      type: object
+      properties:
+        baseFare:
+          type: ["number", "null"]
+        ratePerMile:
+          type: ["number", "null"]
+        airportSurcharge:
+          type: ["number", "null"]
+        isActive:
+          type: ["boolean", "null"]
+
+    # ── ADMIN SCHEMAS ─────────────────────────────────────────────────────────
     AdminStats:
       type: object
       properties:
@@ -862,17 +1765,11 @@ components:
           type: integer
         avgRating:
           type: number
-      required:
-        - totalBookings
-        - activeBookings
-        - completedToday
-        - totalRevenue
-        - revenueThisMonth
-        - activeDrivers
-        - totalDrivers
-        - fleetSize
-        - availableVehicles
-        - avgRating
+        totalPassengers:
+          type: integer
+        openTickets:
+          type: integer
+      required: [totalBookings, activeBookings, completedToday, totalRevenue, revenueThisMonth, activeDrivers, totalDrivers, fleetSize, availableVehicles, avgRating, totalPassengers, openTickets]
 
     RevenueStats:
       type: object
@@ -885,9 +1782,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RevenueByClass"
-      required:
-        - daily
-        - byVehicleClass
+      required: [daily, byVehicleClass]
 
     RevenuePeriod:
       type: object
@@ -898,10 +1793,7 @@ components:
           type: number
         bookings:
           type: integer
-      required:
-        - date
-        - revenue
-        - bookings
+      required: [date, revenue, bookings]
 
     RevenueByClass:
       type: object
@@ -912,7 +1804,21 @@ components:
           type: number
         bookings:
           type: integer
-      required:
-        - vehicleClass
-        - revenue
-        - bookings
+      required: [vehicleClass, revenue, bookings]
+
+    DispatchBoard:
+      type: object
+      properties:
+        activeTrips:
+          type: array
+          items:
+            $ref: "#/components/schemas/Booking"
+        availableDrivers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Driver"
+        pendingBookings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Booking"
+      required: [activeTrips, availableDrivers, pendingBookings]

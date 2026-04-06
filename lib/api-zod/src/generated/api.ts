@@ -3,12 +3,11 @@
  * Do not edit manually.
  * Api
  * Royal Midnight luxury black car service API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import * as zod from "zod";
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -16,10 +15,72 @@ export const HealthCheckResponse = zod.object({
 });
 
 /**
+ * @summary Register a new user
+ */
+export const RegisterBody = zod.object({
+  name: zod.string(),
+  email: zod.string(),
+  password: zod.string(),
+  phone: zod.string().nullish(),
+  role: zod.enum(["passenger", "driver"]),
+});
+
+/**
+ * @summary Login with email and password
+ */
+export const LoginBody = zod.object({
+  email: zod.string(),
+  password: zod.string(),
+});
+
+export const LoginResponse = zod.object({
+  token: zod.string(),
+  user: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    email: zod.string(),
+    phone: zod.string().nullish(),
+    role: zod.enum(["passenger", "driver", "admin"]),
+    createdAt: zod.coerce.date(),
+  }),
+});
+
+/**
+ * @summary Send OTP to phone number
+ */
+export const SendOtpBody = zod.object({
+  phone: zod.string(),
+});
+
+export const SendOtpResponse = zod.object({
+  message: zod.string(),
+});
+
+/**
+ * @summary Verify OTP and get auth token
+ */
+export const VerifyOtpBody = zod.object({
+  phone: zod.string(),
+  otp: zod.string(),
+});
+
+export const VerifyOtpResponse = zod.object({
+  token: zod.string(),
+  user: zod.object({
+    id: zod.number(),
+    name: zod.string(),
+    email: zod.string(),
+    phone: zod.string().nullish(),
+    role: zod.enum(["passenger", "driver", "admin"]),
+    createdAt: zod.coerce.date(),
+  }),
+});
+
+/**
  * @summary List bookings
  */
 export const ListBookingsQueryParams = zod.object({
-  status: zod.coerce.string().optional(),
+  status: zod.coerce.string().nullish(),
   userId: zod.coerce.number().nullish(),
   driverId: zod.coerce.number().nullish(),
 });
@@ -44,8 +105,11 @@ export const ListBookingsResponseItem = zod.object({
     "cancelled",
   ]),
   priceQuoted: zod.number(),
+  promoCode: zod.string().nullish(),
+  discountAmount: zod.number().nullish(),
   driverId: zod.number().nullish(),
   vehicleId: zod.number().nullish(),
+  userId: zod.number().nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -66,6 +130,9 @@ export const CreateBookingBody = zod.object({
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
   priceQuoted: zod.number(),
+  promoCode: zod.string().nullish(),
+  discountAmount: zod.number().nullish(),
+  userId: zod.number().nullish(),
 });
 
 /**
@@ -95,14 +162,17 @@ export const GetBookingResponse = zod.object({
     "cancelled",
   ]),
   priceQuoted: zod.number(),
+  promoCode: zod.string().nullish(),
+  discountAmount: zod.number().nullish(),
   driverId: zod.number().nullish(),
   vehicleId: zod.number().nullish(),
+  userId: zod.number().nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
 
 /**
- * @summary Update booking status or details
+ * @summary Update booking
  */
 export const UpdateBookingParams = zod.object({
   id: zod.coerce.number(),
@@ -144,8 +214,11 @@ export const UpdateBookingResponse = zod.object({
     "cancelled",
   ]),
   priceQuoted: zod.number(),
+  promoCode: zod.string().nullish(),
+  discountAmount: zod.number().nullish(),
   driverId: zod.number().nullish(),
   vehicleId: zod.number().nullish(),
+  userId: zod.number().nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -158,7 +231,7 @@ export const CancelBookingParams = zod.object({
 });
 
 /**
- * @summary Get upfront price quote for a trip
+ * @summary Get upfront price quote
  */
 export const GetQuoteBody = zod.object({
   pickupAddress: zod.string(),
@@ -166,6 +239,7 @@ export const GetQuoteBody = zod.object({
   vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
   passengers: zod.number(),
   pickupAt: zod.string(),
+  promoCode: zod.string().nullish(),
 });
 
 export const GetQuoteResponse = zod.object({
@@ -176,6 +250,8 @@ export const GetQuoteResponse = zod.object({
   estimatedDuration: zod.number(),
   estimatedDistance: zod.number(),
   currency: zod.string(),
+  promoDiscount: zod.number().nullish(),
+  finalPrice: zod.number().nullish(),
 });
 
 /**
@@ -250,6 +326,7 @@ export const UpdateVehicleBody = zod.object({
   isAvailable: zod.boolean().nullish(),
   color: zod.string().nullish(),
   imageUrl: zod.string().nullish(),
+  driverId: zod.number().nullish(),
 });
 
 export const UpdateVehicleResponse = zod.object({
@@ -268,6 +345,13 @@ export const UpdateVehicleResponse = zod.object({
 });
 
 /**
+ * @summary Delete vehicle
+ */
+export const DeleteVehicleParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
  * @summary List all drivers
  */
 export const ListDriversQueryParams = zod.object({
@@ -282,6 +366,7 @@ export const ListDriversResponseItem = zod.object({
   phone: zod.string(),
   licenseNumber: zod.string(),
   status: zod.enum(["pending", "active", "inactive", "suspended"]),
+  isOnline: zod.boolean(),
   rating: zod.number().nullish(),
   totalRides: zod.number(),
   createdAt: zod.coerce.date(),
@@ -314,6 +399,7 @@ export const GetDriverResponse = zod.object({
   phone: zod.string(),
   licenseNumber: zod.string(),
   status: zod.enum(["pending", "active", "inactive", "suspended"]),
+  isOnline: zod.boolean(),
   rating: zod.number().nullish(),
   totalRides: zod.number(),
   createdAt: zod.coerce.date(),
@@ -347,13 +433,79 @@ export const UpdateDriverResponse = zod.object({
   phone: zod.string(),
   licenseNumber: zod.string(),
   status: zod.enum(["pending", "active", "inactive", "suspended"]),
+  isOnline: zod.boolean(),
   rating: zod.number().nullish(),
   totalRides: zod.number(),
   createdAt: zod.coerce.date(),
 });
 
 /**
- * @summary Create or register a user (passenger)
+ * @summary Toggle driver online/offline status
+ */
+export const ToggleDriverAvailabilityParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ToggleDriverAvailabilityBody = zod.object({
+  isOnline: zod.boolean(),
+});
+
+export const ToggleDriverAvailabilityResponse = zod.object({
+  id: zod.number(),
+  userId: zod.number().nullish(),
+  name: zod.string(),
+  email: zod.string(),
+  phone: zod.string(),
+  licenseNumber: zod.string(),
+  status: zod.enum(["pending", "active", "inactive", "suspended"]),
+  isOnline: zod.boolean(),
+  rating: zod.number().nullish(),
+  totalRides: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Get driver earnings summary
+ */
+export const GetDriverEarningsParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetDriverEarningsResponse = zod.object({
+  totalEarnings: zod.number(),
+  thisMonth: zod.number(),
+  thisWeek: zod.number(),
+  today: zod.number(),
+  totalRides: zod.number(),
+  avgPerRide: zod.number(),
+  recentPayouts: zod.array(
+    zod.object({
+      date: zod.string(),
+      amount: zod.number(),
+      rides: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary List users (admin)
+ */
+export const ListUsersQueryParams = zod.object({
+  role: zod.coerce.string().nullish(),
+});
+
+export const ListUsersResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  email: zod.string(),
+  phone: zod.string().nullish(),
+  role: zod.enum(["passenger", "driver", "admin"]),
+  createdAt: zod.coerce.date(),
+});
+export const ListUsersResponse = zod.array(ListUsersResponseItem);
+
+/**
+ * @summary Create a user
  */
 export const CreateUserBody = zod.object({
   name: zod.string(),
@@ -400,6 +552,351 @@ export const UpdateUserResponse = zod.object({
 });
 
 /**
+ * @summary Get a user's booking history
+ */
+export const GetUserBookingsParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetUserBookingsResponseItem = zod.object({
+  id: zod.number(),
+  passengerName: zod.string(),
+  passengerEmail: zod.string(),
+  passengerPhone: zod.string(),
+  pickupAddress: zod.string(),
+  dropoffAddress: zod.string(),
+  pickupAt: zod.coerce.date(),
+  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  passengers: zod.number(),
+  flightNumber: zod.string().nullish(),
+  specialRequests: zod.string().nullish(),
+  status: zod.enum([
+    "pending",
+    "confirmed",
+    "in_progress",
+    "completed",
+    "cancelled",
+  ]),
+  priceQuoted: zod.number(),
+  promoCode: zod.string().nullish(),
+  discountAmount: zod.number().nullish(),
+  driverId: zod.number().nullish(),
+  vehicleId: zod.number().nullish(),
+  userId: zod.number().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const GetUserBookingsResponse = zod.array(GetUserBookingsResponseItem);
+
+/**
+ * @summary List saved addresses for a user
+ */
+export const ListAddressesQueryParams = zod.object({
+  userId: zod.coerce.number(),
+});
+
+export const ListAddressesResponseItem = zod.object({
+  id: zod.number(),
+  userId: zod.number(),
+  label: zod.string(),
+  address: zod.string(),
+  createdAt: zod.coerce.date(),
+});
+export const ListAddressesResponse = zod.array(ListAddressesResponseItem);
+
+/**
+ * @summary Save a new address
+ */
+export const CreateAddressBody = zod.object({
+  userId: zod.number(),
+  label: zod.string(),
+  address: zod.string(),
+});
+
+/**
+ * @summary Delete a saved address
+ */
+export const DeleteAddressParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary List reviews
+ */
+export const ListReviewsQueryParams = zod.object({
+  driverId: zod.coerce.number().nullish(),
+  bookingId: zod.coerce.number().nullish(),
+});
+
+export const ListReviewsResponseItem = zod.object({
+  id: zod.number(),
+  bookingId: zod.number(),
+  driverId: zod.number(),
+  userId: zod.number().nullish(),
+  rating: zod.number(),
+  comment: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const ListReviewsResponse = zod.array(ListReviewsResponseItem);
+
+/**
+ * @summary Submit a review
+ */
+export const CreateReviewBody = zod.object({
+  bookingId: zod.number(),
+  driverId: zod.number(),
+  userId: zod.number().nullish(),
+  rating: zod.number(),
+  comment: zod.string().nullish(),
+});
+
+/**
+ * @summary List support tickets
+ */
+export const ListTicketsQueryParams = zod.object({
+  status: zod.coerce.string().nullish(),
+  userId: zod.coerce.number().nullish(),
+});
+
+export const ListTicketsResponseItem = zod.object({
+  id: zod.number(),
+  userId: zod.number().nullish(),
+  name: zod.string(),
+  email: zod.string(),
+  subject: zod.string(),
+  message: zod.string(),
+  status: zod.enum(["open", "in_progress", "resolved", "closed"]),
+  priority: zod.enum(["low", "medium", "high", "urgent"]),
+  bookingId: zod.number().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const ListTicketsResponse = zod.array(ListTicketsResponseItem);
+
+/**
+ * @summary Submit a support ticket
+ */
+export const CreateTicketBody = zod.object({
+  userId: zod.number().nullish(),
+  name: zod.string(),
+  email: zod.string(),
+  subject: zod.string(),
+  message: zod.string(),
+  priority: zod.enum(["low", "medium", "high", "urgent"]),
+  bookingId: zod.number().nullish(),
+});
+
+/**
+ * @summary Update ticket status (admin)
+ */
+export const UpdateTicketParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateTicketBody = zod.object({
+  status: zod.enum(["open", "in_progress", "resolved", "closed"]).optional(),
+  priority: zod
+    .union([
+      zod.literal("low"),
+      zod.literal("medium"),
+      zod.literal("high"),
+      zod.literal("urgent"),
+      zod.literal(null),
+    ])
+    .nullish(),
+});
+
+export const UpdateTicketResponse = zod.object({
+  id: zod.number(),
+  userId: zod.number().nullish(),
+  name: zod.string(),
+  email: zod.string(),
+  subject: zod.string(),
+  message: zod.string(),
+  status: zod.enum(["open", "in_progress", "resolved", "closed"]),
+  priority: zod.enum(["low", "medium", "high", "urgent"]),
+  bookingId: zod.number().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary List notifications for a user
+ */
+export const ListNotificationsQueryParams = zod.object({
+  userId: zod.coerce.number(),
+});
+
+export const ListNotificationsResponseItem = zod.object({
+  id: zod.number(),
+  userId: zod.number(),
+  title: zod.string(),
+  message: zod.string(),
+  type: zod.enum(["booking", "driver", "payment", "system", "promo"]),
+  isRead: zod.boolean(),
+  bookingId: zod.number().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const ListNotificationsResponse = zod.array(
+  ListNotificationsResponseItem,
+);
+
+/**
+ * @summary Mark notification as read
+ */
+export const MarkNotificationReadParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const MarkNotificationReadResponse = zod.object({
+  id: zod.number(),
+  userId: zod.number(),
+  title: zod.string(),
+  message: zod.string(),
+  type: zod.enum(["booking", "driver", "payment", "system", "promo"]),
+  isRead: zod.boolean(),
+  bookingId: zod.number().nullish(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary List promo codes
+ */
+export const ListPromosResponseItem = zod.object({
+  id: zod.number(),
+  code: zod.string(),
+  description: zod.string(),
+  discountType: zod.enum(["percentage", "fixed"]),
+  discountValue: zod.number(),
+  minBookingAmount: zod.number().nullish(),
+  maxUses: zod.number().nullish(),
+  usedCount: zod.number(),
+  isActive: zod.boolean(),
+  expiresAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const ListPromosResponse = zod.array(ListPromosResponseItem);
+
+/**
+ * @summary Create a promo code
+ */
+export const CreatePromoBody = zod.object({
+  code: zod.string(),
+  description: zod.string(),
+  discountType: zod.enum(["percentage", "fixed"]),
+  discountValue: zod.number(),
+  minBookingAmount: zod.number().nullish(),
+  maxUses: zod.number().nullish(),
+  expiresAt: zod.string().nullish(),
+});
+
+/**
+ * @summary Update promo code
+ */
+export const UpdatePromoParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdatePromoBody = zod.object({
+  isActive: zod.boolean().nullish(),
+  expiresAt: zod.string().nullish(),
+});
+
+export const UpdatePromoResponse = zod.object({
+  id: zod.number(),
+  code: zod.string(),
+  description: zod.string(),
+  discountType: zod.enum(["percentage", "fixed"]),
+  discountValue: zod.number(),
+  minBookingAmount: zod.number().nullish(),
+  maxUses: zod.number().nullish(),
+  usedCount: zod.number(),
+  isActive: zod.boolean(),
+  expiresAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete promo code
+ */
+export const DeletePromoParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
+ * @summary Validate and apply a promo code
+ */
+export const ValidatePromoBody = zod.object({
+  code: zod.string(),
+  bookingAmount: zod.number(),
+});
+
+export const ValidatePromoResponse = zod.object({
+  valid: zod.boolean(),
+  discountAmount: zod.number().nullish(),
+  finalAmount: zod.number().nullish(),
+  message: zod.string(),
+});
+
+/**
+ * @summary List pricing rules
+ */
+export const ListPricingRulesResponseItem = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  vehicleClass: zod.string().nullish(),
+  baseFare: zod.number(),
+  ratePerMile: zod.number(),
+  airportSurcharge: zod.number(),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+});
+export const ListPricingRulesResponse = zod.array(ListPricingRulesResponseItem);
+
+/**
+ * @summary Create a pricing rule
+ */
+export const CreatePricingRuleBody = zod.object({
+  name: zod.string(),
+  vehicleClass: zod.string().nullish(),
+  baseFare: zod.number(),
+  ratePerMile: zod.number(),
+  airportSurcharge: zod.number(),
+});
+
+/**
+ * @summary Update pricing rule
+ */
+export const UpdatePricingRuleParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdatePricingRuleBody = zod.object({
+  baseFare: zod.number().nullish(),
+  ratePerMile: zod.number().nullish(),
+  airportSurcharge: zod.number().nullish(),
+  isActive: zod.boolean().nullish(),
+});
+
+export const UpdatePricingRuleResponse = zod.object({
+  id: zod.number(),
+  name: zod.string(),
+  vehicleClass: zod.string().nullish(),
+  baseFare: zod.number(),
+  ratePerMile: zod.number(),
+  airportSurcharge: zod.number(),
+  isActive: zod.boolean(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete pricing rule
+ */
+export const DeletePricingRuleParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+/**
  * @summary Get dashboard statistics
  */
 export const GetAdminStatsResponse = zod.object({
@@ -413,10 +910,12 @@ export const GetAdminStatsResponse = zod.object({
   fleetSize: zod.number(),
   availableVehicles: zod.number(),
   avgRating: zod.number(),
+  totalPassengers: zod.number(),
+  openTickets: zod.number(),
 });
 
 /**
- * @summary Get recent bookings for admin dashboard
+ * @summary Get recent bookings
  */
 export const GetRecentBookingsQueryParams = zod.object({
   limit: zod.coerce.number().nullish(),
@@ -442,8 +941,11 @@ export const GetRecentBookingsResponseItem = zod.object({
     "cancelled",
   ]),
   priceQuoted: zod.number(),
+  promoCode: zod.string().nullish(),
+  discountAmount: zod.number().nullish(),
   driverId: zod.number().nullish(),
   vehicleId: zod.number().nullish(),
+  userId: zod.number().nullish(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -452,7 +954,7 @@ export const GetRecentBookingsResponse = zod.array(
 );
 
 /**
- * @summary Revenue breakdown by period
+ * @summary Revenue breakdown
  */
 export const GetRevenueStatsResponse = zod.object({
   daily: zod.array(
@@ -467,6 +969,99 @@ export const GetRevenueStatsResponse = zod.object({
       vehicleClass: zod.string(),
       revenue: zod.number(),
       bookings: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary Get live dispatch board
+ */
+export const GetDispatchBoardResponse = zod.object({
+  activeTrips: zod.array(
+    zod.object({
+      id: zod.number(),
+      passengerName: zod.string(),
+      passengerEmail: zod.string(),
+      passengerPhone: zod.string(),
+      pickupAddress: zod.string(),
+      dropoffAddress: zod.string(),
+      pickupAt: zod.coerce.date(),
+      vehicleClass: zod.enum([
+        "standard",
+        "business",
+        "first_class",
+        "suv",
+        "van",
+      ]),
+      passengers: zod.number(),
+      flightNumber: zod.string().nullish(),
+      specialRequests: zod.string().nullish(),
+      status: zod.enum([
+        "pending",
+        "confirmed",
+        "in_progress",
+        "completed",
+        "cancelled",
+      ]),
+      priceQuoted: zod.number(),
+      promoCode: zod.string().nullish(),
+      discountAmount: zod.number().nullish(),
+      driverId: zod.number().nullish(),
+      vehicleId: zod.number().nullish(),
+      userId: zod.number().nullish(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
+    }),
+  ),
+  availableDrivers: zod.array(
+    zod.object({
+      id: zod.number(),
+      userId: zod.number().nullish(),
+      name: zod.string(),
+      email: zod.string(),
+      phone: zod.string(),
+      licenseNumber: zod.string(),
+      status: zod.enum(["pending", "active", "inactive", "suspended"]),
+      isOnline: zod.boolean(),
+      rating: zod.number().nullish(),
+      totalRides: zod.number(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  pendingBookings: zod.array(
+    zod.object({
+      id: zod.number(),
+      passengerName: zod.string(),
+      passengerEmail: zod.string(),
+      passengerPhone: zod.string(),
+      pickupAddress: zod.string(),
+      dropoffAddress: zod.string(),
+      pickupAt: zod.coerce.date(),
+      vehicleClass: zod.enum([
+        "standard",
+        "business",
+        "first_class",
+        "suv",
+        "van",
+      ]),
+      passengers: zod.number(),
+      flightNumber: zod.string().nullish(),
+      specialRequests: zod.string().nullish(),
+      status: zod.enum([
+        "pending",
+        "confirmed",
+        "in_progress",
+        "completed",
+        "cancelled",
+      ]),
+      priceQuoted: zod.number(),
+      promoCode: zod.string().nullish(),
+      discountAmount: zod.number().nullish(),
+      driverId: zod.number().nullish(),
+      vehicleId: zod.number().nullish(),
+      userId: zod.number().nullish(),
+      createdAt: zod.coerce.date(),
+      updatedAt: zod.coerce.date(),
     }),
   ),
 });

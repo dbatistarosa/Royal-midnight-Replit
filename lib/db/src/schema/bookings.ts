@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 export const bookingsTable = pgTable("bookings", {
   id: serial("id").primaryKey(),
+  userId: integer("user_id"),
   passengerName: text("passenger_name").notNull(),
   passengerEmail: text("passenger_email").notNull(),
   passengerPhone: text("passenger_phone").notNull(),
@@ -16,6 +17,8 @@ export const bookingsTable = pgTable("bookings", {
   specialRequests: text("special_requests"),
   status: text("status").notNull().default("pending"),
   priceQuoted: numeric("price_quoted", { precision: 10, scale: 2 }).notNull(),
+  promoCode: text("promo_code"),
+  discountAmount: numeric("discount_amount", { precision: 10, scale: 2 }),
   driverId: integer("driver_id"),
   vehicleId: integer("vehicle_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

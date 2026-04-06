@@ -3,11 +3,14 @@
  * Do not edit manually.
  * Api
  * Royal Midnight luxury black car service API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 
 export type ListBookingsParams = {
-  status?: string;
+  /**
+   * @nullable
+   */
+  status?: string | null;
   /**
    * @nullable
    */

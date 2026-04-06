@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Royal Midnight luxury black car service API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 export interface HealthStatus {
   status: string;
@@ -11,6 +11,41 @@ export interface HealthStatus {
 
 export interface ErrorResponse {
   error: string;
+}
+
+export interface MessageResponse {
+  message: string;
+}
+
+export type RegisterBodyRole =
+  (typeof RegisterBodyRole)[keyof typeof RegisterBodyRole];
+
+export const RegisterBodyRole = {
+  passenger: "passenger",
+  driver: "driver",
+} as const;
+
+export interface RegisterBody {
+  name: string;
+  email: string;
+  password: string;
+  /** @nullable */
+  phone?: string | null;
+  role: RegisterBodyRole;
+}
+
+export interface LoginBody {
+  email: string;
+  password: string;
+}
+
+export interface SendOtpBody {
+  phone: string;
+}
+
+export interface VerifyOtpBody {
+  phone: string;
+  otp: string;
 }
 
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
@@ -29,6 +64,11 @@ export interface User {
   phone?: string | null;
   role: UserRole;
   createdAt: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: User;
 }
 
 export type CreateUserBodyRole =
@@ -115,6 +155,8 @@ export interface UpdateVehicleBody {
   color?: string | null;
   /** @nullable */
   imageUrl?: string | null;
+  /** @nullable */
+  driverId?: number | null;
 }
 
 export type DriverStatus = (typeof DriverStatus)[keyof typeof DriverStatus];
@@ -135,6 +177,7 @@ export interface Driver {
   phone: string;
   licenseNumber: string;
   status: DriverStatus;
+  isOnline: boolean;
   /** @nullable */
   rating?: number | null;
   totalRides: number;
@@ -169,6 +212,26 @@ export interface UpdateDriverBody {
   status?: UpdateDriverBodyStatus;
   /** @nullable */
   rating?: number | null;
+}
+
+export interface ToggleAvailabilityBody {
+  isOnline: boolean;
+}
+
+export interface EarningsPeriod {
+  date: string;
+  amount: number;
+  rides: number;
+}
+
+export interface DriverEarnings {
+  totalEarnings: number;
+  thisMonth: number;
+  thisWeek: number;
+  today: number;
+  totalRides: number;
+  avgPerRide: number;
+  recentPayouts: EarningsPeriod[];
 }
 
 export type BookingVehicleClass =
@@ -209,9 +272,15 @@ export interface Booking {
   status: BookingStatus;
   priceQuoted: number;
   /** @nullable */
+  promoCode?: string | null;
+  /** @nullable */
+  discountAmount?: number | null;
+  /** @nullable */
   driverId?: number | null;
   /** @nullable */
   vehicleId?: number | null;
+  /** @nullable */
+  userId?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -241,6 +310,12 @@ export interface CreateBookingBody {
   /** @nullable */
   specialRequests?: string | null;
   priceQuoted: number;
+  /** @nullable */
+  promoCode?: string | null;
+  /** @nullable */
+  discountAmount?: number | null;
+  /** @nullable */
+  userId?: number | null;
 }
 
 /**
@@ -286,6 +361,8 @@ export interface QuoteRequest {
   vehicleClass: QuoteRequestVehicleClass;
   passengers: number;
   pickupAt: string;
+  /** @nullable */
+  promoCode?: string | null;
 }
 
 export interface QuoteResponse {
@@ -296,6 +373,256 @@ export interface QuoteResponse {
   estimatedDuration: number;
   estimatedDistance: number;
   currency: string;
+  /** @nullable */
+  promoDiscount?: number | null;
+  /** @nullable */
+  finalPrice?: number | null;
+}
+
+export interface SavedAddress {
+  id: number;
+  userId: number;
+  label: string;
+  address: string;
+  createdAt: string;
+}
+
+export interface CreateAddressBody {
+  userId: number;
+  label: string;
+  address: string;
+}
+
+export interface Review {
+  id: number;
+  bookingId: number;
+  driverId: number;
+  /** @nullable */
+  userId?: number | null;
+  rating: number;
+  /** @nullable */
+  comment?: string | null;
+  createdAt: string;
+}
+
+export interface CreateReviewBody {
+  bookingId: number;
+  driverId: number;
+  /** @nullable */
+  userId?: number | null;
+  rating: number;
+  /** @nullable */
+  comment?: string | null;
+}
+
+export type SupportTicketStatus =
+  (typeof SupportTicketStatus)[keyof typeof SupportTicketStatus];
+
+export const SupportTicketStatus = {
+  open: "open",
+  in_progress: "in_progress",
+  resolved: "resolved",
+  closed: "closed",
+} as const;
+
+export type SupportTicketPriority =
+  (typeof SupportTicketPriority)[keyof typeof SupportTicketPriority];
+
+export const SupportTicketPriority = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  urgent: "urgent",
+} as const;
+
+export interface SupportTicket {
+  id: number;
+  /** @nullable */
+  userId?: number | null;
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  status: SupportTicketStatus;
+  priority: SupportTicketPriority;
+  /** @nullable */
+  bookingId?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateTicketBodyPriority =
+  (typeof CreateTicketBodyPriority)[keyof typeof CreateTicketBodyPriority];
+
+export const CreateTicketBodyPriority = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  urgent: "urgent",
+} as const;
+
+export interface CreateTicketBody {
+  /** @nullable */
+  userId?: number | null;
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  priority: CreateTicketBodyPriority;
+  /** @nullable */
+  bookingId?: number | null;
+}
+
+export type UpdateTicketBodyStatus =
+  (typeof UpdateTicketBodyStatus)[keyof typeof UpdateTicketBodyStatus];
+
+export const UpdateTicketBodyStatus = {
+  open: "open",
+  in_progress: "in_progress",
+  resolved: "resolved",
+  closed: "closed",
+} as const;
+
+/**
+ * @nullable
+ */
+export type UpdateTicketBodyPriority =
+  | (typeof UpdateTicketBodyPriority)[keyof typeof UpdateTicketBodyPriority]
+  | null;
+
+export const UpdateTicketBodyPriority = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  urgent: "urgent",
+} as const;
+
+export interface UpdateTicketBody {
+  status?: UpdateTicketBodyStatus;
+  /** @nullable */
+  priority?: UpdateTicketBodyPriority;
+}
+
+export type NotificationType =
+  (typeof NotificationType)[keyof typeof NotificationType];
+
+export const NotificationType = {
+  booking: "booking",
+  driver: "driver",
+  payment: "payment",
+  system: "system",
+  promo: "promo",
+} as const;
+
+export interface Notification {
+  id: number;
+  userId: number;
+  title: string;
+  message: string;
+  type: NotificationType;
+  isRead: boolean;
+  /** @nullable */
+  bookingId?: number | null;
+  createdAt: string;
+}
+
+export type PromoCodeDiscountType =
+  (typeof PromoCodeDiscountType)[keyof typeof PromoCodeDiscountType];
+
+export const PromoCodeDiscountType = {
+  percentage: "percentage",
+  fixed: "fixed",
+} as const;
+
+export interface PromoCode {
+  id: number;
+  code: string;
+  description: string;
+  discountType: PromoCodeDiscountType;
+  discountValue: number;
+  /** @nullable */
+  minBookingAmount?: number | null;
+  /** @nullable */
+  maxUses?: number | null;
+  usedCount: number;
+  isActive: boolean;
+  /** @nullable */
+  expiresAt?: string | null;
+  createdAt: string;
+}
+
+export type CreatePromoBodyDiscountType =
+  (typeof CreatePromoBodyDiscountType)[keyof typeof CreatePromoBodyDiscountType];
+
+export const CreatePromoBodyDiscountType = {
+  percentage: "percentage",
+  fixed: "fixed",
+} as const;
+
+export interface CreatePromoBody {
+  code: string;
+  description: string;
+  discountType: CreatePromoBodyDiscountType;
+  discountValue: number;
+  /** @nullable */
+  minBookingAmount?: number | null;
+  /** @nullable */
+  maxUses?: number | null;
+  /** @nullable */
+  expiresAt?: string | null;
+}
+
+export interface UpdatePromoBody {
+  /** @nullable */
+  isActive?: boolean | null;
+  /** @nullable */
+  expiresAt?: string | null;
+}
+
+export interface ValidatePromoBody {
+  code: string;
+  bookingAmount: number;
+}
+
+export interface PromoValidationResult {
+  valid: boolean;
+  /** @nullable */
+  discountAmount?: number | null;
+  /** @nullable */
+  finalAmount?: number | null;
+  message: string;
+}
+
+export interface PricingRule {
+  id: number;
+  name: string;
+  /** @nullable */
+  vehicleClass?: string | null;
+  baseFare: number;
+  ratePerMile: number;
+  airportSurcharge: number;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreatePricingRuleBody {
+  name: string;
+  /** @nullable */
+  vehicleClass?: string | null;
+  baseFare: number;
+  ratePerMile: number;
+  airportSurcharge: number;
+}
+
+export interface UpdatePricingRuleBody {
+  /** @nullable */
+  baseFare?: number | null;
+  /** @nullable */
+  ratePerMile?: number | null;
+  /** @nullable */
+  airportSurcharge?: number | null;
+  /** @nullable */
+  isActive?: boolean | null;
 }
 
 export interface AdminStats {
@@ -309,6 +636,8 @@ export interface AdminStats {
   fleetSize: number;
   availableVehicles: number;
   avgRating: number;
+  totalPassengers: number;
+  openTickets: number;
 }
 
 export interface RevenuePeriod {
@@ -328,8 +657,17 @@ export interface RevenueStats {
   byVehicleClass: RevenueByClass[];
 }
 
+export interface DispatchBoard {
+  activeTrips: Booking[];
+  availableDrivers: Driver[];
+  pendingBookings: Booking[];
+}
+
 export type ListBookingsParams = {
-  status?: string;
+  /**
+   * @nullable
+   */
+  status?: string | null;
   /**
    * @nullable
    */
@@ -356,6 +694,43 @@ export type ListDriversParams = {
    * @nullable
    */
   status?: string | null;
+};
+
+export type ListUsersParams = {
+  /**
+   * @nullable
+   */
+  role?: string | null;
+};
+
+export type ListAddressesParams = {
+  userId: number;
+};
+
+export type ListReviewsParams = {
+  /**
+   * @nullable
+   */
+  driverId?: number | null;
+  /**
+   * @nullable
+   */
+  bookingId?: number | null;
+};
+
+export type ListTicketsParams = {
+  /**
+   * @nullable
+   */
+  status?: string | null;
+  /**
+   * @nullable
+   */
+  userId?: number | null;
+};
+
+export type ListNotificationsParams = {
+  userId: number;
 };
 
 export type GetRecentBookingsParams = {

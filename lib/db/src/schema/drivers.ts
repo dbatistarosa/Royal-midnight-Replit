@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, numeric, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, boolean, numeric, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -10,6 +10,7 @@ export const driversTable = pgTable("drivers", {
   phone: text("phone").notNull(),
   licenseNumber: text("license_number").notNull().unique(),
   status: text("status").notNull().default("pending"),
+  isOnline: boolean("is_online").notNull().default(false),
   rating: numeric("rating", { precision: 3, scale: 2 }),
   totalRides: integer("total_rides").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
-import { db, driversTable } from "@workspace/db";
+import { eq, sql } from "drizzle-orm";
+import { db, driversTable, bookingsTable } from "@workspace/db";
 import {
   ListDriversQueryParams,
   ListDriversResponse,
@@ -10,9 +10,22 @@ import {
   UpdateDriverParams,
   UpdateDriverBody,
   UpdateDriverResponse,
+  ToggleDriverAvailabilityParams,
+  ToggleDriverAvailabilityBody,
+  ToggleDriverAvailabilityResponse,
+  GetDriverEarningsParams,
+  GetDriverEarningsResponse,
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+function parseDriver(d: typeof driversTable.$inferSelect) {
+  return {
+    ...d,
+    rating: d.rating != null ? parseFloat(d.rating) : null,
+    createdAt: d.createdAt.toISOString(),
+  };
+}
 
 router.get("/drivers", async (req, res): Promise<void> => {
   const parsed = ListDriversQueryParams.safeParse(req.query);
@@ -26,15 +39,7 @@ router.get("/drivers", async (req, res): Promise<void> => {
     .from(driversTable)
     .where(parsed.data.status ? eq(driversTable.status, parsed.data.status) : undefined);
 
-  res.json(
-    ListDriversResponse.parse(
-      drivers.map((d) => ({
-        ...d,
-        rating: d.rating != null ? parseFloat(d.rating) : null,
-        createdAt: d.createdAt.toISOString(),
-      }))
-    )
-  );
+  res.json(ListDriversResponse.parse(drivers.map(parseDriver)));
 });
 
 router.post("/drivers", async (req, res): Promise<void> => {
@@ -45,13 +50,7 @@ router.post("/drivers", async (req, res): Promise<void> => {
   }
 
   const [driver] = await db.insert(driversTable).values(parsed.data).returning();
-  res.status(201).json(
-    GetDriverResponse.parse({
-      ...driver,
-      rating: driver.rating != null ? parseFloat(driver.rating) : null,
-      createdAt: driver.createdAt.toISOString(),
-    })
-  );
+  res.status(201).json(GetDriverResponse.parse(parseDriver(driver)));
 });
 
 router.get("/drivers/:id", async (req, res): Promise<void> => {
@@ -67,13 +66,7 @@ router.get("/drivers/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(
-    GetDriverResponse.parse({
-      ...driver,
-      rating: driver.rating != null ? parseFloat(driver.rating) : null,
-      createdAt: driver.createdAt.toISOString(),
-    })
-  );
+  res.json(GetDriverResponse.parse(parseDriver(driver)));
 });
 
 router.patch("/drivers/:id", async (req, res): Promise<void> => {
@@ -104,11 +97,79 @@ router.patch("/drivers/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  res.json(UpdateDriverResponse.parse(parseDriver(driver)));
+});
+
+router.patch("/drivers/:id/toggle-availability", async (req, res): Promise<void> => {
+  const params = ToggleDriverAvailabilityParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const parsed = ToggleDriverAvailabilityBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [driver] = await db
+    .update(driversTable)
+    .set({ isOnline: parsed.data.isOnline })
+    .where(eq(driversTable.id, params.data.id))
+    .returning();
+
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  res.json(ToggleDriverAvailabilityResponse.parse(parseDriver(driver)));
+});
+
+router.get("/drivers/:id/earnings", async (req, res): Promise<void> => {
+  const params = GetDriverEarningsParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const driverId = params.data.id;
+
+  const [stats] = await db
+    .select({
+      totalEarnings: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
+      thisMonth: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
+      thisWeek: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
+      today: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
+      totalRides: sql<number>`count(*) filter (where status = 'completed')::int`,
+    })
+    .from(bookingsTable)
+    .where(eq(bookingsTable.driverId, driverId));
+
+  const dailyRaw = await db
+    .select({
+      date: sql<string>`date(created_at)::text`,
+      amount: sql<number>`coalesce(sum(price_quoted::numeric), 0)::float`,
+      rides: sql<number>`count(*)::int`,
+    })
+    .from(bookingsTable)
+    .where(sql`driver_id = ${driverId} and status = 'completed' and created_at >= now() - interval '30 days'`)
+    .groupBy(sql`date(created_at)`)
+    .orderBy(sql`date(created_at)`);
+
+  const totalRides = stats?.totalRides ?? 0;
+  const totalEarnings = stats?.totalEarnings ?? 0;
+
   res.json(
-    UpdateDriverResponse.parse({
-      ...driver,
-      rating: driver.rating != null ? parseFloat(driver.rating) : null,
-      createdAt: driver.createdAt.toISOString(),
+    GetDriverEarningsResponse.parse({
+      totalEarnings,
+      thisMonth: stats?.thisMonth ?? 0,
+      thisWeek: stats?.thisWeek ?? 0,
+      today: stats?.today ?? 0,
+      totalRides,
+      avgPerRide: totalRides > 0 ? Math.round((totalEarnings / totalRides) * 100) / 100 : 0,
+      recentPayouts: dailyRaw,
     })
   );
 });

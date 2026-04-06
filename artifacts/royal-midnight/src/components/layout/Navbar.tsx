@@ -18,8 +18,11 @@ export function Navbar() {
 
   const navLinks = [
     { name: "Home", path: "/" },
-    { name: "The Fleet", path: "/fleet" },
-    { name: "Driver Portal", path: "/driver" },
+    { name: "About", path: "/about" },
+    { name: "Services", path: "/services" },
+    { name: "Fleet", path: "/fleet" },
+    { name: "Pricing", path: "/pricing" },
+    { name: "Contact", path: "/contact" },
   ];
 
   return (

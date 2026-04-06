@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Royal Midnight luxury black car service API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 
 export interface QuoteResponse {
@@ -14,4 +14,8 @@ export interface QuoteResponse {
   estimatedDuration: number;
   estimatedDistance: number;
   currency: string;
+  /** @nullable */
+  promoDiscount?: number | null;
+  /** @nullable */
+  finalPrice?: number | null;
 }

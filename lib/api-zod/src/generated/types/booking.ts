@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Api
  * Royal Midnight luxury black car service API
- * OpenAPI spec version: 0.1.0
+ * OpenAPI spec version: 0.2.0
  */
 import type { BookingStatus } from "./bookingStatus";
 import type { BookingVehicleClass } from "./bookingVehicleClass";
@@ -25,9 +25,15 @@ export interface Booking {
   status: BookingStatus;
   priceQuoted: number;
   /** @nullable */
+  promoCode?: string | null;
+  /** @nullable */
+  discountAmount?: number | null;
+  /** @nullable */
   driverId?: number | null;
   /** @nullable */
   vehicleId?: number | null;
+  /** @nullable */
+  userId?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }

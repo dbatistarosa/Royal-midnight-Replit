@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, and, sql, gte } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { db, bookingsTable } from "@workspace/db";
 import {
   ListBookingsQueryParams,
@@ -15,6 +15,17 @@ import {
 
 const router: IRouter = Router();
 
+function parseBooking(b: typeof bookingsTable.$inferSelect) {
+  return {
+    ...b,
+    priceQuoted: parseFloat(b.priceQuoted ?? "0"),
+    discountAmount: b.discountAmount != null ? parseFloat(b.discountAmount) : null,
+    pickupAt: b.pickupAt.toISOString(),
+    createdAt: b.createdAt.toISOString(),
+    updatedAt: b.updatedAt.toISOString(),
+  };
+}
+
 router.get("/bookings", async (req, res): Promise<void> => {
   const parsed = ListBookingsQueryParams.safeParse(req.query);
   if (!parsed.success) {
@@ -23,12 +34,9 @@ router.get("/bookings", async (req, res): Promise<void> => {
   }
 
   const conditions = [];
-  if (parsed.data.status) {
-    conditions.push(eq(bookingsTable.status, parsed.data.status));
-  }
-  if (parsed.data.driverId != null) {
-    conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
-  }
+  if (parsed.data.status) conditions.push(eq(bookingsTable.status, parsed.data.status));
+  if (parsed.data.driverId != null) conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
+  if (parsed.data.userId != null) conditions.push(eq(bookingsTable.userId, parsed.data.userId));
 
   const bookings = await db
     .select()
@@ -36,15 +44,7 @@ router.get("/bookings", async (req, res): Promise<void> => {
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(bookingsTable.createdAt));
 
-  const mapped = bookings.map((b) => ({
-    ...b,
-    priceQuoted: parseFloat(b.priceQuoted ?? "0"),
-    pickupAt: b.pickupAt.toISOString(),
-    createdAt: b.createdAt.toISOString(),
-    updatedAt: b.updatedAt.toISOString(),
-  }));
-
-  res.json(ListBookingsResponse.parse(mapped));
+  res.json(ListBookingsResponse.parse(bookings.map(parseBooking)));
 });
 
 router.post("/bookings", async (req, res): Promise<void> => {
@@ -60,18 +60,11 @@ router.post("/bookings", async (req, res): Promise<void> => {
       ...parsed.data,
       pickupAt: new Date(parsed.data.pickupAt),
       priceQuoted: String(parsed.data.priceQuoted),
+      discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
     })
     .returning();
 
-  res.status(201).json(
-    GetBookingResponse.parse({
-      ...booking,
-      priceQuoted: parseFloat(booking.priceQuoted ?? "0"),
-      pickupAt: booking.pickupAt.toISOString(),
-      createdAt: booking.createdAt.toISOString(),
-      updatedAt: booking.updatedAt.toISOString(),
-    })
-  );
+  res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
 });
 
 router.get("/bookings/:id", async (req, res): Promise<void> => {
@@ -81,25 +74,13 @@ router.get("/bookings/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [booking] = await db
-    .select()
-    .from(bookingsTable)
-    .where(eq(bookingsTable.id, params.data.id));
-
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, params.data.id));
   if (!booking) {
     res.status(404).json({ error: "Booking not found" });
     return;
   }
 
-  res.json(
-    GetBookingResponse.parse({
-      ...booking,
-      priceQuoted: parseFloat(booking.priceQuoted ?? "0"),
-      pickupAt: booking.pickupAt.toISOString(),
-      createdAt: booking.createdAt.toISOString(),
-      updatedAt: booking.updatedAt.toISOString(),
-    })
-  );
+  res.json(GetBookingResponse.parse(parseBooking(booking)));
 });
 
 router.patch("/bookings/:id", async (req, res): Promise<void> => {
@@ -132,15 +113,7 @@ router.patch("/bookings/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(
-    UpdateBookingResponse.parse({
-      ...booking,
-      priceQuoted: parseFloat(booking.priceQuoted ?? "0"),
-      pickupAt: booking.pickupAt.toISOString(),
-      createdAt: booking.createdAt.toISOString(),
-      updatedAt: booking.updatedAt.toISOString(),
-    })
-  );
+  res.json(UpdateBookingResponse.parse(parseBooking(booking)));
 });
 
 router.delete("/bookings/:id", async (req, res): Promise<void> => {

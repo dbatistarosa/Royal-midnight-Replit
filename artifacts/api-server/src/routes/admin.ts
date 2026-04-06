@@ -1,14 +1,34 @@
 import { Router, type IRouter } from "express";
 import { sql, desc, eq } from "drizzle-orm";
-import { db, bookingsTable, driversTable, vehiclesTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable } from "@workspace/db";
 import {
   GetAdminStatsResponse,
   GetRecentBookingsQueryParams,
   GetRecentBookingsResponse,
   GetRevenueStatsResponse,
+  GetDispatchBoardResponse,
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+function parseBooking(b: typeof bookingsTable.$inferSelect) {
+  return {
+    ...b,
+    priceQuoted: parseFloat(b.priceQuoted ?? "0"),
+    discountAmount: b.discountAmount != null ? parseFloat(b.discountAmount) : null,
+    pickupAt: b.pickupAt.toISOString(),
+    createdAt: b.createdAt.toISOString(),
+    updatedAt: b.updatedAt.toISOString(),
+  };
+}
+
+function parseDriver(d: typeof driversTable.$inferSelect) {
+  return {
+    ...d,
+    rating: d.rating != null ? parseFloat(d.rating) : null,
+    createdAt: d.createdAt.toISOString(),
+  };
+}
 
 router.get("/admin/stats", async (_req, res): Promise<void> => {
   const [bookingStats] = await db
@@ -36,6 +56,18 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
     })
     .from(vehiclesTable);
 
+  const [userStats] = await db
+    .select({
+      passengers: sql<number>`count(*) filter (where role = 'passenger')::int`,
+    })
+    .from(usersTable);
+
+  const [ticketStats] = await db
+    .select({
+      open: sql<number>`count(*) filter (where status = 'open')::int`,
+    })
+    .from(supportTicketsTable);
+
   res.json(
     GetAdminStatsResponse.parse({
       totalBookings: bookingStats?.total ?? 0,
@@ -48,6 +80,8 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
       fleetSize: vehicleStats?.total ?? 0,
       availableVehicles: vehicleStats?.available ?? 0,
       avgRating: driverStats?.avgRating ?? 0,
+      totalPassengers: userStats?.passengers ?? 0,
+      openTickets: ticketStats?.open ?? 0,
     })
   );
 });
@@ -59,29 +93,17 @@ router.get("/admin/recent-bookings", async (req, res): Promise<void> => {
     return;
   }
 
-  const limit = parsed.data.limit ?? 10;
-
   const bookings = await db
     .select()
     .from(bookingsTable)
     .orderBy(desc(bookingsTable.createdAt))
-    .limit(limit);
+    .limit(parsed.data.limit ?? 10);
 
-  res.json(
-    GetRecentBookingsResponse.parse(
-      bookings.map((b) => ({
-        ...b,
-        priceQuoted: parseFloat(b.priceQuoted ?? "0"),
-        pickupAt: b.pickupAt.toISOString(),
-        createdAt: b.createdAt.toISOString(),
-        updatedAt: b.updatedAt.toISOString(),
-      }))
-    )
-  );
+  res.json(GetRecentBookingsResponse.parse(bookings.map(parseBooking)));
 });
 
 router.get("/admin/revenue", async (_req, res): Promise<void> => {
-  const dailyRaw = await db
+  const daily = await db
     .select({
       date: sql<string>`date(created_at)::text`,
       revenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
@@ -92,7 +114,7 @@ router.get("/admin/revenue", async (_req, res): Promise<void> => {
     .groupBy(sql`date(created_at)`)
     .orderBy(sql`date(created_at)`);
 
-  const byClassRaw = await db
+  const byVehicleClass = await db
     .select({
       vehicleClass: bookingsTable.vehicleClass,
       revenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
@@ -101,10 +123,21 @@ router.get("/admin/revenue", async (_req, res): Promise<void> => {
     .from(bookingsTable)
     .groupBy(bookingsTable.vehicleClass);
 
+  res.json(GetRevenueStatsResponse.parse({ daily, byVehicleClass }));
+});
+
+router.get("/admin/dispatch", async (_req, res): Promise<void> => {
+  const [activeTripsRaw, availableDriversRaw, pendingRaw] = await Promise.all([
+    db.select().from(bookingsTable).where(eq(bookingsTable.status, "in_progress")),
+    db.select().from(driversTable).where(sql`status = 'active' and is_online = true`),
+    db.select().from(bookingsTable).where(eq(bookingsTable.status, "pending")).orderBy(bookingsTable.pickupAt),
+  ]);
+
   res.json(
-    GetRevenueStatsResponse.parse({
-      daily: dailyRaw,
-      byVehicleClass: byClassRaw,
+    GetDispatchBoardResponse.parse({
+      activeTrips: activeTripsRaw.map(parseBooking),
+      availableDrivers: availableDriversRaw.map(parseDriver),
+      pendingBookings: pendingRaw.map(parseBooking),
     })
   );
 });
