@@ -4,6 +4,7 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -37,8 +38,19 @@ type DriverRow = {
   vehicleModel?: string | null;
   vehicleYear?: string | null;
   vehicleColor?: string | null;
+  passengerCapacity?: number | null;
+  luggageCapacity?: number | null;
+  hasCarSeat?: boolean | null;
   serviceArea?: string | null;
   licenseNumber?: string | null;
+  licenseExpiry?: string | null;
+  licenseDoc?: string | null;
+  regVin?: string | null;
+  regPlate?: string | null;
+  regExpiry?: string | null;
+  regDoc?: string | null;
+  insuranceExpiry?: string | null;
+  insuranceDoc?: string | null;
 };
 
 function ApprovalBadge({ status }: { status?: string }) {
@@ -47,23 +59,46 @@ function ApprovalBadge({ status }: { status?: string }) {
   return <span className="px-2 py-0.5 text-[10px] uppercase tracking-widest rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">Pending</span>;
 }
 
+function DetailRow({ label, value }: { label: string; value?: string | number | boolean | null }) {
+  const display = value == null ? "—" : typeof value === "boolean" ? (value ? "Yes" : "No") : String(value) || "—";
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">{label}</p>
+      <p className="text-sm text-white">{display}</p>
+    </div>
+  );
+}
+
 export default function AdminDrivers() {
   const { data: drivers, isLoading, refetch } = useListDrivers();
   const { toast } = useToast();
+  const { token } = useAuth();
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState<Record<number, string>>({});
   const [rejectingId, setRejectingId] = useState<number | null>(null);
 
+  const authHeaders = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
   const handleApprove = async (driverId: number) => {
     setActionLoading(driverId);
     try {
-      const res = await fetch(`${API_BASE}/drivers/${driverId}/approve`, { method: "PATCH" });
-      if (!res.ok) throw new Error("Failed to approve");
+      const res = await fetch(`${API_BASE}/drivers/${driverId}/approve`, {
+        method: "PATCH",
+        headers: authHeaders,
+      });
+      if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        throw new Error(data.error || "Failed to approve");
+      }
       toast({ title: "Driver approved", description: "The driver can now go online." });
       refetch();
-    } catch {
-      toast({ title: "Error", description: "Could not approve driver.", variant: "destructive" });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not approve driver.";
+      toast({ title: "Error", description: msg, variant: "destructive" });
     }
     setActionLoading(null);
   };
@@ -74,15 +109,19 @@ export default function AdminDrivers() {
       const reason = rejectReason[driverId] || "";
       const res = await fetch(`${API_BASE}/drivers/${driverId}/reject`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
         body: JSON.stringify({ reason }),
       });
-      if (!res.ok) throw new Error("Failed to reject");
+      if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        throw new Error(data.error || "Failed to reject");
+      }
       toast({ title: "Driver rejected", description: "The driver has been notified." });
       setRejectingId(null);
       refetch();
-    } catch {
-      toast({ title: "Error", description: "Could not reject driver.", variant: "destructive" });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not reject driver.";
+      toast({ title: "Error", description: msg, variant: "destructive" });
     }
     setActionLoading(null);
   };
@@ -135,7 +174,7 @@ export default function AdminDrivers() {
 
                 return (
                   <React.Fragment key={driver.id}>
-                    <tr className={`hover:bg-background/50 ${isPending ? "bg-yellow-500/3" : ""}`}>
+                    <tr className={`hover:bg-background/50 ${isPending ? "bg-yellow-500/[0.02]" : ""}`}>
                       <td className="px-5 py-4 font-medium text-muted-foreground">#{driver.id}</td>
                       <td className="px-5 py-4">
                         <div className="font-medium text-white">{driver.name}</div>
@@ -220,35 +259,58 @@ export default function AdminDrivers() {
                     {isExpanded && (
                       <tr className="bg-background/30">
                         <td colSpan={8} className="px-5 py-5">
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-5 text-sm">
-                            <div>
-                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Phone</p>
-                              <p className="text-white">{driver.phone || "—"}</p>
+                          <div className="space-y-5">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+                              <DetailRow label="Phone" value={driver.phone} />
+                              <DetailRow label="Service Area" value={driver.serviceArea} />
+                              <DetailRow label="User ID" value={driver.userId} />
+                              <DetailRow label="Status" value={driver.status} />
                             </div>
+
                             <div>
-                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Service Area</p>
-                              <p className="text-white">{driver.serviceArea || "—"}</p>
+                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3 border-b border-white/8 pb-1">Vehicle</p>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+                                <DetailRow label="Year" value={driver.vehicleYear} />
+                                <DetailRow label="Make" value={driver.vehicleMake} />
+                                <DetailRow label="Model" value={driver.vehicleModel} />
+                                <DetailRow label="Color" value={driver.vehicleColor} />
+                                <DetailRow label="Passenger Capacity" value={driver.passengerCapacity} />
+                                <DetailRow label="Luggage Capacity" value={driver.luggageCapacity} />
+                                <DetailRow label="Has Car Seat" value={driver.hasCarSeat} />
+                              </div>
                             </div>
+
                             <div>
-                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Vehicle</p>
-                              <p className="text-white">
-                                {driver.vehicleYear && driver.vehicleMake && driver.vehicleModel
-                                  ? `${driver.vehicleYear} ${driver.vehicleMake} ${driver.vehicleModel}`
-                                  : "—"}
-                              </p>
+                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3 border-b border-white/8 pb-1">Driver's License</p>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+                                <DetailRow label="License #" value={driver.licenseNumber} />
+                                <DetailRow label="Expiry" value={driver.licenseExpiry} />
+                                <DetailRow label="Doc File" value={driver.licenseDoc} />
+                              </div>
                             </div>
+
                             <div>
-                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Vehicle Color</p>
-                              <p className="text-white">{driver.vehicleColor || "—"}</p>
+                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3 border-b border-white/8 pb-1">Vehicle Registration</p>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+                                <DetailRow label="VIN" value={driver.regVin} />
+                                <DetailRow label="Plate" value={driver.regPlate} />
+                                <DetailRow label="Reg. Expiry" value={driver.regExpiry} />
+                                <DetailRow label="Reg. Doc" value={driver.regDoc} />
+                              </div>
                             </div>
+
                             <div>
-                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">License #</p>
-                              <p className="text-white">{driver.licenseNumber || "—"}</p>
+                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3 border-b border-white/8 pb-1">Insurance</p>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+                                <DetailRow label="Policy Expiry" value={driver.insuranceExpiry} />
+                                <DetailRow label="Certificate Doc" value={driver.insuranceDoc} />
+                              </div>
                             </div>
+
                             {driver.approvalStatus === "rejected" && driver.rejectionReason && (
-                              <div className="col-span-2">
+                              <div className="bg-red-900/10 border border-red-900/30 p-4">
                                 <p className="text-[10px] uppercase tracking-widest text-red-400 mb-1">Rejection Reason</p>
-                                <p className="text-red-300">{driver.rejectionReason}</p>
+                                <p className="text-sm text-red-300">{driver.rejectionReason}</p>
                               </div>
                             )}
                           </div>

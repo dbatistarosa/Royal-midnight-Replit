@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, driversTable, bookingsTable } from "@workspace/db";
+import { requireAdmin } from "../middleware/auth.js";
 import {
   ListDriversQueryParams,
   ListDriversResponse,
@@ -143,7 +144,7 @@ router.get("/drivers/by-user/:userId", async (req, res): Promise<void> => {
   res.json(parseDriver(driver));
 });
 
-router.patch("/drivers/:id/approve", async (req, res): Promise<void> => {
+router.patch("/drivers/:id/approve", requireAdmin, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
@@ -164,7 +165,7 @@ router.patch("/drivers/:id/approve", async (req, res): Promise<void> => {
   res.json({ success: true, driver: parseDriver(driver) });
 });
 
-router.patch("/drivers/:id/reject", async (req, res): Promise<void> => {
+router.patch("/drivers/:id/reject", requireAdmin, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });

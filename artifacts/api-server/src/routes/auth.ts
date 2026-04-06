@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
-import { db, usersTable, driversTable } from "@workspace/db";
+import { db, usersTable, driversTable, sessionsTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
@@ -45,6 +45,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     .returning();
 
   const token = generateToken(user.id);
+  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
 
   res.status(201).json({
     token,
@@ -81,6 +82,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   }
 
   const token = generateToken(user.id);
+  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
 
   res.json({
     token,
@@ -137,6 +139,8 @@ router.post("/auth/verify-otp", async (req, res): Promise<void> => {
   }
 
   const token = generateToken(user.id);
+  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
+
   res.json({
     token,
     user: {
@@ -208,6 +212,7 @@ router.post("/auth/driver-register", async (req, res): Promise<void> => {
     .returning();
 
   const token = generateToken(user.id);
+  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
 
   res.status(201).json({
     token,
