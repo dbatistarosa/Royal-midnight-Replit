@@ -193,38 +193,42 @@ router.post("/auth/driver-register", async (req, res): Promise<void> => {
     return;
   }
 
-  const [user] = await db
-    .insert(usersTable)
-    .values({ name, email, phone, role: "driver", passwordHash: hashPassword(password) })
-    .returning();
+  const result = await db.transaction(async (tx) => {
+    const [user] = await tx
+      .insert(usersTable)
+      .values({ name, email, phone, role: "driver", passwordHash: hashPassword(password) })
+      .returning();
 
-  const [driver] = await db
-    .insert(driversTable)
-    .values({
-      userId: user.id,
-      name,
-      email,
-      phone,
-      approvalStatus: "pending",
-      status: "pending",
-      ...driverFields,
-    })
-    .returning();
+    const [driver] = await tx
+      .insert(driversTable)
+      .values({
+        userId: user.id,
+        name,
+        email,
+        phone,
+        approvalStatus: "pending",
+        status: "pending",
+        ...driverFields,
+      })
+      .returning();
 
-  const token = generateToken(user.id);
-  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
+    const token = generateToken(user.id);
+    await tx.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
+
+    return { user, driver, token };
+  });
 
   res.status(201).json({
-    token,
+    token: result.token,
     user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      createdAt: user.createdAt.toISOString(),
+      id: result.user.id,
+      name: result.user.name,
+      email: result.user.email,
+      phone: result.user.phone,
+      role: result.user.role,
+      createdAt: result.user.createdAt.toISOString(),
     },
-    driverId: driver.id,
+    driverId: result.driver.id,
   });
 });
 

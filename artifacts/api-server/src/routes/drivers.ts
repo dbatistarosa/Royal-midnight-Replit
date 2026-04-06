@@ -200,7 +200,7 @@ router.patch("/drivers/:id/reject", requireAdmin, async (req, res): Promise<void
 
   const [driver] = await db
     .update(driversTable)
-    .set({ approvalStatus: "rejected", status: "inactive", rejectionReason: reason || null })
+    .set({ approvalStatus: "rejected", status: "rejected", rejectionReason: reason || null })
     .where(eq(driversTable.id, id))
     .returning();
 
