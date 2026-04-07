@@ -176,8 +176,8 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       priceQuoted: String(parsed.data.priceQuoted),
       discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
       paymentType: parsed.data.paymentType ?? "standard",
-      // Corporate bookings are confirmed immediately — standard bookings wait for payment
-      status: isCorporate ? "confirmed" : "awaiting_payment",
+      // Admin and corporate bookings are confirmed immediately — public bookings wait for payment
+      status: (isCorporate || caller?.role === "admin") ? "confirmed" : "awaiting_payment",
     })
     .returning();
 

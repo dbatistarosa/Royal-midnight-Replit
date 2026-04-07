@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User } from "lucide-react";
 import { format } from "date-fns";
@@ -341,8 +341,8 @@ export default function AdminBookings() {
               ) : !bookings.length ? (
                 <tr><td colSpan={8} className="px-5 py-10 text-center text-muted-foreground">No bookings found.</td></tr>
               ) : bookings.map(b => (
-                <>
-                  <tr key={b.id} className="hover:bg-background/50 transition-colors">
+                <Fragment key={b.id}>
+                  <tr className="hover:bg-background/50 transition-colors">
                     <td className="px-5 py-4 font-medium text-muted-foreground">#{b.id}</td>
                     <td className="px-5 py-4">{format(new Date(b.pickupAt), "MMM d, yyyy HH:mm")}</td>
                     <td className="px-5 py-4">
@@ -423,7 +423,7 @@ export default function AdminBookings() {
                     </td>
                   </tr>
                   {expandedId === b.id && (
-                    <tr key={`${b.id}-detail`} className="bg-background/30">
+                    <tr className="bg-background/30">
                       <td colSpan={8} className="px-6 py-6 border-t border-border/50">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                           {/* Customer Info */}
@@ -547,7 +547,7 @@ export default function AdminBookings() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
