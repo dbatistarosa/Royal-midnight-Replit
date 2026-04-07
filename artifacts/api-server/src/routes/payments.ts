@@ -125,6 +125,58 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
   }
 });
 
+// Admin: send a Stripe Invoice to the passenger's email for manual bookings
+router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<void> => {
+  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+  if (booking.status !== "awaiting_payment") {
+    res.status(400).json({ error: "Booking is not awaiting payment" }); return;
+  }
+
+  try {
+    const stripe = getStripe();
+    const amount = Math.round(parseFloat(String(booking.priceQuoted)) * 100);
+
+    // Find or create a Stripe customer for the passenger
+    const existingCustomers = await stripe.customers.list({ email: booking.passengerEmail, limit: 1 });
+    const customer = existingCustomers.data.length > 0
+      ? existingCustomers.data[0]
+      : await stripe.customers.create({
+          email: booking.passengerEmail,
+          name: booking.passengerName,
+          metadata: { bookingId: String(bId) },
+        });
+
+    const bookingRef = `RM-${String(bId).padStart(4, "0")}`;
+
+    // Create an invoice item then a finalised invoice (auto-sends payment link)
+    await stripe.invoiceItems.create({
+      customer: customer.id,
+      amount,
+      currency: "usd",
+      description: `Royal Midnight Chauffeur — Booking ${bookingRef}\n${booking.pickupAddress} → ${booking.dropoffAddress}`,
+    });
+
+    const invoice = await stripe.invoices.create({
+      customer: customer.id,
+      collection_method: "send_invoice",
+      days_until_due: 7,
+      metadata: { bookingId: String(bId) },
+      description: `Royal Midnight — Reservation ${bookingRef}`,
+    });
+
+    const finalised = await stripe.invoices.finalizeInvoice(invoice.id);
+    await stripe.invoices.sendInvoice(finalised.id);
+
+    res.json({ success: true, invoiceId: finalised.id, invoiceUrl: finalised.hosted_invoice_url });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post("/webhook/stripe", async (req, res): Promise<void> => {
   const sig = req.headers["stripe-signature"] as string;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -145,16 +197,30 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       const bookingId = parseInt(intent.metadata.bookingId || "0");
       if (bookingId) {
         const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
-        // Only advance if still awaiting payment (prevent overwriting confirmed/in_progress etc.)
         if (current && current.status === "awaiting_payment") {
           await db.update(bookings)
             .set({ status: "pending", updatedAt: new Date() })
             .where(eq(bookings.id, bookingId));
-          // Fire-and-forget emails
-          firePostPaymentEmails(bookingId).catch(err => console.error("[payments] webhook email error:", err));
+          firePostPaymentEmails(bookingId).catch(err => console.error("[payments] webhook pi email error:", err));
         }
       }
     }
+
+    // Invoice paid via emailed link
+    if (event.type === "invoice.payment_succeeded") {
+      const invoice = event.data.object as Stripe.Invoice;
+      const bookingId = parseInt((invoice.metadata as Record<string, string>)?.bookingId || "0");
+      if (bookingId) {
+        const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
+        if (current && current.status === "awaiting_payment") {
+          await db.update(bookings)
+            .set({ status: "pending", updatedAt: new Date() })
+            .where(eq(bookings.id, bookingId));
+          firePostPaymentEmails(bookingId).catch(err => console.error("[payments] webhook invoice email error:", err));
+        }
+      }
+    }
+
     res.json({ received: true });
   } catch (err: any) {
     res.status(400).send(`Webhook Error: ${err.message}`);

@@ -68,9 +68,9 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   if (parsed.data.driverId != null) conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
   if (parsed.data.userId != null) conditions.push(eq(bookingsTable.userId, parsed.data.userId));
 
-  // Admins and drivers never see unconfirmed/unpaid bookings unless explicitly filtering for that status.
-  // Passengers can still see their own awaiting_payment bookings so they can complete payment.
-  if ((caller.role === "admin" || caller.role === "driver") && !parsed.data.status) {
+  // Drivers never see unconfirmed/unpaid bookings — only admin and passengers see them.
+  // Passengers see their own (scoped below), admin sees all, drivers see none.
+  if (caller.role === "driver" && !parsed.data.status) {
     conditions.push(ne(bookingsTable.status, "awaiting_payment"));
   }
 
@@ -176,8 +176,8 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       priceQuoted: String(parsed.data.priceQuoted),
       discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
       paymentType: parsed.data.paymentType ?? "standard",
-      // Admin and corporate bookings are confirmed immediately — public bookings wait for payment
-      status: (isCorporate || caller?.role === "admin") ? "confirmed" : "awaiting_payment",
+      // Corporate bookings are confirmed immediately — all others (including admin-manual) await payment
+      status: isCorporate ? "confirmed" : "awaiting_payment",
     })
     .returning();
 

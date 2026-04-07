@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
 import { AIRLINES_BY_AIRPORT } from "@/data/airlines";
+import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 
 type AirportCode = "FLL" | "MIA" | "PBI";
 function detectAirportCode(address: string): AirportCode | null {
@@ -142,6 +143,13 @@ export default function AdminBookings() {
   const [dropoffAirline, setDropoffAirline] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
+  // Payment collection state
+  const [chargeBooking, setChargeBooking] = useState<BookingRow | null>(null);
+  const [chargeClientSecret, setChargeClientSecret] = useState<string | null>(null);
+  const [chargePublishableKey, setChargePublishableKey] = useState<string | null>(null);
+  const [chargeLoading, setChargeLoading] = useState(false);
+  const [sendingInvoiceId, setSendingInvoiceId] = useState<number | null>(null);
+
   const authHdr = token ? `Bearer ${token}` : "";
 
   const pickupAirportCode = detectAirportCode(createForm.pickupAddress);
@@ -263,6 +271,65 @@ export default function AdminBookings() {
     }
   };
 
+  const handleChargeCard = async (b: BookingRow) => {
+    setChargeLoading(true);
+    try {
+      const [configRes, intentRes] = await Promise.all([
+        fetch(`${API_BASE}/payments/config`, { headers: { Authorization: authHdr } }),
+        fetch(`${API_BASE}/payments/create-intent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHdr },
+          body: JSON.stringify({ bookingId: b.id, amount: parseFloat(b.priceQuoted) }),
+        }),
+      ]);
+      const { publishableKey } = await configRes.json() as { publishableKey: string };
+      const { clientSecret } = await intentRes.json() as { clientSecret: string };
+      setChargePublishableKey(publishableKey);
+      setChargeClientSecret(clientSecret);
+      setChargeBooking(b);
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not open payment form.", variant: "destructive" });
+    } finally {
+      setChargeLoading(false);
+    }
+  };
+
+  const handlePaymentSuccess = async (paymentIntentId: string) => {
+    if (!chargeBooking) return;
+    try {
+      const res = await fetch(`${API_BASE}/payments/confirm/${chargeBooking.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: authHdr },
+        body: JSON.stringify({ paymentIntentId }),
+      });
+      if (!res.ok) throw new Error("Confirmation failed");
+      toast({ title: "Payment successful", description: `Booking #RM-${String(chargeBooking.id).padStart(4, "0")} is now pending driver assignment.` });
+      setChargeBooking(null);
+      setChargeClientSecret(null);
+      refetch();
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Payment confirmed but status update failed.", variant: "destructive" });
+    }
+  };
+
+  const handleSendInvoice = async (b: BookingRow) => {
+    if (!confirm(`Send a Stripe invoice to ${b.passengerEmail} for $${parseFloat(b.priceQuoted).toFixed(2)}?`)) return;
+    setSendingInvoiceId(b.id);
+    try {
+      const res = await fetch(`${API_BASE}/payments/create-invoice/${b.id}`, {
+        method: "POST",
+        headers: { Authorization: authHdr },
+      });
+      const data = await res.json() as { success?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to send invoice");
+      toast({ title: "Invoice sent", description: `Invoice emailed to ${b.passengerEmail}. Booking will auto-confirm when paid.` });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not send invoice.", variant: "destructive" });
+    } finally {
+      setSendingInvoiceId(null);
+    }
+  };
+
   const setField = (k: keyof FormData, v: string) => setCreateForm(prev => {
     const updated = { ...prev, [k]: v };
     if (k === "vehicleClass") {
@@ -366,7 +433,26 @@ export default function AdminBookings() {
                     </td>
                     <td className="px-5 py-4 hidden md:table-cell font-medium text-primary">${b.priceQuoted?.toFixed(2)}</td>
                     <td className="px-5 py-4">
-                      {assigningId === b.id ? (
+                      {b.status === "awaiting_payment" ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => void handleChargeCard(b)}
+                            disabled={chargeLoading}
+                            className="flex items-center gap-1 text-xs border border-primary/40 text-primary hover:bg-primary/10 px-2.5 py-1.5 transition-colors disabled:opacity-50"
+                          >
+                            {chargeLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />}
+                            Charge Card
+                          </button>
+                          <button
+                            onClick={() => void handleSendInvoice(b)}
+                            disabled={sendingInvoiceId === b.id}
+                            className="flex items-center gap-1 text-xs border border-white/20 text-muted-foreground hover:text-white hover:border-white/40 px-2.5 py-1.5 transition-colors disabled:opacity-50"
+                          >
+                            {sendingInvoiceId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                            Send Invoice
+                          </button>
+                        </div>
+                      ) : assigningId === b.id ? (
                         <div className="flex items-center gap-2">
                           <select
                             className="bg-black border border-white/20 text-white text-xs rounded-none h-8 px-2"
@@ -687,6 +773,47 @@ export default function AdminBookings() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Charge Card Modal */}
+      {chargeBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-[#0f0f0f] border border-white/10 w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
+              <div>
+                <h2 className="text-sm uppercase tracking-widest font-semibold">Charge Card</h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Booking #RM-{String(chargeBooking.id).padStart(4, "0")} — {chargeBooking.passengerName}
+                </p>
+              </div>
+              <button
+                onClick={() => { setChargeBooking(null); setChargeClientSecret(null); }}
+                className="text-muted-foreground hover:text-white transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-6 py-6">
+              <div className="flex items-center gap-2 text-xs text-amber-400 border border-amber-400/20 bg-amber-400/5 px-3 py-2 mb-6">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>Charging <strong>${parseFloat(chargeBooking.priceQuoted).toFixed(2)}</strong> to the passenger's card. Booking will move to <em>Pending</em> on success.</span>
+              </div>
+              {chargeClientSecret && chargePublishableKey ? (
+                <StripePaymentForm
+                  clientSecret={chargeClientSecret}
+                  publishableKey={chargePublishableKey}
+                  amount={parseFloat(chargeBooking.priceQuoted)}
+                  onSuccess={(id) => void handlePaymentSuccess(id)}
+                  onError={(msg) => toast({ title: "Payment failed", description: msg, variant: "destructive" })}
+                />
+              ) : (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </PortalLayout>
   );
