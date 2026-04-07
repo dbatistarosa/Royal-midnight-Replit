@@ -23,6 +23,7 @@ export interface DriverRecord {
   serviceArea?: string | null;
   licenseNumber?: string | null;
   licenseExpiry?: string | null;
+  profilePicture?: string | null;
 }
 
 interface DriverStatusContextValue {

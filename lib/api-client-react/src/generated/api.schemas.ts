@@ -192,6 +192,8 @@ export interface Driver {
   longitude?: string | null;
   /** @nullable */
   locationUpdatedAt?: string | null;
+  /** @nullable */
+  profilePicture?: string | null;
   createdAt: string;
 }
 
@@ -262,6 +264,7 @@ export const BookingVehicleClass = {
 export type BookingStatus = (typeof BookingStatus)[keyof typeof BookingStatus];
 
 export const BookingStatus = {
+  awaiting_payment: "awaiting_payment",
   pending: "pending",
   confirmed: "confirmed",
   in_progress: "in_progress",
@@ -357,6 +360,7 @@ export type UpdateBookingBodyStatus =
   | null;
 
 export const UpdateBookingBodyStatus = {
+  awaiting_payment: "awaiting_payment",
   pending: "pending",
   confirmed: "confirmed",
   in_progress: "in_progress",

@@ -14,6 +14,7 @@ export type UpdateBookingBodyStatus =
   | null;
 
 export const UpdateBookingBodyStatus = {
+  awaiting_payment: "awaiting_payment",
   pending: "pending",
   confirmed: "confirmed",
   in_progress: "in_progress",

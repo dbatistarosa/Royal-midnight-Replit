@@ -84,6 +84,31 @@ router.get("/drivers/:id", requireAuth, async (req, res): Promise<void> => {
   res.json(GetDriverResponse.parse(parseDriver(driver)));
 });
 
+// Public endpoint — returns only passenger-safe driver info for confirmed bookings
+router.get("/drivers/:id/public", async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+  res.json({
+    id: driver.id,
+    name: driver.name,
+    phone: driver.phone,
+    vehicleYear: driver.vehicleYear,
+    vehicleMake: driver.vehicleMake,
+    vehicleModel: driver.vehicleModel,
+    vehicleColor: driver.vehicleColor,
+    profilePicture: driver.profilePicture ?? null,
+    rating: driver.rating != null ? parseFloat(driver.rating) : null,
+  });
+});
+
 router.patch("/drivers/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = UpdateDriverParams.safeParse(req.params);
   if (!params.success) {

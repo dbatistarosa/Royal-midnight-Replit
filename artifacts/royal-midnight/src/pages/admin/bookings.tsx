@@ -55,6 +55,7 @@ type BookingRow = {
 type DriverOption = { id: number; name: string; status: string };
 
 const STATUS_COLORS: Record<string, string> = {
+  awaiting_payment: "text-orange-400 bg-orange-400/10 border-orange-400/20",
   pending:     "text-yellow-400 bg-yellow-400/10 border-yellow-400/20",
   confirmed:   "text-primary bg-primary/10 border-primary/20",
   in_progress: "text-blue-400 bg-blue-400/10 border-blue-400/20",

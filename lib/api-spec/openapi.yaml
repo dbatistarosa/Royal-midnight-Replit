@@ -1343,6 +1343,8 @@ components:
         locationUpdatedAt:
           type: ["string", "null"]
           format: date-time
+        profilePicture:
+          type: ["string", "null"]
         createdAt:
           type: string
           format: date-time
@@ -1441,7 +1443,7 @@ components:
           type: ["string", "null"]
         status:
           type: string
-          enum: [pending, confirmed, in_progress, completed, cancelled]
+          enum: [awaiting_payment, pending, confirmed, in_progress, completed, cancelled]
         priceQuoted:
           type: number
         promoCode:
@@ -1509,7 +1511,7 @@ components:
       properties:
         status:
           type: ["string", "null"]
-          enum: [pending, confirmed, in_progress, completed, cancelled, null]
+          enum: [awaiting_payment, pending, confirmed, in_progress, completed, cancelled, null]
         driverId:
           type: ["integer", "null"]
         vehicleId:

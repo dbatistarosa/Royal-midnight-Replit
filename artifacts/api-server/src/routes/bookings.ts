@@ -8,6 +8,7 @@ import {
   sendNewBookingAvailableToDrivers,
   sendBookingCancelledAdmin,
   sendDriverAcceptedAdmin,
+  sendDriverAcceptedPassenger,
   sendDriverUnassignedAdmin,
   sendStatusChangedAdmin,
 } from "../lib/mailer.js";
@@ -169,39 +170,39 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       priceQuoted: String(parsed.data.priceQuoted),
       discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
       paymentType: parsed.data.paymentType ?? "standard",
-      // Corporate bookings are confirmed immediately — no payment required
-      status: isCorporate ? "confirmed" : "pending",
+      // Corporate bookings are confirmed immediately — standard bookings wait for payment
+      status: isCorporate ? "confirmed" : "awaiting_payment",
     })
     .returning();
 
   res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
-
-  // Fire-and-forget email notifications
-  (async () => {
-    try {
-      const parsed2 = parseBooking(booking);
-      const commissionPct = await getCommissionPct();
-      const driverEarnings = Math.round(parsed2.priceQuoted * commissionPct * 100) / 100;
-      const emailData = {
-        ...parsed2,
-        vehicleClass: parsed2.vehicleClass ?? "business",
-        passengers: parsed2.passengers ?? 1,
-        driverEarnings,
-      };
-      await sendBookingConfirmationPassenger(emailData);
-      await sendNewBookingAdmin(emailData);
-      // Notify all approved online drivers
-      const approvedDrivers = await db
-        .select({ email: usersTable.email })
-        .from(driversTable)
-        .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
-        .where(eq(driversTable.approvalStatus, "approved"));
-      const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
-      await sendNewBookingAvailableToDrivers(emailData, driverEmails);
-    } catch (err) {
-      console.error("[bookings] post-create email error:", err);
-    }
-  })();
+  // Corporate bookings: fire emails immediately since no payment step
+  if (isCorporate) {
+    (async () => {
+      try {
+        const parsed2 = parseBooking(booking);
+        const commissionPct = await getCommissionPct();
+        const driverEarnings = Math.round(parsed2.priceQuoted * commissionPct * 100) / 100;
+        const emailData = {
+          ...parsed2,
+          vehicleClass: parsed2.vehicleClass ?? "business",
+          passengers: parsed2.passengers ?? 1,
+          driverEarnings,
+        };
+        await sendBookingConfirmationPassenger(emailData);
+        await sendNewBookingAdmin(emailData);
+        const approvedDrivers = await db
+          .select({ email: usersTable.email })
+          .from(driversTable)
+          .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
+          .where(eq(driversTable.approvalStatus, "approved"));
+        const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
+        await sendNewBookingAvailableToDrivers(emailData, driverEmails);
+      } catch (err) {
+        console.error("[bookings] corporate post-create email error:", err);
+      }
+    })();
+  }
 });
 
 // Public tracking endpoint — returns only non-sensitive status fields (no fare/PII)
@@ -364,18 +365,20 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
   const parsedUpdated = parseBooking(updated);
   res.json(parsedUpdated);
 
-  // Fire-and-forget: notify admin that driver accepted
+  // Fire-and-forget: notify admin and passenger that driver accepted
   (async () => {
     try {
       const [driverUser] = await db
-        .select({ name: usersTable.name, email: usersTable.email })
+        .select({ name: usersTable.name, email: usersTable.email, phone: driversTable.phone, vehicleYear: driversTable.vehicleYear, vehicleMake: driversTable.vehicleMake, vehicleModel: driversTable.vehicleModel, vehicleColor: driversTable.vehicleColor })
         .from(usersTable)
+        .innerJoin(driversTable, eq(driversTable.userId, usersTable.id))
         .where(eq(usersTable.id, caller.userId));
-      await sendDriverAcceptedAdmin(
-        { ...parsedUpdated, vehicleClass: parsedUpdated.vehicleClass ?? "business", passengers: parsedUpdated.passengers ?? 1, driverEarnings: Math.round(parsedUpdated.priceQuoted * commissionPct2 * 100) / 100 },
-        driverUser?.name ?? "Driver",
-        driverUser?.email ?? "",
-      );
+      const bookingEmailData = { ...parsedUpdated, vehicleClass: parsedUpdated.vehicleClass ?? "business", passengers: parsedUpdated.passengers ?? 1, driverEarnings: Math.round(parsedUpdated.priceQuoted * commissionPct2 * 100) / 100 };
+      const vehicleDescription = [driverUser?.vehicleColor, driverUser?.vehicleYear, driverUser?.vehicleMake, driverUser?.vehicleModel].filter(Boolean).join(" ") || "Luxury Vehicle";
+      await Promise.all([
+        sendDriverAcceptedAdmin(bookingEmailData, driverUser?.name ?? "Driver", driverUser?.email ?? ""),
+        sendDriverAcceptedPassenger(bookingEmailData, driverUser?.name ?? "Driver", driverUser?.phone ?? "", vehicleDescription),
+      ]);
     } catch (err) {
       console.error("[bookings] accept email error:", err);
     }

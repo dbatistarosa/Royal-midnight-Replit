@@ -826,6 +826,9 @@ export default function DriverDashboard() {
 
   const initials = user?.name?.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() ?? "DR";
   const currentStatus = driverRecord?.status ?? "unavailable";
+  const profilePicUrl = driverRecord?.profilePicture
+    ? `${API_BASE}/storage/objects/${driverRecord.profilePicture.replace(/^\/objects\//, "")}`
+    : null;
   const normalizedStatus: DriverAvailability = ["available", "on_break", "unavailable"].includes(currentStatus)
     ? (currentStatus as DriverAvailability)
     : "unavailable";
@@ -835,9 +838,17 @@ export default function DriverDashboard() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 sm:mb-8 gap-4">
         <div className="flex items-center gap-3 sm:gap-4">
-          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-none bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-serif text-base sm:text-lg flex-shrink-0">
-            {initials}
-          </div>
+          {profilePicUrl ? (
+            <img
+              src={profilePicUrl}
+              alt={user?.name ?? "Driver"}
+              className="w-10 h-10 sm:w-12 sm:h-12 object-cover border border-primary/30 flex-shrink-0"
+            />
+          ) : (
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-none bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-serif text-base sm:text-lg flex-shrink-0">
+              {initials}
+            </div>
+          )}
           <div>
             <h1 className="font-serif text-xl sm:text-2xl leading-tight">{user?.name ?? "Driver"}</h1>
             {driverRecord?.rating != null && (

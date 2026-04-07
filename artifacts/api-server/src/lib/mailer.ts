@@ -142,6 +142,34 @@ export async function sendBookingCancelledAdmin(b: BookingEmailData) {
   await send(ADMIN_EMAIL, `Booking #${b.id} Cancelled — ${b.passengerName}`, html);
 }
 
+export async function sendDriverAcceptedPassenger(
+  b: BookingEmailData,
+  driverName: string,
+  driverPhone: string,
+  vehicleDescription: string,
+) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const html = wrap(`
+<h2 style="color:#22c55e;font-size:20px;margin:0 0 8px">Your Driver is Confirmed</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Great news, ${b.passengerName.split(" ")[0]}. A driver has been assigned to your reservation. Details are below.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking #", `RM-${String(b.id).padStart(4, "0")}`)}
+  ${row("Driver", driverName)}
+  ${row("Phone", driverPhone)}
+  ${row("Vehicle", vehicleDescription)}
+  ${row("Pickup", b.pickupAddress)}
+  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+  ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
+</table>
+<p style="margin-top:24px"><a href="${appUrl}/passenger/rides" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">VIEW MY RIDES</a></p>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  Please be ready at the pickup location at the scheduled time.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(b.passengerEmail, `Your Driver is Confirmed — Royal Midnight #RM-${String(b.id).padStart(4, "0")}`, html);
+}
+
 export async function sendDriverAcceptedAdmin(b: BookingEmailData, driverName: string, driverEmail: string) {
   const html = wrap(`
 <h2 style="color:#22c55e;font-size:20px;margin:0 0 20px">Driver Accepted Booking #${b.id}</h2>

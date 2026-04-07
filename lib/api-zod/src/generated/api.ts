@@ -127,6 +127,7 @@ export const ListBookingsResponseItem = zod.object({
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
   status: zod.enum([
+    "awaiting_payment",
     "pending",
     "confirmed",
     "in_progress",
@@ -195,6 +196,7 @@ export const GetBookingResponse = zod.object({
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
   status: zod.enum([
+    "awaiting_payment",
     "pending",
     "confirmed",
     "in_progress",
@@ -222,6 +224,7 @@ export const UpdateBookingParams = zod.object({
 export const UpdateBookingBody = zod.object({
   status: zod
     .union([
+      zod.literal("awaiting_payment"),
       zod.literal("pending"),
       zod.literal("confirmed"),
       zod.literal("in_progress"),
@@ -248,6 +251,7 @@ export const UpdateBookingResponse = zod.object({
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
   status: zod.enum([
+    "awaiting_payment",
     "pending",
     "confirmed",
     "in_progress",
@@ -292,6 +296,7 @@ export const AcceptBookingResponse = zod.object({
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
   status: zod.enum([
+    "awaiting_payment",
     "pending",
     "confirmed",
     "in_progress",
@@ -463,6 +468,7 @@ export const ListDriversResponseItem = zod.object({
   latitude: zod.string().nullish(),
   longitude: zod.string().nullish(),
   locationUpdatedAt: zod.coerce.date().nullish(),
+  profilePicture: zod.string().nullish(),
   createdAt: zod.coerce.date(),
 });
 export const ListDriversResponse = zod.array(ListDriversResponseItem);
@@ -507,6 +513,7 @@ export const GetDriverResponse = zod.object({
   latitude: zod.string().nullish(),
   longitude: zod.string().nullish(),
   locationUpdatedAt: zod.coerce.date().nullish(),
+  profilePicture: zod.string().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -555,6 +562,7 @@ export const UpdateDriverResponse = zod.object({
   latitude: zod.string().nullish(),
   longitude: zod.string().nullish(),
   locationUpdatedAt: zod.coerce.date().nullish(),
+  profilePicture: zod.string().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -591,6 +599,7 @@ export const ToggleDriverAvailabilityResponse = zod.object({
   latitude: zod.string().nullish(),
   longitude: zod.string().nullish(),
   locationUpdatedAt: zod.coerce.date().nullish(),
+  profilePicture: zod.string().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -701,6 +710,7 @@ export const GetUserBookingsResponseItem = zod.object({
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
   status: zod.enum([
+    "awaiting_payment",
     "pending",
     "confirmed",
     "in_progress",
@@ -1065,6 +1075,7 @@ export const GetRecentBookingsResponseItem = zod.object({
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
   status: zod.enum([
+    "awaiting_payment",
     "pending",
     "confirmed",
     "in_progress",
@@ -1103,11 +1114,6 @@ export const GetRevenueStatsResponse = zod.object({
       bookings: zod.number(),
     }),
   ),
-  totalRevenue: zod.number().optional(),
-  totalCommissionPaid: zod.number().optional(),
-  totalCompanyRevenue: zod.number().optional(),
-  commissionPct: zod.number().optional(),
-  completedRides: zod.number().optional(),
 });
 
 /**
@@ -1134,6 +1140,7 @@ export const GetDispatchBoardResponse = zod.object({
       flightNumber: zod.string().nullish(),
       specialRequests: zod.string().nullish(),
       status: zod.enum([
+        "awaiting_payment",
         "pending",
         "confirmed",
         "in_progress",
@@ -1174,6 +1181,7 @@ export const GetDispatchBoardResponse = zod.object({
       latitude: zod.string().nullish(),
       longitude: zod.string().nullish(),
       locationUpdatedAt: zod.coerce.date().nullish(),
+      profilePicture: zod.string().nullish(),
       createdAt: zod.coerce.date(),
     }),
   ),
@@ -1197,6 +1205,7 @@ export const GetDispatchBoardResponse = zod.object({
       flightNumber: zod.string().nullish(),
       specialRequests: zod.string().nullish(),
       status: zod.enum([
+        "awaiting_payment",
         "pending",
         "confirmed",
         "in_progress",

@@ -157,6 +157,7 @@ export default function DriverOnboarding() {
   const [step2Data, setStep2Data] = useState<Step2Values | null>(null);
   const [step3Data, setStep3Data] = useState<Step3Values | null>(null);
 
+  const [profilePicPath, setProfilePicPath] = useState<string | null>(null);
   const [licenseDocPath, setLicenseDocPath] = useState<string | null>(null);
   const [regDocPath, setRegDocPath] = useState<string | null>(null);
   const [insuranceDocPath, setInsuranceDocPath] = useState<string | null>(null);
@@ -223,6 +224,7 @@ export default function DriverOnboarding() {
         regDoc: regDocPath,
         insuranceExpiry: step4Data.insuranceExpiry || "",
         insuranceDoc: insuranceDocPath,
+        profilePicture: profilePicPath ?? undefined,
       };
 
       const res = await fetch(`${API_BASE}/auth/driver-register`, {
@@ -576,6 +578,19 @@ export default function DriverOnboarding() {
                   <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-1">Step 4 of 4</p>
                   <h2 className="text-2xl font-serif text-white">Documents</h2>
                   <p className="text-sm text-gray-500 mt-1">Provide your credentials for our compliance review.</p>
+                </div>
+
+                {/* Profile Photo */}
+                <div className="space-y-4">
+                  <p className="text-xs uppercase tracking-widest text-gray-500 pb-1 border-b border-white/8">Profile Photo <span className="text-gray-700">(optional)</span></p>
+                  <p className="text-xs text-gray-600">A clear headshot helps passengers identify you. Professional attire preferred.</p>
+                  <DocUploadField
+                    label="Chauffeur Photo"
+                    hint="JPG or PNG — your face should be clearly visible"
+                    accept="image/jpeg,image/png,image/webp"
+                    objectPath={profilePicPath}
+                    onChange={setProfilePicPath}
+                  />
                 </div>
 
                 {/* Driver's License */}

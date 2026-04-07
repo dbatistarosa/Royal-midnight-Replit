@@ -184,6 +184,7 @@ const DriverRegisterBody = z.object({
   regDoc: z.string().optional(),
   insuranceExpiry: z.string().optional(),
   insuranceDoc: z.string().optional(),
+  profilePicture: z.string().optional(),
 });
 
 router.post("/auth/driver-register", async (req, res): Promise<void> => {

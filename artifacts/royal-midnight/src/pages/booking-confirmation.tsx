@@ -36,7 +36,8 @@ export default function BookingConfirmation() {
       const data = await fetchBooking(id);
       setBooking(data);
       setError(false);
-      if (data.status === "confirmed" || data.status === "in_progress" || data.status === "completed" || data.status === "cancelled") {
+      // Stop polling once payment is confirmed (status moves past awaiting_payment)
+      if (data.status !== "awaiting_payment") {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       }
     } catch {
@@ -73,7 +74,7 @@ export default function BookingConfirmation() {
     );
   }
 
-  const isPending = booking.status === "pending";
+  const awaitingPayment = booking.status === "awaiting_payment";
 
   return (
     <div className="min-h-screen bg-[#050505] pt-32 pb-24">
@@ -81,7 +82,7 @@ export default function BookingConfirmation() {
         <div className="bg-black border border-white/10 p-8 md:p-16 text-center relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
 
-          {isPending ? (
+          {awaitingPayment ? (
             <>
               <div className="w-20 h-20 mx-auto mb-8 flex items-center justify-center border border-primary/30 bg-primary/5">
                 <Clock className="w-10 h-10 text-primary animate-pulse" />
@@ -140,7 +141,7 @@ export default function BookingConfirmation() {
             </div>
           </div>
 
-          {!isPending && booking.passengerEmail && (
+          {!awaitingPayment && booking.passengerEmail && (
             <p className="text-gray-500 text-sm mb-8">A confirmation has been sent to {booking.passengerEmail}.</p>
           )}
 

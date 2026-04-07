@@ -26,5 +26,7 @@ export interface Driver {
   longitude?: string | null;
   /** @nullable */
   locationUpdatedAt?: Date | null;
+  /** @nullable */
+  profilePicture?: string | null;
   createdAt: Date;
 }

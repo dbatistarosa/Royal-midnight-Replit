@@ -43,6 +43,8 @@ export const driversTable = pgTable("drivers", {
   latitude: numeric("latitude", { precision: 10, scale: 7 }),
   longitude: numeric("longitude", { precision: 10, scale: 7 }),
   locationUpdatedAt: timestamp("location_updated_at", { withTimezone: true }),
+
+  profilePicture: text("profile_picture"),
 });
 
 export const insertDriverSchema = createInsertSchema(driversTable).omit({ id: true, createdAt: true, updatedAt: true });

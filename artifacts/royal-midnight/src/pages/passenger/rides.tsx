@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useGetUserBookings } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { useAuth } from "@/contexts/auth";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, ChevronDown, ChevronUp, Users, Briefcase, Plane, Phone, DollarSign, Clock } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, ChevronDown, ChevronUp, Users, Briefcase, Plane, Phone, DollarSign, Clock, Star } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
+import { API_BASE } from "@/lib/constants";
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -36,7 +37,74 @@ type Booking = {
   passengerPhone?: string | null;
   promoCode?: string | null;
   discountAmount?: number | null;
+  driverId?: number | null;
 };
+
+type PublicDriver = {
+  id: number;
+  name: string;
+  phone: string;
+  vehicleYear?: string | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehicleColor?: string | null;
+  profilePicture?: string | null;
+  rating?: number | null;
+};
+
+function driverPicUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const stripped = path.replace(/^\/objects\//, "");
+  return `${API_BASE}/storage/objects/${stripped}`;
+}
+
+function DriverInfoCard({ driverId }: { driverId: number }) {
+  const [driver, setDriver] = useState<PublicDriver | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/drivers/${driverId}/public`)
+      .then(r => r.ok ? r.json() as Promise<PublicDriver> : Promise.reject())
+      .then(d => setDriver(d))
+      .catch(() => null);
+  }, [driverId]);
+
+  if (!driver) return null;
+
+  const picUrl = driverPicUrl(driver.profilePicture);
+  const vehicleDesc = [driver.vehicleColor, driver.vehicleYear, driver.vehicleMake, driver.vehicleModel].filter(Boolean).join(" ") || null;
+  const initials = driver.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+
+  return (
+    <div className="mt-4 pt-4 border-t border-white/8">
+      <p className="text-[10px] uppercase tracking-widest text-primary mb-3">Your Chauffeur</p>
+      <div className="flex items-center gap-4">
+        {picUrl ? (
+          <img src={picUrl} alt={driver.name} className="w-12 h-12 object-cover border border-primary/30 flex-shrink-0" />
+        ) : (
+          <div className="w-12 h-12 bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-serif text-sm flex-shrink-0">
+            {initials}
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-sm">{driver.name}</p>
+          {vehicleDesc && <p className="text-xs text-muted-foreground mt-0.5 truncate">{vehicleDesc}</p>}
+          <div className="flex items-center gap-3 mt-1">
+            {driver.phone && (
+              <a href={`tel:${driver.phone}`} className="text-xs text-primary flex items-center gap-1 hover:underline">
+                <Phone className="w-3 h-3" /> {driver.phone}
+              </a>
+            )}
+            {driver.rating != null && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Star className="w-3 h-3 text-primary" /> {driver.rating.toFixed(1)}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function BookingDetailPanel({ booking }: { booking: Booking }) {
   return (
@@ -133,6 +201,7 @@ function BookingDetailPanel({ booking }: { booking: Booking }) {
 
 function RideCard({ booking, isPast }: { booking: Booking; isPast?: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const showDriverCard = !isPast && booking.driverId != null && ["confirmed", "in_progress"].includes(booking.status);
 
   return (
     <div className={`bg-card border border-border rounded-none p-6 transition-opacity ${isPast ? "opacity-75 hover:opacity-100" : ""}`}>
@@ -158,6 +227,9 @@ function RideCard({ booking, isPast }: { booking: Booking; isPast?: boolean }) {
           </div>
         </div>
       </div>
+
+      {/* Driver card for confirmed/in_progress bookings */}
+      {showDriverCard && <DriverInfoCard driverId={booking.driverId!} />}
 
       {/* Expanded detail panel */}
       {expanded && <BookingDetailPanel booking={booking} />}
