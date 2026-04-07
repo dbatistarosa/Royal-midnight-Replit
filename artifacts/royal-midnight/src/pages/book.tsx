@@ -361,24 +361,24 @@ export default function Book() {
         <div className="absolute inset-0 opacity-30" style={{ backgroundImage: "radial-gradient(ellipse at 50% 0%, rgba(201,168,76,0.12) 0%, transparent 70%)" }} />
         <div className="relative container mx-auto px-4 max-w-4xl text-center">
           <p className="text-xs uppercase tracking-[0.4em] text-primary mb-3">South Florida Luxury Transportation</p>
-          <h1 className="text-5xl md:text-6xl font-serif text-white mb-4">Reserve Your Ride</h1>
+          <h1 className="text-3xl sm:text-5xl md:text-6xl font-serif text-white mb-4">Reserve Your Ride</h1>
           <p className="text-gray-500 text-sm tracking-wide">Professional chauffeur service — FLL, MIA &amp; PBI</p>
 
           {/* Step indicators */}
-          <div className="flex items-center justify-center mt-10 gap-0">
+          <div className="flex items-center justify-center mt-8 sm:mt-10 gap-0">
             {STEPS.map((s, i) => (
               <div key={s.num} className="flex items-center">
                 <div className="flex flex-col items-center gap-1.5">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-medium transition-all duration-300
+                  <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs font-medium transition-all duration-300
                     ${step > s.num ? "bg-primary text-black" : step === s.num ? "border-2 border-primary text-primary bg-primary/10" : "border border-white/15 text-white/25 bg-white/3"}`}>
-                    {step > s.num ? <CheckCircle2 className="w-4 h-4" /> : s.num}
+                    {step > s.num ? <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : s.num}
                   </div>
-                  <span className={`text-[10px] uppercase tracking-[0.15em] transition-colors ${step === s.num ? "text-primary" : step > s.num ? "text-white/50" : "text-white/20"}`}>
+                  <span className={`text-[9px] sm:text-[10px] uppercase tracking-[0.1em] sm:tracking-[0.15em] transition-colors ${step === s.num ? "text-primary" : step > s.num ? "text-white/50" : "text-white/20"}`}>
                     {s.label}
                   </span>
                 </div>
                 {i < STEPS.length - 1 && (
-                  <div className={`h-px w-20 md:w-32 mx-3 mb-5 transition-colors duration-500 ${step > s.num ? "bg-primary/50" : "bg-white/8"}`} />
+                  <div className={`h-px w-10 sm:w-20 md:w-32 mx-2 sm:mx-3 mb-5 transition-colors duration-500 ${step > s.num ? "bg-primary/50" : "bg-white/8"}`} />
                 )}
               </div>
             ))}
@@ -394,7 +394,7 @@ export default function Book() {
             {step === 1 && (
               <div className="space-y-px">
                 {/* Route section */}
-                <div className="bg-[#0a0a0a] border border-white/8 p-7 md:p-10 space-y-6">
+                <div className="bg-[#0a0a0a] border border-white/8 p-5 sm:p-7 md:p-10 space-y-6">
                   <div className="flex items-center gap-3 mb-1">
                     <div className="w-5 h-px bg-primary" />
                     <p className="text-xs uppercase tracking-[0.3em] text-primary">Your Route</p>
@@ -562,7 +562,7 @@ export default function Book() {
                 </div>
 
                 {/* Passenger info section */}
-                <div className="bg-[#0a0a0a] border border-white/8 border-t-0 p-7 md:p-10 space-y-6">
+                <div className="bg-[#0a0a0a] border border-white/8 border-t-0 p-5 sm:p-7 md:p-10 space-y-6">
                   <div className="flex items-center gap-3 mb-1">
                     <div className="w-5 h-px bg-primary" />
                     <p className="text-xs uppercase tracking-[0.3em] text-primary">Passenger Information</p>
@@ -660,13 +660,15 @@ export default function Book() {
             {step === 2 && (
               <div className="space-y-5">
                 {/* Route banner */}
-                <div className="bg-[#0a0a0a] border border-white/8 px-6 py-4 flex items-center gap-3 text-sm">
-                  <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                  <span className="text-gray-400 truncate">{pickupAddress}</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-white/20 flex-shrink-0" />
-                  <span className="text-gray-400 truncate">{dropoffAddress}</span>
+                <div className="bg-[#0a0a0a] border border-white/8 px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 text-sm">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                    <span className="text-gray-400 truncate">{pickupAddress}</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-white/20 flex-shrink-0" />
+                    <span className="text-gray-400 truncate">{dropoffAddress}</span>
+                  </div>
                   {quotes.business && (
-                    <span className="ml-auto flex items-center gap-1 text-gray-600 text-xs whitespace-nowrap">
+                    <span className="sm:ml-auto flex items-center gap-1 text-gray-600 text-xs whitespace-nowrap">
                       <Clock className="w-3 h-3" /> ~{quotes.business.estimatedDuration} min · {quotes.business.estimatedDistance} mi
                     </span>
                   )}
@@ -695,13 +697,13 @@ export default function Book() {
                       {/* Top accent line */}
                       <div className={`absolute top-0 left-0 right-0 h-px transition-all duration-300 ${isSelected ? "bg-gradient-to-r from-transparent via-primary to-transparent" : "bg-transparent"}`} />
 
-                      <div className="grid grid-cols-1 md:grid-cols-[1fr_280px]">
+                      <div className="flex flex-col md:grid md:grid-cols-[1fr_280px]">
                         {/* Left: Vehicle info */}
-                        <div className={`p-8 md:p-10 relative ${isSelected ? "bg-gradient-to-br from-[#0d0b06] to-[#080808]" : "bg-[#080808]"}`}>
-                          <div className="flex items-start justify-between mb-6">
+                        <div className={`p-6 sm:p-8 md:p-10 relative ${isSelected ? "bg-gradient-to-br from-[#0d0b06] to-[#080808]" : "bg-[#080808]"}`}>
+                          <div className="flex items-start justify-between mb-5">
                             <div>
                               <p className="text-[10px] uppercase tracking-[0.35em] text-primary mb-2">{info.class}</p>
-                              <h3 className="text-2xl md:text-3xl font-serif text-white leading-tight">{info.name}</h3>
+                              <h3 className="text-xl sm:text-2xl md:text-3xl font-serif text-white leading-tight">{info.name}</h3>
                               {"subtitle" in info && <p className="text-xs text-gray-600 mt-1">{info.subtitle}</p>}
                               <p className="text-xs text-gray-500 mt-1 italic">{info.tagline}</p>
                             </div>
@@ -710,9 +712,9 @@ export default function Book() {
                             </div>
                           </div>
 
-                          <p className="text-sm text-gray-500 leading-relaxed mb-6 max-w-md">{info.description}</p>
+                          <p className="text-sm text-gray-500 leading-relaxed mb-5 max-w-md">{info.description}</p>
 
-                          <div className="flex gap-8">
+                          <div className="flex flex-wrap gap-5 sm:gap-8">
                             <div>
                               <p className="text-[10px] uppercase tracking-widest text-gray-700 mb-1">Passengers</p>
                               <p className="text-sm text-white flex items-center gap-1.5">
@@ -738,7 +740,7 @@ export default function Book() {
 
                         {/* Right: Price */}
                         {quote ? (
-                          <div className={`border-t md:border-t-0 md:border-l ${isSelected ? "border-primary/20 bg-[#0d0b04]" : "border-white/8 bg-[#060606]"} p-8 md:p-10 flex flex-col justify-between`}>
+                          <div className={`border-t md:border-t-0 md:border-l ${isSelected ? "border-primary/20 bg-[#0d0b04]" : "border-white/8 bg-[#060606]"} p-6 sm:p-8 md:p-10 flex flex-col justify-between`}>
                             <div className="space-y-3 text-sm">
                               <div className="flex justify-between items-center text-gray-500">
                                 <span>Base fare</span>
@@ -758,9 +760,9 @@ export default function Book() {
                                 <span className="text-gray-300">${quote.taxAmount.toFixed(2)}</span>
                               </div>
                             </div>
-                            <div className="mt-6 pt-4 border-t border-white/10">
+                            <div className="mt-5 pt-4 border-t border-white/10">
                               <p className="text-[10px] uppercase tracking-widest text-gray-600 mb-1">Total</p>
-                              <p className={`text-4xl font-serif transition-colors ${isSelected ? "text-primary" : "text-white"}`}>
+                              <p className={`text-3xl sm:text-4xl font-serif transition-colors ${isSelected ? "text-primary" : "text-white"}`}>
                                 ${quote.totalWithTax.toFixed(2)}
                               </p>
                               <p className="text-xs text-gray-700 mt-1">All inclusive</p>

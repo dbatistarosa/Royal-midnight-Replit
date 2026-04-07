@@ -45,15 +45,15 @@ export default function DriverEarnings() {
 
   return (
     <PortalLayout title="Driver Portal" navItems={driverNavItems}>
-      <h1 className="font-serif text-3xl mb-8">Earnings</h1>
+      <h1 className="font-serif text-2xl sm:text-3xl mb-6 sm:mb-8">Earnings</h1>
 
       {driverLoading || isLoading ? (
         <div className="flex items-center justify-center py-24">
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
       ) : (
-        <div className="space-y-8">
-          <div className="grid md:grid-cols-4 gap-6">
+        <div className="space-y-6 sm:space-y-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
             <div className="bg-card border border-border rounded-none p-6">
               <h3 className="text-muted-foreground text-xs uppercase tracking-widest font-medium mb-2">Today</h3>
               <div className="text-3xl font-serif text-primary">{fmt$(earnings?.today ?? 0)}</div>
@@ -72,8 +72,8 @@ export default function DriverEarnings() {
             </div>
           </div>
 
-          <div className="bg-card border border-border rounded-none p-6">
-            <div className="flex justify-between items-center mb-6">
+          <div className="bg-card border border-border rounded-none p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 sm:mb-6 gap-1">
               <h2 className="font-serif text-xl">Earnings (Last 30 Days)</h2>
               <span className="text-xs text-muted-foreground uppercase tracking-widest">Driver share · {earnings?.totalRides ?? 0} trips total</span>
             </div>

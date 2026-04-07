@@ -30,19 +30,19 @@ export default function Home() {
           <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black"></div>
         </div>
 
-        <div className="container mx-auto px-6 relative z-10 flex flex-col md:flex-row items-center justify-between">
+        <div className="container mx-auto px-4 sm:px-6 relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-8">
           <div className="max-w-2xl text-left">
-            <h1 className="text-5xl md:text-7xl font-serif text-white mb-6 leading-tight animate-in fade-in slide-in-from-bottom-8 duration-1000">
+            <h1 className="text-4xl sm:text-5xl md:text-7xl font-serif text-white mb-4 md:mb-6 leading-tight animate-in fade-in slide-in-from-bottom-8 duration-1000">
               The <span className="text-primary italic">Pinnacle</span> of South Florida Transport.
             </h1>
-            <p className="text-lg md:text-xl text-gray-300 mb-10 max-w-xl leading-relaxed animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-200">
+            <p className="text-base md:text-lg text-gray-300 mb-6 md:mb-10 max-w-xl leading-relaxed animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-200">
               Discretion, reliability, and first-class comfort. No surge pricing, no uncertainty. Just flat-rate luxury rides booked in advance.
             </p>
           </div>
 
           {/* Quick Booking Widget */}
-          <div className="w-full md:w-auto mt-12 md:mt-0 max-w-md animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-300">
-            <div className="bg-black/80 backdrop-blur-xl border border-white/10 p-8 shadow-2xl relative overflow-hidden">
+          <div className="w-full lg:w-auto lg:flex-shrink-0 max-w-md animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-300">
+            <div className="bg-black/80 backdrop-blur-xl border border-white/10 p-6 sm:p-8 shadow-2xl relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50"></div>
               <h3 className="text-xl font-serif text-white mb-6 tracking-widest uppercase">Reserve a Vehicle</h3>
               
@@ -75,10 +75,10 @@ export default function Home() {
       </section>
 
       {/* Services / Philosophy */}
-      <section className="py-32 bg-black border-t border-white/5 relative overflow-hidden">
+      <section className="py-16 md:py-32 bg-black border-t border-white/5 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-1/3 h-full bg-primary/5 blur-[120px] rounded-full pointer-events-none"></div>
-        <div className="container mx-auto px-6 relative z-10">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-16">
+        <div className="container mx-auto px-4 sm:px-6 relative z-10">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-16">
             <div className="text-center md:text-left">
               <h3 className="text-primary text-sm uppercase tracking-widest mb-4">Discretion</h3>
               <h4 className="text-2xl font-serif text-white mb-4">Silent & Private</h4>
@@ -105,14 +105,14 @@ export default function Home() {
       </section>
 
       {/* Fleet Teaser */}
-      <section className="py-32 bg-[#0a0a0a]">
-        <div className="container mx-auto px-6 text-center">
-          <h2 className="text-4xl md:text-5xl font-serif text-white mb-4">An Impeccable Fleet</h2>
-          <p className="text-gray-400 max-w-2xl mx-auto mb-16">
+      <section className="py-16 md:py-32 bg-[#0a0a0a]">
+        <div className="container mx-auto px-4 sm:px-6 text-center">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-serif text-white mb-4">An Impeccable Fleet</h2>
+          <p className="text-gray-400 max-w-2xl mx-auto mb-10 md:mb-16">
             Meticulously maintained. Perfectly appointed. Choose the vehicle that suits your occasion.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
             {VEHICLE_CLASSES.slice(0, 3).map((vehicle) => (
               <div key={vehicle.id} className="group relative overflow-hidden bg-black border border-white/5 aspect-[4/3]">
                 <img 

@@ -24,11 +24,11 @@ function PassengerRidesInner() {
 
   return (
     <PortalLayout title="Passenger Portal" navItems={passengerNavItems}>
-      <h1 className="font-serif text-3xl mb-8">My Rides</h1>
+      <h1 className="font-serif text-2xl sm:text-3xl mb-6 sm:mb-8">My Rides</h1>
       
-      <div className="space-y-12">
+      <div className="space-y-10 sm:space-y-12">
         <section>
-          <h2 className="font-serif text-2xl mb-6">Upcoming Rides</h2>
+          <h2 className="font-serif text-xl sm:text-2xl mb-4 sm:mb-6">Upcoming Rides</h2>
           {isLoading ? (
             <div className="text-center py-12 text-muted-foreground">Loading...</div>
           ) : upcomingBookings.length > 0 ? (
@@ -64,7 +64,7 @@ function PassengerRidesInner() {
         </section>
 
         <section>
-          <h2 className="font-serif text-2xl mb-6">Past Rides</h2>
+          <h2 className="font-serif text-xl sm:text-2xl mb-4 sm:mb-6">Past Rides</h2>
           {isLoading ? (
             <div className="text-center py-12 text-muted-foreground">Loading...</div>
           ) : pastBookings.length > 0 ? (

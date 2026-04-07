@@ -609,25 +609,25 @@ export default function DriverDashboard() {
   return (
     <PortalLayout title="Driver Portal" navItems={driverNavItems}>
       {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-none bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-serif text-lg">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 sm:mb-8 gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-none bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-serif text-base sm:text-lg flex-shrink-0">
             {initials}
           </div>
           <div>
-            <h1 className="font-serif text-2xl leading-tight">{user?.name ?? "Driver"}</h1>
+            <h1 className="font-serif text-xl sm:text-2xl leading-tight">{user?.name ?? "Driver"}</h1>
             {driverRecord?.rating != null && (
-              <div className="text-sm text-muted-foreground">
+              <div className="text-xs sm:text-sm text-muted-foreground">
                 {driverRecord.rating.toFixed(1)} rating · {driverRecord.totalRides} rides
               </div>
             )}
           </div>
         </div>
         {driverRecord && (
-          <div className="flex items-center gap-3 flex-wrap justify-end">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <LocationShareToggle driverId={driverRecord.id} authHeader={authHeader} />
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-muted-foreground uppercase tracking-widest">Status</span>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <span className="text-xs text-muted-foreground uppercase tracking-widest hidden sm:block">Status</span>
               <StatusToggle driverId={driverRecord.id} currentStatus={normalizedStatus} authHeader={authHeader} />
             </div>
           </div>
@@ -641,7 +641,7 @@ export default function DriverDashboard() {
       ) : (
         <>
           {/* Stats Row */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
             <div className="bg-card border border-border p-5">
               <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-2">Today's Earnings</h3>
               <div className="text-3xl font-serif text-primary">
@@ -669,12 +669,12 @@ export default function DriverDashboard() {
           </div>
 
           {/* Tab Bar */}
-          <div className="flex border-b border-border mb-6 overflow-x-auto">
+          <div className="flex border-b border-border mb-6 overflow-x-auto scrollbar-hide -mx-4 sm:mx-0 px-4 sm:px-0">
             {TABS.map(({ key, label }) => (
               <button
                 key={key}
                 onClick={() => setActiveTab(key)}
-                className={`px-5 py-3 text-xs uppercase tracking-widest font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
+                className={`px-4 sm:px-5 py-3 text-xs uppercase tracking-widest font-medium transition-colors border-b-2 -mb-px whitespace-nowrap flex-shrink-0 ${
                   activeTab === key
                     ? "border-primary text-primary"
                     : "border-transparent text-muted-foreground hover:text-foreground"

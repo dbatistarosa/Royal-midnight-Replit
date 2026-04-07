@@ -51,7 +51,7 @@ export default function DriverHistory() {
 
   return (
     <PortalLayout title="Driver Portal" navItems={driverNavItems}>
-      <h1 className="font-serif text-3xl mb-8">Trip History</h1>
+      <h1 className="font-serif text-2xl sm:text-3xl mb-6 sm:mb-8">Trip History</h1>
 
       {driverLoading || isLoading ? (
         <div className="flex items-center justify-center py-24">
@@ -60,7 +60,7 @@ export default function DriverHistory() {
       ) : pastBookings.length > 0 ? (
         <div className="bg-card border border-border rounded-none overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
+            <table className="w-full text-sm text-left min-w-[560px]">
               <thead className="bg-background/50 border-b border-border">
                 <tr>
                   <th className="px-6 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Date</th>

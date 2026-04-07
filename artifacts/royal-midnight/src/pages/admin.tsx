@@ -26,14 +26,14 @@ function AdminInner() {
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
-      <div className="flex justify-between items-end mb-10">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end mb-8 gap-3">
         <div>
-          <h1 className="font-serif text-3xl mb-1">Director's Office</h1>
+          <h1 className="font-serif text-2xl sm:text-3xl mb-1">Director's Office</h1>
           <p className="text-muted-foreground text-sm">System overview and real-time operations.</p>
         </div>
-        <div className="text-right">
+        <div className="sm:text-right">
           <p className="text-xs uppercase tracking-widest text-primary mb-1">System Status</p>
-          <p className="text-sm flex items-center justify-end gap-2">
+          <p className="text-sm flex items-center sm:justify-end gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
             Operational
           </p>
@@ -46,7 +46,7 @@ function AdminInner() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8 sm:mb-10">
             <div className="bg-card border border-border p-6 rounded-lg flex flex-col justify-between">
               <div className="flex justify-between items-start mb-4">
                 <div className="p-3 bg-primary/10 rounded-full">
@@ -103,46 +103,46 @@ function AdminInner() {
             </div>
           </div>
 
-          <div className="bg-card border border-border rounded-lg p-8">
-            <div className="flex justify-between items-center mb-8">
+          <div className="bg-card border border-border rounded-lg p-4 sm:p-8">
+            <div className="flex justify-between items-center mb-6 sm:mb-8">
               <h2 className="font-serif text-xl">Recent Operations</h2>
               <Link href="/admin/bookings" className="text-primary text-xs uppercase tracking-widest hover:text-foreground transition-colors">
                 View All
               </Link>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+            <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <table className="w-full text-left text-sm min-w-[600px]">
                 <thead className="text-muted-foreground uppercase tracking-widest text-xs border-b border-border">
                   <tr>
-                    <th className="pb-4 font-medium">Ref / Date</th>
+                    <th className="pb-4 font-medium px-4 sm:px-0">Ref / Date</th>
                     <th className="pb-4 font-medium">Client</th>
                     <th className="pb-4 font-medium">Route</th>
                     <th className="pb-4 font-medium">Vehicle</th>
                     <th className="pb-4 font-medium text-right">Value</th>
-                    <th className="pb-4 font-medium text-right">Status</th>
+                    <th className="pb-4 font-medium text-right pr-4 sm:pr-0">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {bookings?.map((booking) => (
                     <tr key={booking.id} className="hover:bg-white/5 transition-colors">
-                      <td className="py-4">
+                      <td className="py-4 px-4 sm:px-0">
                         <div className="font-mono mb-1">RM-{booking.id.toString().padStart(4, "0")}</div>
                         <div className="text-muted-foreground text-xs flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
                           {format(new Date(booking.pickupAt), "MMM d, HH:mm")}
                         </div>
                       </td>
-                      <td className="py-4 text-muted-foreground">{booking.passengerName}</td>
-                      <td className="py-4 text-muted-foreground text-xs max-w-[200px] truncate" title={`${booking.pickupAddress} → ${booking.dropoffAddress}`}>
+                      <td className="py-4 text-muted-foreground whitespace-nowrap">{booking.passengerName}</td>
+                      <td className="py-4 text-muted-foreground text-xs max-w-[180px] truncate" title={`${booking.pickupAddress} → ${booking.dropoffAddress}`}>
                         {booking.pickupAddress.split(",")[0]}
                         <br />
                         <span className="opacity-50">to</span> {booking.dropoffAddress.split(",")[0]}
                       </td>
-                      <td className="py-4 text-muted-foreground capitalize">{booking.vehicleClass.replace("_", " ")}</td>
-                      <td className="py-4 text-right font-mono">${booking.priceQuoted}</td>
-                      <td className="py-4 text-right">
-                        <span className={`inline-block px-3 py-1 text-xs uppercase tracking-widest border ${STATUS_COLORS[booking.status]}`}>
+                      <td className="py-4 text-muted-foreground capitalize whitespace-nowrap">{booking.vehicleClass.replace("_", " ")}</td>
+                      <td className="py-4 text-right font-mono whitespace-nowrap">${booking.priceQuoted}</td>
+                      <td className="py-4 text-right pr-4 sm:pr-0">
+                        <span className={`inline-block px-2 sm:px-3 py-1 text-xs uppercase tracking-widest border ${STATUS_COLORS[booking.status]}`}>
                           {booking.status.replace("_", " ")}
                         </span>
                       </td>
