@@ -236,6 +236,82 @@ router.patch("/drivers/:id/contact", requireAuth, async (req, res): Promise<void
   res.json(parseDriver(updated));
 });
 
+// Driver payout (banking) info — driver self-service
+router.get("/drivers/:id/payout", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
+  if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== driver.userId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  // Return masked sensitive fields
+  res.json({
+    payoutLegalName: driver.payoutLegalName ?? "",
+    payoutEmail: driver.payoutEmail ?? "",
+    payoutBankName: driver.payoutBankName ?? "",
+    hasSsn: !!driver.payoutSsn,
+    ssnLast4: driver.payoutSsn ? driver.payoutSsn.slice(-4) : null,
+    hasRoutingNumber: !!driver.payoutRoutingNumber,
+    routingLast4: driver.payoutRoutingNumber ? driver.payoutRoutingNumber.slice(-4) : null,
+    hasAccountNumber: !!driver.payoutAccountNumber,
+    accountLast4: driver.payoutAccountNumber ? driver.payoutAccountNumber.slice(-4) : null,
+  });
+});
+
+router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
+  if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== driver.userId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  const { payoutLegalName, payoutEmail, payoutSsn, payoutBankName, payoutRoutingNumber, payoutAccountNumber } =
+    req.body as Record<string, string | undefined>;
+
+  const updates: Partial<typeof driversTable.$inferInsert> = {};
+  if (payoutLegalName !== undefined) updates.payoutLegalName = payoutLegalName.trim() || null;
+  if (payoutEmail !== undefined) updates.payoutEmail = payoutEmail.trim() || null;
+  if (payoutBankName !== undefined) updates.payoutBankName = payoutBankName.trim() || null;
+  // Only update sensitive fields if a new value is actually provided (non-empty)
+  if (payoutSsn && payoutSsn.replace(/\D/g, "").length >= 9) {
+    updates.payoutSsn = payoutSsn.replace(/\D/g, "");
+  }
+  if (payoutRoutingNumber && payoutRoutingNumber.replace(/\D/g, "").length === 9) {
+    updates.payoutRoutingNumber = payoutRoutingNumber.replace(/\D/g, "");
+  }
+  if (payoutAccountNumber && payoutAccountNumber.replace(/\D/g, "").length >= 4) {
+    updates.payoutAccountNumber = payoutAccountNumber.replace(/\D/g, "");
+  }
+
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ error: "No valid fields to update" }); return;
+  }
+
+  const [updated] = await db.update(driversTable).set(updates).where(eq(driversTable.id, id)).returning();
+
+  res.json({
+    payoutLegalName: updated.payoutLegalName ?? "",
+    payoutEmail: updated.payoutEmail ?? "",
+    payoutBankName: updated.payoutBankName ?? "",
+    hasSsn: !!updated.payoutSsn,
+    ssnLast4: updated.payoutSsn ? updated.payoutSsn.slice(-4) : null,
+    hasRoutingNumber: !!updated.payoutRoutingNumber,
+    routingLast4: updated.payoutRoutingNumber ? updated.payoutRoutingNumber.slice(-4) : null,
+    hasAccountNumber: !!updated.payoutAccountNumber,
+    accountLast4: updated.payoutAccountNumber ? updated.payoutAccountNumber.slice(-4) : null,
+  });
+});
+
 // Driver location update — driver sends GPS coords every 30 seconds when sharing is enabled
 router.patch("/drivers/:id/location", requireAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);

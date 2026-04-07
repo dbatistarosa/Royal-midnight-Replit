@@ -45,6 +45,14 @@ export const driversTable = pgTable("drivers", {
   locationUpdatedAt: timestamp("location_updated_at", { withTimezone: true }),
 
   profilePicture: text("profile_picture"),
+
+  // Payout / banking information
+  payoutLegalName: text("payout_legal_name"),
+  payoutEmail: text("payout_email"),
+  payoutSsn: text("payout_ssn"),
+  payoutBankName: text("payout_bank_name"),
+  payoutRoutingNumber: text("payout_routing_number"),
+  payoutAccountNumber: text("payout_account_number"),
 });
 
 export const insertDriverSchema = createInsertSchema(driversTable).omit({ id: true, createdAt: true, updatedAt: true });
