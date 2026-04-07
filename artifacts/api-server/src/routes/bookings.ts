@@ -3,6 +3,7 @@ import { eq, desc, and, isNull } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
+  sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
   sendNewBookingAvailableToDrivers,
   sendBookingCancelledAdmin,
@@ -187,6 +188,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
         passengers: parsed2.passengers ?? 1,
         driverEarnings,
       };
+      await sendBookingConfirmationPassenger(emailData);
       await sendNewBookingAdmin(emailData);
       // Notify all approved online drivers
       const approvedDrivers = await db

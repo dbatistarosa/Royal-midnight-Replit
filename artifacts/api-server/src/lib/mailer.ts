@@ -68,6 +68,28 @@ export type BookingEmailData = {
   status?: string;
 };
 
+export async function sendBookingConfirmationPassenger(b: BookingEmailData) {
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Booking Confirmed</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Thank you for choosing Royal Midnight. Your reservation is confirmed and our team will be in touch shortly.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking #", String(b.id))}
+  ${row("Pickup", b.pickupAddress)}
+  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+  ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
+  ${row("Passengers", String(b.passengers))}
+  ${row("Total Fare", `<span style="color:#c9a84c;font-weight:bold">$${b.priceQuoted.toFixed(2)}</span>`)}
+  ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
+  ${b.specialRequests ? row("Special Requests", b.specialRequests) : ""}
+</table>
+<p style="margin-top:24px;color:#888;font-size:12px">
+  Questions? Reply to this email or contact our support team.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(b.passengerEmail, `Booking Confirmed — Royal Midnight #${b.id}`, html);
+}
+
 export async function sendNewBookingAdmin(b: BookingEmailData) {
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 20px">New Booking #${b.id}</h2>
