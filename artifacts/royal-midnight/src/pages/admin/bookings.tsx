@@ -238,6 +238,24 @@ export default function AdminBookings() {
     setAssignSaving(false);
   };
 
+  const handleUnassign = async (bookingId: number) => {
+    if (!confirm("Unassign the driver from this booking? It will return to the available pool.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${bookingId}/unassign`, {
+        method: "POST",
+        headers: { Authorization: authHdr },
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        throw new Error(err.error ?? "Failed to unassign driver");
+      }
+      toast({ title: "Driver unassigned", description: "The booking is now back in the available pool." });
+      refetch();
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not unassign driver.", variant: "destructive" });
+    }
+  };
+
   const setField = (k: keyof FormData, v: string) => setCreateForm(prev => {
     const updated = { ...prev, [k]: v };
     if (k === "vehicleClass") {
@@ -358,7 +376,7 @@ export default function AdminBookings() {
                           <button onClick={() => { setAssigningId(null); setAssignDriverId(""); }} className="text-muted-foreground hover:text-white text-xs">Cancel</button>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           {b.driverId ? (
                             <span className="text-xs text-green-400">Driver #{b.driverId}</span>
                           ) : (
@@ -370,6 +388,14 @@ export default function AdminBookings() {
                               className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2"
                             >
                               {b.driverId ? "Reassign" : "Assign"}
+                            </button>
+                          )}
+                          {b.driverId && !["completed", "cancelled"].includes(b.status) && (
+                            <button
+                              onClick={() => void handleUnassign(b.id)}
+                              className="text-xs text-red-400/60 hover:text-red-400 underline underline-offset-2"
+                            >
+                              Unassign
                             </button>
                           )}
                         </div>

@@ -3,6 +3,14 @@ import { eq, desc, and, isNull } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
+  sendNewBookingAdmin,
+  sendNewBookingAvailableToDrivers,
+  sendBookingCancelledAdmin,
+  sendDriverAcceptedAdmin,
+  sendDriverUnassignedAdmin,
+  sendStatusChangedAdmin,
+} from "../lib/mailer.js";
+import {
   ListBookingsQueryParams,
   ListBookingsResponse,
   CreateBookingBody,
@@ -166,6 +174,32 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     .returning();
 
   res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
+
+  // Fire-and-forget email notifications
+  (async () => {
+    try {
+      const parsed2 = parseBooking(booking);
+      const commissionPct = await getCommissionPct();
+      const driverEarnings = Math.round(parsed2.priceQuoted * commissionPct * 100) / 100;
+      const emailData = {
+        ...parsed2,
+        vehicleClass: parsed2.vehicleClass ?? "business",
+        passengers: parsed2.passengers ?? 1,
+        driverEarnings,
+      };
+      await sendNewBookingAdmin(emailData);
+      // Notify all approved online drivers
+      const approvedDrivers = await db
+        .select({ email: usersTable.email })
+        .from(driversTable)
+        .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
+        .where(eq(driversTable.approvalStatus, "approved"));
+      const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
+      await sendNewBookingAvailableToDrivers(emailData, driverEmails);
+    } catch (err) {
+      console.error("[bookings] post-create email error:", err);
+    }
+  })();
 });
 
 // Public tracking endpoint — returns only non-sensitive status fields (no fare/PII)
@@ -245,6 +279,8 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
 
+  const [before] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, params.data.id));
+
   const updateData: Record<string, unknown> = {};
   if (parsed.data.status != null) updateData.status = parsed.data.status;
   if (parsed.data.driverId !== undefined) updateData.driverId = parsed.data.driverId;
@@ -263,6 +299,17 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
   }
 
   res.json(UpdateBookingResponse.parse(parseBooking(booking)));
+
+  // Fire-and-forget: notify admin on status change
+  if (before && parsed.data.status && before.status !== parsed.data.status) {
+    (async () => {
+      try {
+        await sendStatusChangedAdmin(booking.id, before.status, booking.status, booking.passengerName);
+      } catch (err) {
+        console.error("[bookings] status change email error:", err);
+      }
+    })();
+  }
 });
 
 // Driver self-assigns a pending booking
@@ -311,7 +358,70 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
     return;
   }
 
+  const commissionPct2 = await getCommissionPct();
+  const parsedUpdated = parseBooking(updated);
+  res.json(parsedUpdated);
+
+  // Fire-and-forget: notify admin that driver accepted
+  (async () => {
+    try {
+      const [driverUser] = await db
+        .select({ name: usersTable.name, email: usersTable.email })
+        .from(usersTable)
+        .where(eq(usersTable.id, caller.userId));
+      await sendDriverAcceptedAdmin(
+        { ...parsedUpdated, vehicleClass: parsedUpdated.vehicleClass ?? "business", passengers: parsedUpdated.passengers ?? 1, driverEarnings: Math.round(parsedUpdated.priceQuoted * commissionPct2 * 100) / 100 },
+        driverUser?.name ?? "Driver",
+        driverUser?.email ?? "",
+      );
+    } catch (err) {
+      console.error("[bookings] accept email error:", err);
+    }
+  })();
+});
+
+// Admin: unassign driver from a booking (puts it back in the open pool)
+router.post("/bookings/:id/unassign", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid booking id" });
+    return;
+  }
+
+  const [existing] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Booking not found" });
+    return;
+  }
+
+  if (!existing.driverId) {
+    res.status(400).json({ error: "Booking has no driver assigned" });
+    return;
+  }
+
+  const prevDriverId = existing.driverId;
+
+  const [updated] = await db
+    .update(bookingsTable)
+    .set({ driverId: null, status: "pending" })
+    .where(eq(bookingsTable.id, id))
+    .returning();
+
   res.json(parseBooking(updated));
+
+  // Fire-and-forget: notify admin
+  (async () => {
+    try {
+      const [driverUser] = await db
+        .select({ name: usersTable.name })
+        .from(driversTable)
+        .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
+        .where(eq(driversTable.id, prevDriverId));
+      await sendDriverUnassignedAdmin(id, driverUser?.name ?? `Driver #${prevDriverId}`, existing.passengerName);
+    } catch (err) {
+      console.error("[bookings] unassign email error:", err);
+    }
+  })();
 });
 
 router.delete("/bookings/:id", async (req, res): Promise<void> => {
@@ -320,6 +430,8 @@ router.delete("/bookings/:id", async (req, res): Promise<void> => {
     res.status(400).json({ error: params.error.message });
     return;
   }
+
+  const [existing] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, params.data.id));
 
   const [booking] = await db
     .update(bookingsTable)
@@ -333,6 +445,22 @@ router.delete("/bookings/:id", async (req, res): Promise<void> => {
   }
 
   res.sendStatus(204);
+
+  // Fire-and-forget: notify admin
+  if (existing) {
+    (async () => {
+      try {
+        const parsed2 = parseBooking(existing);
+        await sendBookingCancelledAdmin({
+          ...parsed2,
+          vehicleClass: parsed2.vehicleClass ?? "business",
+          passengers: parsed2.passengers ?? 1,
+        });
+      } catch (err) {
+        console.error("[bookings] cancel email error:", err);
+      }
+    })();
+  }
 });
 
 export default router;

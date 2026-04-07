@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { sql, desc, eq } from "drizzle-orm";
-import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable } from "@workspace/db";
 import {
   GetAdminStatsResponse,
   GetRecentBookingsQueryParams,
@@ -104,6 +104,14 @@ router.get("/admin/recent-bookings", async (req, res): Promise<void> => {
 });
 
 router.get("/admin/revenue", async (_req, res): Promise<void> => {
+  // Fetch commission rate from settings
+  const [commRow] = await db
+    .select({ value: settingsTable.value })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, "driver_commission_pct"));
+  const rawPct = parseFloat(commRow?.value ?? "0.80");
+  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+
   const daily = await db
     .select({
       date: sql<string>`date(created_at)::text`,
@@ -124,7 +132,26 @@ router.get("/admin/revenue", async (_req, res): Promise<void> => {
     .from(bookingsTable)
     .groupBy(bookingsTable.vehicleClass);
 
-  res.json(GetRevenueStatsResponse.parse({ daily, byVehicleClass }));
+  const [totals] = await db
+    .select({
+      totalRevenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
+      completedCount: sql<number>`count(*) filter (where status = 'completed')::int`,
+    })
+    .from(bookingsTable);
+
+  const totalRevenue = totals?.totalRevenue ?? 0;
+  const totalCommissionPaid = Math.round(totalRevenue * commissionPct * 100) / 100;
+  const totalCompanyRevenue = Math.round((totalRevenue - totalCommissionPaid) * 100) / 100;
+
+  res.json(GetRevenueStatsResponse.parse({
+    daily,
+    byVehicleClass,
+    totalRevenue,
+    totalCommissionPaid,
+    totalCompanyRevenue,
+    commissionPct,
+    completedRides: totals?.completedCount ?? 0,
+  }));
 });
 
 router.get("/admin/dispatch", async (_req, res): Promise<void> => {

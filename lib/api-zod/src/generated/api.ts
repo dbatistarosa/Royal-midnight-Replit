@@ -1103,6 +1103,11 @@ export const GetRevenueStatsResponse = zod.object({
       bookings: zod.number(),
     }),
   ),
+  totalRevenue: zod.number().optional(),
+  totalCommissionPaid: zod.number().optional(),
+  totalCompanyRevenue: zod.number().optional(),
+  commissionPct: zod.number().optional(),
+  completedRides: zod.number().optional(),
 });
 
 /**

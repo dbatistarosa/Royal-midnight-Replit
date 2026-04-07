@@ -985,6 +985,29 @@ export default function Book() {
                           )}
                         </div>
 
+                        {/* Cancellation Policy */}
+                        <div className="border border-amber-900/30 bg-amber-950/10 p-4">
+                          <p className="text-[10px] uppercase tracking-[0.3em] text-amber-500/70 mb-3 flex items-center gap-1.5">
+                            <span className="inline-block w-3.5 h-3.5 rounded-full border border-amber-500/50 text-center leading-[13px] text-[9px]">!</span>
+                            Cancellation Policy
+                          </p>
+                          <div className="space-y-2">
+                            {[
+                              { time: "0–2 hours before", fee: "100%", desc: "No refund" },
+                              { time: "2–12 hours before", fee: "50%", desc: "50% refund" },
+                              { time: "12–24 hours before", fee: "25%", desc: "75% refund" },
+                              { time: "1+ day before", fee: "0%", desc: "Full refund" },
+                            ].map(tier => (
+                              <div key={tier.time} className="flex items-center justify-between text-xs">
+                                <span className="text-gray-500">{tier.time}</span>
+                                <span className={`font-medium ${tier.fee === "0%" ? "text-green-400" : tier.fee === "100%" ? "text-red-400/80" : "text-amber-400/80"}`}>
+                                  {tier.fee} fee &middot; {tier.desc}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
                         <div className="bg-white/3 border border-white/8 p-4 flex gap-3 items-start">
                           <Lock className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
                           <div>
