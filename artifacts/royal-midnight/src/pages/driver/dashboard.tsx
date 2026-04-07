@@ -641,7 +641,7 @@ export default function DriverDashboard() {
       ) : (
         <>
           {/* Stats Row */}
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
             <div className="bg-card border border-border p-5">
               <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-2">Today's Earnings</h3>
               <div className="text-3xl font-serif text-primary">
