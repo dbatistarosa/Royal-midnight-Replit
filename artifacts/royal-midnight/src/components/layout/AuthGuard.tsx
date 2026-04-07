@@ -13,13 +13,17 @@ export function AuthGuard({ children, requiredRole, redirectTo = "/auth/login" }
   const { user, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
 
+  // Corporate routes are strictly corporate-only — admin bypass does not apply
+  const isCorporateRoute = requiredRole === "corporate";
+  const hasAccess = !requiredRole || user?.role === requiredRole || (!isCorporateRoute && user?.role === "admin");
+
   useEffect(() => {
     if (!isAuthenticated) {
       setLocation(redirectTo);
-    } else if (requiredRole && user?.role !== requiredRole && user?.role !== "admin") {
+    } else if (!hasAccess) {
       setLocation("/");
     }
-  }, [isAuthenticated, user, requiredRole, redirectTo, setLocation]);
+  }, [isAuthenticated, hasAccess, redirectTo, setLocation]);
 
   if (!isAuthenticated) {
     return (
@@ -29,7 +33,7 @@ export function AuthGuard({ children, requiredRole, redirectTo = "/auth/login" }
     );
   }
 
-  if (requiredRole && user?.role !== requiredRole && user?.role !== "admin") {
+  if (!hasAccess) {
     return null;
   }
 

@@ -46,12 +46,16 @@ export function Navbar() {
     ? "/admin"
     : user?.role === "driver"
     ? "/driver/dashboard"
+    : user?.role === "corporate"
+    ? "/corporate/dashboard"
     : "/passenger/dashboard";
 
   const portalLabel = user?.role === "admin"
     ? "Director's Office"
     : user?.role === "driver"
     ? "Driver Portal"
+    : user?.role === "corporate"
+    ? "Corporate Portal"
     : "My Account";
 
   return (

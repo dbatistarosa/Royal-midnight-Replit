@@ -32,6 +32,7 @@ const VEHICLE_OPTIONS = [
 ];
 
 type BookingResult = { id: number };
+type QuoteResult = { estimatedPrice: number };
 
 function CorporateBookInner() {
   const { user, token } = useAuth();
@@ -51,9 +52,37 @@ function CorporateBookInner() {
     notes: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [confirmed, setConfirmed] = useState<{ id: number } | null>(null);
+  const [quotedPrice, setQuotedPrice] = useState<number | null>(null);
+  const [isQuoting, setIsQuoting] = useState(false);
+  const [confirmed, setConfirmed] = useState<{ id: number; price: number } | null>(null);
 
   const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+
+  const fetchQuote = async () => {
+    if (!form.pickupAddress || !form.dropoffAddress || !form.vehicleClass) return;
+    setIsQuoting(true);
+    try {
+      const res = await fetch(`${API_BASE}/quote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pickupAddress: form.pickupAddress,
+          dropoffAddress: form.dropoffAddress,
+          vehicleClass: form.vehicleClass,
+          passengers: form.passengers,
+          pickupAt: form.pickupAt ? new Date(form.pickupAt).toISOString() : new Date().toISOString(),
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json() as QuoteResult;
+        setQuotedPrice(data.estimatedPrice);
+      }
+    } catch {
+      // Quote not critical — silently ignore
+    } finally {
+      setIsQuoting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +93,27 @@ function CorporateBookInner() {
 
     setIsSubmitting(true);
     try {
+      // Get a fresh quote if we don't have one yet
+      let price = quotedPrice;
+      if (price === null) {
+        const qRes = await fetch(`${API_BASE}/quote`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pickupAddress: form.pickupAddress,
+            dropoffAddress: form.dropoffAddress,
+            vehicleClass: form.vehicleClass,
+            passengers: form.passengers,
+            pickupAt: new Date(form.pickupAt).toISOString(),
+          }),
+        });
+        if (qRes.ok) {
+          const qData = await qRes.json() as QuoteResult;
+          price = qData.estimatedPrice;
+          setQuotedPrice(price);
+        }
+      }
+
       const res = await fetch(`${API_BASE}/bookings`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
@@ -77,7 +127,7 @@ function CorporateBookInner() {
           vehicleClass: form.vehicleClass,
           passengers: form.passengers,
           specialRequests: form.notes || null,
-          priceQuoted: 0,
+          priceQuoted: price ?? 0,
           userId: user?.id ?? null,
           paymentType: "corporate_account",
         }),
@@ -89,7 +139,7 @@ function CorporateBookInner() {
       }
 
       const data = await res.json() as BookingResult;
-      setConfirmed({ id: data.id });
+      setConfirmed({ id: data.id, price: price ?? 0 });
     } catch (err: unknown) {
       toast({
         title: "Booking failed",
@@ -99,6 +149,12 @@ function CorporateBookInner() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const resetForm = () => {
+    setConfirmed(null);
+    setQuotedPrice(null);
+    setForm({ passengerName: "", passengerEmail: "", passengerPhone: "", pickupAddress: "", dropoffAddress: "", pickupAt: "", vehicleClass: "business", passengers: 1, specialRequests: "", notes: "" });
   };
 
   if (confirmed) {
@@ -112,6 +168,9 @@ function CorporateBookInner() {
           <p className="text-muted-foreground text-sm mb-2">
             Reference: <span className="font-mono text-primary">RM-{String(confirmed.id).padStart(6, "0")}</span>
           </p>
+          {confirmed.price > 0 && (
+            <p className="text-primary font-medium text-lg mb-2">${confirmed.price.toFixed(2)}</p>
+          )}
           <p className="text-muted-foreground text-sm mb-8">
             Your booking has been confirmed and will be billed to your corporate account. Our team will be in touch to confirm chauffeur details.
           </p>
@@ -124,7 +183,7 @@ function CorporateBookInner() {
             </Button>
             <Button
               variant="outline"
-              onClick={() => { setConfirmed(null); setForm({ passengerName: "", passengerEmail: "", passengerPhone: "", pickupAddress: "", dropoffAddress: "", pickupAt: "", vehicleClass: "business", passengers: 1, specialRequests: "", notes: "" }); }}
+              onClick={resetForm}
               className="border-border text-foreground hover:bg-white/5 rounded-none uppercase tracking-widest text-xs px-8 min-h-[44px]"
             >
               Book Another
@@ -271,8 +330,34 @@ function CorporateBookInner() {
           />
         </div>
 
-        <div className="bg-muted/30 border border-border p-4 text-sm text-muted-foreground">
-          <strong className="text-foreground">Corporate Billing:</strong> This trip will be confirmed immediately and billed to your corporate account. No payment is required at booking.
+        <div className="bg-card border border-border p-6 sm:p-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Estimated Fare</p>
+              {isQuoting ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-sm">Calculating...</span>
+                </div>
+              ) : quotedPrice !== null ? (
+                <p className="font-serif text-2xl text-primary">${quotedPrice.toFixed(2)}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">Enter route and vehicle class to see estimate</p>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!form.pickupAddress || !form.dropoffAddress || isQuoting}
+              onClick={() => void fetchQuote()}
+              className="border-border text-foreground hover:bg-white/5 rounded-none uppercase tracking-widest text-xs px-6 min-h-[44px]"
+            >
+              {isQuoting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Quoting...</> : "Get Quote"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-3">
+            <strong className="text-foreground/70">Corporate Billing:</strong> Trip confirmed immediately. Fare billed to your corporate account — no payment required at booking.
+          </p>
         </div>
 
         <div className="flex justify-end">
