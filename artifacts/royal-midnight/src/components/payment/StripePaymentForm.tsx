@@ -39,11 +39,12 @@ const appearance = {
 
 interface CheckoutFormProps {
   amount: number;
+  returnUrl?: string;
   onSuccess: (paymentIntentId: string) => void;
   onError: (message: string) => void;
 }
 
-function CheckoutForm({ amount, onSuccess, onError }: CheckoutFormProps) {
+function CheckoutForm({ amount, returnUrl, onSuccess, onError }: CheckoutFormProps) {
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -56,6 +57,9 @@ function CheckoutForm({ amount, onSuccess, onError }: CheckoutFormProps) {
     const { error, paymentIntent } = await stripe.confirmPayment({
       elements,
       redirect: "if_required",
+      confirmParams: {
+        return_url: returnUrl || window.location.href,
+      },
     });
 
     if (error) {
@@ -96,16 +100,17 @@ interface StripePaymentFormProps {
   clientSecret: string;
   publishableKey: string;
   amount: number;
+  returnUrl?: string;
   onSuccess: (paymentIntentId: string) => void;
   onError: (message: string) => void;
 }
 
-export function StripePaymentForm({ clientSecret, publishableKey, amount, onSuccess, onError }: StripePaymentFormProps) {
+export function StripePaymentForm({ clientSecret, publishableKey, amount, returnUrl, onSuccess, onError }: StripePaymentFormProps) {
   const stripePromise = loadStripe(publishableKey);
 
   return (
     <Elements stripe={stripePromise} options={{ clientSecret, appearance }}>
-      <CheckoutForm amount={amount} onSuccess={onSuccess} onError={onError} />
+      <CheckoutForm amount={amount} returnUrl={returnUrl} onSuccess={onSuccess} onError={onError} />
     </Elements>
   );
 }

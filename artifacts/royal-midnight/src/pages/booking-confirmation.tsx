@@ -47,6 +47,21 @@ export default function BookingConfirmation() {
     }
   };
 
+  // If Stripe redirected back with payment_intent param (3D Secure), confirm it server-side immediately
+  useEffect(() => {
+    if (!id) return;
+    const search = new URLSearchParams(window.location.search);
+    const paymentIntentId = search.get("payment_intent");
+    const redirectStatus = search.get("redirect_status");
+    if (paymentIntentId && redirectStatus === "succeeded") {
+      fetch(`${API_BASE}/payments/confirm/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentIntentId }),
+      }).catch(() => { /* webhook will cover it */ });
+    }
+  }, [id]);
+
   useEffect(() => {
     void load();
     pollRef.current = setInterval(() => { void load(); }, 4000);
