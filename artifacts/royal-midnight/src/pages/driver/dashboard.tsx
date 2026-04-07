@@ -309,9 +309,16 @@ function BookingCard({ booking }: { booking: BookingRow }) {
           <div className="text-xs text-primary font-medium mb-1 uppercase tracking-widest">#{booking.id}</div>
           <div className="font-medium">{booking.passengerName}</div>
         </div>
-        <span className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20 capitalize">
-          {booking.status.replace(/_/g, " ")}
-        </span>
+        <div className="flex flex-col items-end gap-1.5">
+          <span className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20 capitalize">
+            {booking.status.replace(/_/g, " ")}
+          </span>
+          {booking.driverEarnings != null && (
+            <span className="text-sm font-semibold text-primary tabular-nums">
+              ${booking.driverEarnings.toFixed(2)}
+            </span>
+          )}
+        </div>
       </div>
       <div className="text-sm text-muted-foreground">
         {booking.pickupAddress} → {booking.dropoffAddress}
@@ -322,7 +329,7 @@ function BookingCard({ booking }: { booking: BookingRow }) {
         </div>
       )}
 
-      {expanded && <BookingDetailPanel booking={booking} showEarnings />}
+      {expanded && <BookingDetailPanel booking={booking} />}
 
       <button
         onClick={() => setExpanded(e => !e)}
@@ -380,9 +387,16 @@ function AvailableRideCard({
           <div className="text-xs text-primary font-medium mb-1 uppercase tracking-widest">#{booking.id}</div>
           <div className="font-medium">{booking.passengerName}</div>
         </div>
-        <span className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20 capitalize">
-          Available
-        </span>
+        <div className="flex flex-col items-end gap-1.5">
+          <span className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20">
+            Available
+          </span>
+          {booking.driverEarnings != null && (
+            <span className="text-sm font-semibold text-primary tabular-nums">
+              ${booking.driverEarnings.toFixed(2)}
+            </span>
+          )}
+        </div>
       </div>
       <div className="text-sm text-muted-foreground mb-1">
         <span className="inline-block">{booking.pickupAddress}</span>
