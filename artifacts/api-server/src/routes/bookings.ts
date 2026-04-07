@@ -265,6 +265,55 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
   res.json(UpdateBookingResponse.parse(parseBooking(booking)));
 });
 
+// Driver self-assigns a pending booking
+router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid booking id" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "driver") {
+    res.status(403).json({ error: "Only drivers can accept bookings" });
+    return;
+  }
+
+  const [driverRow] = await db
+    .select({ id: driversTable.id, approvalStatus: driversTable.approvalStatus })
+    .from(driversTable)
+    .where(eq(driversTable.userId, caller.userId));
+
+  if (!driverRow || driverRow.approvalStatus !== "approved") {
+    res.status(403).json({ error: "Driver not approved" });
+    return;
+  }
+
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
+  if (!booking) {
+    res.status(404).json({ error: "Booking not found" });
+    return;
+  }
+
+  if (booking.status !== "pending" || booking.driverId != null) {
+    res.status(400).json({ error: "Booking is already assigned or not available" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(bookingsTable)
+    .set({ driverId: driverRow.id, status: "confirmed" })
+    .where(and(eq(bookingsTable.id, id), isNull(bookingsTable.driverId)))
+    .returning();
+
+  if (!updated) {
+    res.status(409).json({ error: "Booking was just taken by another driver" });
+    return;
+  }
+
+  res.json(parseBooking(updated));
+});
+
 router.delete("/bookings/:id", async (req, res): Promise<void> => {
   const params = CancelBookingParams.safeParse(req.params);
   if (!params.success) {

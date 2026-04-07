@@ -1,16 +1,16 @@
 import { Router, type IRouter } from "express";
-import { db, settingsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, settingsTable, pricingRulesTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
-const BASE_FARES: Record<string, number> = {
+const DEFAULT_BASE_FARES: Record<string, number> = {
   business: 55,
   suv: 75,
 };
 
-const RATE_PER_MILE: Record<string, number> = {
+const DEFAULT_RATE_PER_MILE: Record<string, number> = {
   business: 3.5,
   suv: 4.0,
 };
@@ -120,6 +120,33 @@ async function getSetting(key: string, fallback: string): Promise<string> {
   }
 }
 
+/** Fetch active pricing rule for a given vehicle class from the DB.
+ *  Falls back to hardcoded defaults if none found. */
+async function getPricingForClass(vc: string): Promise<{ baseFare: number; ratePerMile: number; airportFee: number }> {
+  try {
+    const [rule] = await db
+      .select()
+      .from(pricingRulesTable)
+      .where(and(eq(pricingRulesTable.vehicleClass, vc), eq(pricingRulesTable.isActive, true)));
+
+    if (rule) {
+      return {
+        baseFare: parseFloat(rule.baseFare ?? "0") || (DEFAULT_BASE_FARES[vc] ?? 35),
+        ratePerMile: parseFloat(rule.ratePerMile ?? "0") || (DEFAULT_RATE_PER_MILE[vc] ?? 2.5),
+        airportFee: parseFloat(rule.airportSurcharge ?? "0") || 0,
+      };
+    }
+  } catch {
+    // fall through to defaults
+  }
+
+  return {
+    baseFare: DEFAULT_BASE_FARES[vc] ?? 35,
+    ratePerMile: DEFAULT_RATE_PER_MILE[vc] ?? 2.5,
+    airportFee: 0,
+  };
+}
+
 router.post("/quote", async (req, res): Promise<void> => {
   const parsed = GetQuoteBody.safeParse(req.body);
   if (!parsed.success) {
@@ -144,21 +171,26 @@ router.post("/quote", async (req, res): Promise<void> => {
     return;
   }
 
-  // Get Florida tax rate from settings
+  // Get Florida tax rate from settings (stored as decimal: 0.07 = 7%)
   const taxRateStr = await getSetting("florida_tax_rate", "0.07");
-  const taxRate = parseFloat(taxRateStr);
+  let taxRate = parseFloat(taxRateStr);
+  // Normalise: if stored as whole percent (e.g. 7 instead of 0.07), convert
+  if (taxRate > 1) taxRate = taxRate / 100;
 
-  const baseFare = BASE_FARES[vc] ?? 35;
-  const ratePerMile = RATE_PER_MILE[vc] ?? 2.5;
+  // Get pricing rule from DB for this vehicle class
+  const { baseFare, ratePerMile, airportFee: ruleAirportFee } = await getPricingForClass(vc);
 
   // Driving route distance via Directions API (falls back to hardcoded estimates)
   const mapsResult = await getDirectionsDistance(pickupAddress, dropoffAddress);
   const { distance: estimatedDistance, duration: estimatedDuration } =
     mapsResult ?? fallbackDistance(pickupAddress, dropoffAddress);
 
+  // Airport fee: apply from pricing rule if either endpoint is an airport
+  const isAirport = isAirportTrip(pickupAddress) || isAirportTrip(dropoffAddress);
+  const airportFee = isAirport ? ruleAirportFee : 0;
+
   const distanceCharge = Math.round(estimatedDistance * ratePerMile * 100) / 100;
-  const airportFee = 0;
-  const subtotal = Math.round((baseFare + distanceCharge) * 100) / 100;
+  const subtotal = Math.round((baseFare + distanceCharge + airportFee) * 100) / 100;
   const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
   const totalWithTax = Math.round((subtotal + taxAmount) * 100) / 100;
 

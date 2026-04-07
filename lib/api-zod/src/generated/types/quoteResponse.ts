@@ -11,6 +11,10 @@ export interface QuoteResponse {
   estimatedPrice: number;
   baseFare: number;
   distanceCharge: number;
+  airportFee: number;
+  taxRate: number;
+  taxAmount: number;
+  totalWithTax: number;
   estimatedDuration: number;
   estimatedDistance: number;
   currency: string;

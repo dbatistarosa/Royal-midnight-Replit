@@ -105,6 +105,9 @@ export default function Book() {
   const [minBookingHours, setMinBookingHours] = useState(2);
   const [pickupAirline, setPickupAirline] = useState("");
   const [dropoffAirline, setDropoffAirline] = useState("");
+  const [promoCode, setPromoCode] = useState("");
+  const [promoValidating, setPromoValidating] = useState(false);
+  const [promoResult, setPromoResult] = useState<{ valid: boolean; discountAmount: number | null; finalAmount: number | null; message: string } | null>(null);
 
   const getQuote = useGetQuote();
 
@@ -313,7 +316,9 @@ export default function Book() {
           pickupAt: isoDate,
           flightNumber: values.flightNumber || null,
           specialRequests: values.specialRequests || null,
-          priceQuoted: selectedQuote.totalWithTax,
+          priceQuoted: effectiveTotal,
+          promoCode: promoResult?.valid && promoCode ? promoCode.toUpperCase() : null,
+          discountAmount: promoResult?.valid && promoResult.discountAmount != null ? promoResult.discountAmount : null,
           userId: userId,
           paymentType: "standard",
         }),
@@ -335,7 +340,7 @@ export default function Book() {
       const intentRes = await fetch(`${API_BASE}/payments/create-intent`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: selectedQuote.totalWithTax, bookingId }),
+        body: JSON.stringify({ amount: effectiveTotal, bookingId }),
       });
       if (!intentRes.ok) throw new Error("Could not initiate payment. Please try again.");
       const { clientSecret } = await intentRes.json() as { clientSecret: string };
@@ -347,6 +352,28 @@ export default function Book() {
       toast({ title: "Error", description: err?.message, variant: "destructive" });
     }
     setIsConfirming(false);
+  };
+
+  const effectiveTotal = promoResult?.valid && promoResult.finalAmount != null
+    ? promoResult.finalAmount
+    : selectedQuote?.totalWithTax ?? 0;
+
+  const handlePromoValidate = async () => {
+    if (!promoCode.trim() || !selectedQuote) return;
+    setPromoValidating(true);
+    try {
+      const res = await fetch(`${API_BASE}/promos/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: promoCode.trim(), amount: selectedQuote.totalWithTax }),
+      });
+      const data = await res.json() as { valid: boolean; discountAmount: number | null; finalAmount: number | null; message: string };
+      setPromoResult(data);
+    } catch {
+      setPromoResult({ valid: false, discountAmount: null, finalAmount: null, message: "Could not validate promo code." });
+    } finally {
+      setPromoValidating(false);
+    }
   };
 
   const handlePaymentSuccess = (_paymentIntentId: string) => {
@@ -873,28 +900,19 @@ export default function Book() {
                       </div>
                     )}
 
-                    {/* Price breakdown */}
-                    <div className="border-t border-white/8 pt-5 space-y-2.5">
-                      <p className="text-[10px] uppercase tracking-[0.3em] text-gray-600 mb-3">Price Breakdown</p>
-                      <div className="flex justify-between text-sm text-gray-500">
-                        <span>Base fare</span>
-                        <span>${selectedQuote.baseFare.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm text-gray-500">
-                        <span>Distance ({selectedQuote.estimatedDistance.toFixed(1)} mi)</span>
-                        <span>${selectedQuote.distanceCharge.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm text-gray-500 border-t border-white/8 pt-2">
-                        <span>Subtotal</span>
-                        <span>${(selectedQuote.baseFare + selectedQuote.distanceCharge).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm text-gray-500">
-                        <span>Florida tax ({(selectedQuote.taxRate * 100).toFixed(0)}%)</span>
-                        <span>${selectedQuote.taxAmount.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between items-baseline pt-3 border-t border-white/15">
+                    {/* Total */}
+                    <div className="border-t border-white/8 pt-5">
+                      <div className="flex justify-between items-baseline">
                         <span className="text-base text-white font-serif">Total Due</span>
-                        <span className="text-3xl font-serif text-primary">${selectedQuote.totalWithTax.toFixed(2)}</span>
+                        <div className="text-right">
+                          {promoResult?.valid && promoResult.discountAmount != null && (
+                            <div className="text-xs text-green-400 line-through text-right">${selectedQuote.totalWithTax.toFixed(2)}</div>
+                          )}
+                          <span className="text-3xl font-serif text-primary">${effectiveTotal.toFixed(2)}</span>
+                          {promoResult?.valid && promoResult.discountAmount != null && (
+                            <div className="text-xs text-green-400">−${promoResult.discountAmount.toFixed(2)} discount</div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -915,7 +933,7 @@ export default function Book() {
                         <StripePaymentForm
                           clientSecret={paymentClientSecret}
                           publishableKey={paymentPublishableKey}
-                          amount={selectedQuote.totalWithTax}
+                          amount={effectiveTotal}
                           onSuccess={handlePaymentSuccess}
                           onError={handlePaymentError}
                         />
@@ -929,8 +947,42 @@ export default function Book() {
                         {/* Amount callout */}
                         <div className="bg-primary/5 border border-primary/15 p-5 text-center">
                           <p className="text-[10px] uppercase tracking-[0.3em] text-gray-600 mb-1">You will be charged</p>
-                          <p className="text-4xl font-serif text-primary">${selectedQuote.totalWithTax.toFixed(2)}</p>
-                          <p className="text-xs text-gray-700 mt-1">All inclusive — no hidden fees</p>
+                          {promoResult?.valid && promoResult.discountAmount != null && (
+                            <p className="text-sm text-gray-500 line-through">${selectedQuote.totalWithTax.toFixed(2)}</p>
+                          )}
+                          <p className="text-4xl font-serif text-primary">${effectiveTotal.toFixed(2)}</p>
+                          {promoResult?.valid && promoResult.discountAmount != null
+                            ? <p className="text-xs text-green-400 mt-1">Promo applied — saving ${promoResult.discountAmount.toFixed(2)}</p>
+                            : <p className="text-xs text-gray-700 mt-1">All inclusive — no hidden fees</p>
+                          }
+                        </div>
+
+                        {/* Promo code */}
+                        <div>
+                          <p className="text-[10px] uppercase tracking-[0.3em] text-gray-600 mb-2">Promo Code</p>
+                          <div className="flex gap-2">
+                            <Input
+                              value={promoCode}
+                              onChange={e => { setPromoCode(e.target.value.toUpperCase()); setPromoResult(null); }}
+                              placeholder="Enter code"
+                              className="flex-1 bg-transparent border-white/12 text-white placeholder:text-gray-600 rounded-none text-xs h-10 uppercase"
+                              onKeyDown={e => e.key === "Enter" && void handlePromoValidate()}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => void handlePromoValidate()}
+                              disabled={promoValidating || !promoCode.trim()}
+                              className="border-white/20 text-white/70 hover:text-white hover:bg-white/5 rounded-none text-xs px-4 h-10"
+                            >
+                              {promoValidating ? <Loader2 className="w-3 h-3 animate-spin" /> : "Apply"}
+                            </Button>
+                          </div>
+                          {promoResult && (
+                            <p className={`text-xs mt-1.5 ${promoResult.valid ? "text-green-400" : "text-red-400"}`}>
+                              {promoResult.message}
+                            </p>
+                          )}
                         </div>
 
                         <div className="bg-white/3 border border-white/8 p-4 flex gap-3 items-start">
@@ -951,7 +1003,7 @@ export default function Book() {
                         >
                           {isConfirming
                             ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Preparing...</>
-                            : `Pay $${selectedQuote.totalWithTax.toFixed(2)}`}
+                            : `Pay $${effectiveTotal.toFixed(2)}`}
                         </Button>
 
                         <Button

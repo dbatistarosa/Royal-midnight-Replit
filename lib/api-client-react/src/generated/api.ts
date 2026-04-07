@@ -1116,6 +1116,90 @@ export const useCancelBooking = <
 };
 
 /**
+ * @summary Driver accepts a pending booking
+ */
+export const getAcceptBookingUrl = (id: number) => {
+  return `/api/bookings/${id}/accept`;
+};
+
+export const acceptBooking = async (
+  id: number,
+  options?: RequestInit,
+): Promise<Booking> => {
+  return customFetch<Booking>(getAcceptBookingUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAcceptBookingMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acceptBooking>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof acceptBooking>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["acceptBooking"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof acceptBooking>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return acceptBooking(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AcceptBookingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acceptBooking>>
+>;
+
+export type AcceptBookingMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Driver accepts a pending booking
+ */
+export const useAcceptBooking = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acceptBooking>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof acceptBooking>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getAcceptBookingMutationOptions(options));
+};
+
+/**
  * @summary Get upfront price quote
  */
 export const getGetQuoteUrl = () => {

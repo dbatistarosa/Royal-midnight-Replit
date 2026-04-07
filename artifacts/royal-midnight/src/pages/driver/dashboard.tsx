@@ -224,7 +224,7 @@ function BookingCard({ booking }: { booking: BookingRow }) {
           <div className="font-medium">{booking.passengerName}</div>
         </div>
         <span className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20 capitalize">
-          {booking.status.replace("_", " ")}
+          {booking.status.replace(/_/g, " ")}
         </span>
       </div>
       <div className="text-sm text-muted-foreground">
@@ -239,24 +239,116 @@ function BookingCard({ booking }: { booking: BookingRow }) {
   );
 }
 
-function TabAvailable({ authHeader }: { authHeader: string }) {
+function AvailableRideCard({
+  booking,
+  authHeader,
+  onAccepted,
+  onRejected,
+}: {
+  booking: BookingRow;
+  authHeader: string;
+  onAccepted: (b: BookingRow) => void;
+  onRejected: (id: number) => void;
+}) {
+  const [accepting, setAccepting] = useState(false);
+  const { toast } = useToast();
+
+  const handleAccept = async () => {
+    setAccepting(true);
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${booking.id}/accept`, {
+        method: "POST",
+        headers: { Authorization: authHeader },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed to accept" })) as { error?: string };
+        toast({ title: "Could not accept ride", description: err.error ?? "Please try again.", variant: "destructive" });
+        return;
+      }
+      const updated = await res.json() as BookingRow;
+      toast({ title: "Ride accepted", description: `Trip #${booking.id} is now yours.` });
+      onAccepted(updated);
+    } finally {
+      setAccepting(false);
+    }
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-none p-5">
+      <div className="flex justify-between items-start mb-3">
+        <div>
+          <div className="text-xs text-primary font-medium mb-1 uppercase tracking-widest">#{booking.id}</div>
+          <div className="font-medium">{booking.passengerName}</div>
+        </div>
+        <span className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20 capitalize">
+          Pending
+        </span>
+      </div>
+      <div className="text-sm text-muted-foreground mb-1">
+        {booking.pickupAddress} → {booking.dropoffAddress}
+      </div>
+      {booking.pickupAt && (
+        <div className="text-xs text-muted-foreground mb-4">
+          {format(new Date(booking.pickupAt), "MMM d, yyyy 'at' h:mm a")}
+        </div>
+      )}
+      <div className="flex gap-3 pt-3 border-t border-border">
+        <button
+          onClick={() => onRejected(booking.id)}
+          className="flex-1 py-2 text-xs uppercase tracking-widest border border-white/20 text-muted-foreground hover:border-red-500/50 hover:text-red-400 transition-colors"
+        >
+          Reject
+        </button>
+        <button
+          onClick={handleAccept}
+          disabled={accepting}
+          className="flex-1 py-2 text-xs uppercase tracking-widest bg-primary text-black font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+        >
+          {accepting ? "Accepting..." : "Accept"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TabAvailable({ authHeader, onRideAccepted }: { authHeader: string; onRideAccepted?: () => void }) {
   const [trips, setTrips] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Fetch unassigned pending trips — backend scopes to driverId IS NULL for drivers
+  const loadTrips = () => {
     fetch(`${API_BASE}/bookings?status=pending`, { headers: { Authorization: authHeader } })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
       .then(data => setTrips(Array.isArray(data) ? data : []))
       .catch(() => setTrips([]))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadTrips();
   }, [authHeader]);
 
-  if (loading) return <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-24 bg-card/50 animate-pulse border border-border" />)}</div>;
+  const handleAccepted = (_updated: BookingRow) => {
+    setTrips(prev => prev.filter(t => t.id !== _updated.id));
+    onRideAccepted?.();
+  };
+
+  const handleRejected = (id: number) => {
+    setTrips(prev => prev.filter(t => t.id !== id));
+  };
+
+  if (loading) return <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-32 bg-card/50 animate-pulse border border-border" />)}</div>;
 
   return trips.length > 0 ? (
     <div className="space-y-3">
-      {trips.map(b => <BookingCard key={b.id} booking={b} />)}
+      {trips.map(b => (
+        <AvailableRideCard
+          key={b.id}
+          booking={b}
+          authHeader={authHeader}
+          onAccepted={handleAccepted}
+          onRejected={handleRejected}
+        />
+      ))}
     </div>
   ) : (
     <div className="bg-card border border-border p-8 text-center text-muted-foreground text-sm">
@@ -265,17 +357,18 @@ function TabAvailable({ authHeader }: { authHeader: string }) {
   );
 }
 
-function TabMyRides({ driverId, authHeader }: { driverId: number; authHeader: string }) {
+function TabMyRides({ driverId, authHeader, refreshKey }: { driverId: number; authHeader: string; refreshKey?: number }) {
   const [rides, setRides] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
       .then(data => setRides(Array.isArray(data) ? data.filter(b => ["confirmed", "in_progress", "assigned"].includes(b.status)) : []))
       .catch(() => setRides([]))
       .finally(() => setLoading(false));
-  }, [driverId, authHeader]);
+  }, [driverId, authHeader, refreshKey]);
 
   if (loading) return <div className="space-y-3">{[1,2].map(i => <div key={i} className="h-24 bg-card/50 animate-pulse border border-border" />)}</div>;
 
@@ -566,6 +659,7 @@ export default function DriverDashboard() {
   const [activeTab, setActiveTab] = useState<DashboardTab>("available");
   const [earnings, setEarnings] = useState<EarningsData | null>(null);
   const [upcomingCount, setUpcomingCount] = useState<number | null>(null);
+  const [myRidesRefreshKey, setMyRidesRefreshKey] = useState(0);
 
   const authHeader = `Bearer ${token ?? ""}`;
 
@@ -686,8 +780,17 @@ export default function DriverDashboard() {
           </div>
 
           {/* Tab Content */}
-          {activeTab === "available" && <TabAvailable authHeader={authHeader} />}
-          {activeTab === "my_rides" && <TabMyRides driverId={driverRecord.id} authHeader={authHeader} />}
+          {activeTab === "available" && (
+            <TabAvailable
+              authHeader={authHeader}
+              onRideAccepted={() => {
+                setMyRidesRefreshKey(k => k + 1);
+                setUpcomingCount(c => (c ?? 0) + 1);
+                setActiveTab("my_rides");
+              }}
+            />
+          )}
+          {activeTab === "my_rides" && <TabMyRides driverId={driverRecord.id} authHeader={authHeader} refreshKey={myRidesRefreshKey} />}
           {activeTab === "earnings" && <TabEarnings driverId={driverRecord.id} authHeader={authHeader} />}
           {activeTab === "stats" && <TabStats driverId={driverRecord.id} authHeader={authHeader} rating={driverRecord.rating ?? null} totalRides={driverRecord.totalRides ?? 0} />}
           {activeTab === "history" && <TabHistory driverId={driverRecord.id} authHeader={authHeader} />}

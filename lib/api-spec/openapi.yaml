@@ -311,6 +311,37 @@ paths:
         "204":
           description: Booking cancelled
 
+  /bookings/{id}/accept:
+    post:
+      operationId: acceptBooking
+      tags: [bookings]
+      summary: Driver accepts a pending booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Booking accepted and confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          description: Booking already assigned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── QUOTE ─────────────────────────────────────────────────────────────────
   /quote:
     post:
@@ -1516,6 +1547,14 @@ components:
           type: number
         distanceCharge:
           type: number
+        airportFee:
+          type: number
+        taxRate:
+          type: number
+        taxAmount:
+          type: number
+        totalWithTax:
+          type: number
         estimatedDuration:
           type: integer
         estimatedDistance:
@@ -1526,7 +1565,7 @@ components:
           type: ["number", "null"]
         finalPrice:
           type: ["number", "null"]
-      required: [vehicleClass, estimatedPrice, baseFare, distanceCharge, estimatedDuration, estimatedDistance, currency]
+      required: [vehicleClass, estimatedPrice, baseFare, distanceCharge, airportFee, taxRate, taxAmount, totalWithTax, estimatedDuration, estimatedDistance, currency]
 
     # ── ADDRESS SCHEMAS ───────────────────────────────────────────────────────
     SavedAddress:

@@ -273,6 +273,43 @@ export const CancelBookingParams = zod.object({
 });
 
 /**
+ * @summary Driver accepts a pending booking
+ */
+export const AcceptBookingParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const AcceptBookingResponse = zod.object({
+  id: zod.number(),
+  passengerName: zod.string(),
+  passengerEmail: zod.string(),
+  passengerPhone: zod.string(),
+  pickupAddress: zod.string(),
+  dropoffAddress: zod.string(),
+  pickupAt: zod.coerce.date(),
+  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  passengers: zod.number(),
+  flightNumber: zod.string().nullish(),
+  specialRequests: zod.string().nullish(),
+  status: zod.enum([
+    "pending",
+    "confirmed",
+    "in_progress",
+    "completed",
+    "cancelled",
+  ]),
+  priceQuoted: zod.number(),
+  promoCode: zod.string().nullish(),
+  discountAmount: zod.number().nullish(),
+  driverId: zod.number().nullish(),
+  vehicleId: zod.number().nullish(),
+  userId: zod.number().nullish(),
+  paymentType: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
+/**
  * @summary Get upfront price quote
  */
 export const GetQuoteBody = zod.object({
@@ -289,6 +326,10 @@ export const GetQuoteResponse = zod.object({
   estimatedPrice: zod.number(),
   baseFare: zod.number(),
   distanceCharge: zod.number(),
+  airportFee: zod.number(),
+  taxRate: zod.number(),
+  taxAmount: zod.number(),
+  totalWithTax: zod.number(),
   estimatedDuration: zod.number(),
   estimatedDistance: zod.number(),
   currency: zod.string(),
