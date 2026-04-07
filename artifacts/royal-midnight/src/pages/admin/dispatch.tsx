@@ -83,7 +83,7 @@ export default function AdminDispatch() {
 
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<Record<number, google.maps.Marker>>({});
+  const markersRef = useRef<Record<number, { marker: google.maps.Marker; infoWindow: google.maps.InfoWindow }>>({});
 
   const token = (() => {
     try {
@@ -167,10 +167,21 @@ export default function AdminDispatch() {
       const color = STATUS_MARKER_COLOR[effectiveStatus] ?? STATUS_MARKER_COLOR["unavailable"]!;
       const iconUrl = createSvgMarker(color);
 
-      const existingMarker = markersRef.current[driver.id];
-      if (existingMarker) {
-        existingMarker.setPosition({ lat, lng });
-        existingMarker.setIcon({ url: iconUrl, scaledSize: new google.maps.Size(32, 40) });
+      const infoContent = `
+        <div style="background:#0a0a0f;color:#f3f4f6;padding:12px 16px;font-family:Inter,sans-serif;min-width:180px;border:1px solid #27272a;">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px;color:#f9fafb;">${driver.name}</div>
+          <div style="font-size:12px;color:${color};margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">${STATUS_LABEL[effectiveStatus] ?? effectiveStatus}</div>
+          ${driver.rating != null ? `<div style="font-size:11px;color:#9ca3af;">Rating: ${driver.rating.toFixed(2)}</div>` : ""}
+          ${inTrip ? `<div style="font-size:11px;color:#9ca3af;">Trip: #${board.activeTrips.find(t => t.driverId === driver.id)?.id ?? "—"}</div>` : ""}
+          ${driver.locationUpdatedAt ? `<div style="font-size:10px;color:#6b7280;margin-top:4px;">Updated ${formatDistanceToNow(new Date(driver.locationUpdatedAt))} ago</div>` : ""}
+        </div>
+      `;
+
+      const existing = markersRef.current[driver.id];
+      if (existing) {
+        existing.marker.setPosition({ lat, lng });
+        existing.marker.setIcon({ url: iconUrl, scaledSize: new google.maps.Size(32, 40) });
+        existing.infoWindow.setContent(infoContent);
       } else {
         const marker = new google.maps.Marker({
           position: { lat, lng },
@@ -179,23 +190,13 @@ export default function AdminDispatch() {
           icon: { url: iconUrl, scaledSize: new google.maps.Size(32, 40) },
         });
 
-        const infoWindow = new google.maps.InfoWindow({
-          content: `
-            <div style="background:#0a0a0f;color:#f3f4f6;padding:12px 16px;font-family:Inter,sans-serif;min-width:180px;border:1px solid #27272a;">
-              <div style="font-weight:600;font-size:14px;margin-bottom:4px;color:#f9fafb;">${driver.name}</div>
-              <div style="font-size:12px;color:${color};margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">${STATUS_LABEL[effectiveStatus] ?? effectiveStatus}</div>
-              ${driver.rating != null ? `<div style="font-size:11px;color:#9ca3af;">Rating: ${driver.rating.toFixed(2)}</div>` : ""}
-              ${inTrip ? `<div style="font-size:11px;color:#9ca3af;">Trip: #${board.activeTrips.find(t => t.driverId === driver.id)?.id ?? "—"}</div>` : ""}
-              ${driver.locationUpdatedAt ? `<div style="font-size:10px;color:#6b7280;margin-top:4px;">Updated ${formatDistanceToNow(new Date(driver.locationUpdatedAt))} ago</div>` : ""}
-            </div>
-          `,
-        });
+        const infoWindow = new google.maps.InfoWindow({ content: infoContent });
 
         marker.addListener("click", () => {
           infoWindow.open(map, marker);
         });
 
-        markersRef.current[driver.id] = marker;
+        markersRef.current[driver.id] = { marker, infoWindow };
       }
     }
 
@@ -203,7 +204,7 @@ export default function AdminDispatch() {
     for (const idStr of Object.keys(markersRef.current)) {
       const id = Number(idStr);
       if (!currentIds.has(id)) {
-        markersRef.current[id]?.setMap(null);
+        markersRef.current[id]?.marker.setMap(null);
         delete markersRef.current[id];
       }
     }
