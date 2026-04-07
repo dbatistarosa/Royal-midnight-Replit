@@ -34,7 +34,7 @@ export default function FAQ() {
     <div className="py-24 min-h-screen">
       <div className="container mx-auto max-w-3xl px-4">
         <div className="text-center mb-16">
-          <h1 className="font-serif text-4xl md:text-6xl mb-6">Frequently Asked Questions</h1>
+          <h1 className="font-serif text-3xl sm:text-4xl md:text-6xl mb-6">Frequently Asked Questions</h1>
           <p className="text-xl text-muted-foreground">
             Everything you need to know about the Royal Midnight experience.
           </p>

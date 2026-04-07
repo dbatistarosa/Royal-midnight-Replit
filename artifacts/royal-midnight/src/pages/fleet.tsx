@@ -7,7 +7,7 @@ export default function Fleet() {
     <div className="min-h-screen bg-black pt-32 pb-24">
       <div className="container mx-auto px-6">
         <div className="text-center mb-20 max-w-3xl mx-auto">
-          <h1 className="text-5xl font-serif text-white mb-6">The Royal Fleet</h1>
+          <h1 className="text-3xl sm:text-5xl font-serif text-white mb-6">The Royal Fleet</h1>
           <p className="text-gray-400 text-lg leading-relaxed">
             Our vehicles are more than mere transportation; they are sanctuaries of privacy and comfort. 
             Every vehicle in our fleet is meticulously maintained, featuring deep tinted windows, 
@@ -15,11 +15,11 @@ export default function Fleet() {
           </p>
         </div>
 
-        <div className="space-y-32">
+        <div className="space-y-16 sm:space-y-24 md:space-y-32">
           {VEHICLE_CLASSES.map((vehicle, idx) => (
             <div 
               key={vehicle.id} 
-              className={`flex flex-col md:flex-row items-center gap-12 lg:gap-24 ${
+              className={`flex flex-col md:flex-row items-center gap-8 sm:gap-12 lg:gap-24 ${
                 idx % 2 !== 0 ? "md:flex-row-reverse" : ""
               }`}
             >
@@ -34,8 +34,8 @@ export default function Fleet() {
 
               <div className="w-full md:w-2/5">
                 <h3 className="text-primary text-sm uppercase tracking-widest mb-4 border-b border-primary/30 pb-2 inline-block">Class {idx + 1}</h3>
-                <h2 className="text-4xl font-serif text-white mb-6">{vehicle.name}</h2>
-                <p className="text-gray-400 text-lg mb-8 leading-relaxed">
+                <h2 className="text-2xl sm:text-4xl font-serif text-white mb-4 sm:mb-6">{vehicle.name}</h2>
+                <p className="text-gray-400 text-base sm:text-lg mb-6 sm:mb-8 leading-relaxed">
                   {vehicle.description} Perfect for airport transfers, executive road shows, or a discrete night out.
                 </p>
                 

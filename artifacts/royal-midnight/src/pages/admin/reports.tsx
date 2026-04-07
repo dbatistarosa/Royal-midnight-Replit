@@ -22,7 +22,7 @@ export default function AdminReports() {
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
-      <h1 className="font-serif text-3xl mb-8">Reports & Analytics</h1>
+      <h1 className="font-serif text-2xl sm:text-3xl mb-6 sm:mb-8">Reports & Analytics</h1>
       
       {isLoading ? (
         <div className="text-center py-12 text-muted-foreground">Loading reports...</div>

@@ -22,7 +22,7 @@ export default function AdminPassengers() {
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
-      <h1 className="font-serif text-3xl mb-8">Passengers</h1>
+      <h1 className="font-serif text-2xl sm:text-3xl mb-6 sm:mb-8">Passengers</h1>
       
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">

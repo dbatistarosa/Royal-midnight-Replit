@@ -212,12 +212,12 @@ function PassengerAddressesInner() {
 
   return (
     <PortalLayout title="Passenger Portal" navItems={passengerNavItems}>
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="font-serif text-3xl">Saved Addresses</h1>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 sm:mb-8 gap-3">
+        <h1 className="font-serif text-2xl sm:text-3xl">Saved Addresses</h1>
         {!isAdding && (
           <button
             onClick={() => setIsAdding(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-primary text-black text-xs uppercase tracking-widest font-medium hover:bg-primary/90 transition-colors"
+            className="flex items-center gap-2 px-5 min-h-[44px] bg-primary text-black text-xs uppercase tracking-widest font-medium hover:bg-primary/90 transition-colors self-start sm:self-auto"
           >
             <Plus className="w-4 h-4" /> Add Address
           </button>
@@ -241,13 +241,13 @@ function PassengerAddressesInner() {
             <button
               onClick={() => void handleAdd()}
               disabled={!label.trim() || !address.trim() || adding}
-              className="px-6 py-2.5 bg-primary text-black text-xs uppercase tracking-widest font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+              className="px-6 min-h-[44px] bg-primary text-black text-xs uppercase tracking-widest font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {adding ? "Saving..." : "Save Address"}
             </button>
             <button
               onClick={() => setIsAdding(false)}
-              className="px-6 py-2.5 bg-white/5 border border-white/10 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="px-6 min-h-[44px] bg-white/5 border border-white/10 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               Cancel
             </button>

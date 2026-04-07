@@ -159,9 +159,9 @@ function AdminSettingsInner() {
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
-      <div className="flex justify-between items-end mb-10">
+      <div className="flex justify-between items-end mb-8 sm:mb-10">
         <div>
-          <h1 className="font-serif text-3xl mb-1">System Settings</h1>
+          <h1 className="font-serif text-2xl sm:text-3xl mb-1">System Settings</h1>
           <p className="text-muted-foreground text-sm">Configure booking rules and pricing parameters.</p>
         </div>
       </div>

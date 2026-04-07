@@ -5,7 +5,7 @@ export default function About() {
     <div className="py-24">
       <div className="container mx-auto max-w-6xl px-4">
         <div className="text-center mb-16">
-          <h1 className="font-serif text-4xl md:text-6xl mb-6">About Royal Midnight</h1>
+          <h1 className="font-serif text-3xl sm:text-4xl md:text-6xl mb-6">About Royal Midnight</h1>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             The premier luxury black car service of South Florida. 
             Discreet, impeccable, and always on time.

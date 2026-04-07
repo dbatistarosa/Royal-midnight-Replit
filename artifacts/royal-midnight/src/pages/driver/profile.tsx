@@ -86,7 +86,7 @@ export default function DriverProfile() {
 
   return (
     <PortalLayout title="Driver Portal" navItems={driverNavItems}>
-      <h1 className="font-serif text-3xl mb-8">My Profile</h1>
+      <h1 className="font-serif text-2xl sm:text-3xl mb-6 sm:mb-8">My Profile</h1>
 
       <div className="max-w-2xl space-y-8">
         <div className="bg-card border border-border rounded-none p-8">

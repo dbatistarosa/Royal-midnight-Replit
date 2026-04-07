@@ -68,7 +68,7 @@ export default function Contact() {
     <div className="py-24">
       <div className="container mx-auto max-w-6xl px-4">
         <div className="text-center mb-16">
-          <h1 className="font-serif text-4xl md:text-6xl mb-6">Contact Us</h1>
+          <h1 className="font-serif text-3xl sm:text-4xl md:text-6xl mb-6">Contact Us</h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
             Available 24/7. How may we assist you today?
           </p>

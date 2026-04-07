@@ -179,9 +179,9 @@ export default function AdminPromos() {
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="font-serif text-3xl">Promo Codes</h1>
-        <Button onClick={openCreate} className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-5 h-10">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 sm:mb-8 gap-3">
+        <h1 className="font-serif text-2xl sm:text-3xl">Promo Codes</h1>
+        <Button onClick={openCreate} className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-5 min-h-[44px] self-start sm:self-auto">
           <Plus className="w-4 h-4 mr-2" />New Code
         </Button>
       </div>

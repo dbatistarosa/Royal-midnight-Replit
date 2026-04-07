@@ -21,7 +21,7 @@ export default function AdminFleet() {
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
-      <h1 className="font-serif text-3xl mb-8">Fleet Management</h1>
+      <h1 className="font-serif text-2xl sm:text-3xl mb-6 sm:mb-8">Fleet Management</h1>
       
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
         {isLoading ? (

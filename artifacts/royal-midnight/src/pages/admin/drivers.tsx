@@ -194,18 +194,18 @@ export default function AdminDrivers() {
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
-      <div className="flex justify-between items-end mb-8">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end mb-6 sm:mb-8 gap-3">
         <div>
-          <h1 className="font-serif text-3xl mb-1">Drivers</h1>
+          <h1 className="font-serif text-2xl sm:text-3xl mb-1">Drivers</h1>
           {pendingCount > 0 && (
             <p className="text-sm text-yellow-400">{pendingCount} application{pendingCount > 1 ? "s" : ""} pending review</p>
           )}
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
           <span className="text-xs text-muted-foreground">{drivers?.length ?? 0} total</span>
           <Button
             onClick={() => setShowAdd(true)}
-            className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-5 h-10"
+            className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-5 min-h-[44px]"
           >
             <Plus className="w-4 h-4 mr-2" />Add Driver
           </Button>

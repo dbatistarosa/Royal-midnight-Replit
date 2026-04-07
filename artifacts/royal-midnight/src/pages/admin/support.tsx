@@ -294,9 +294,9 @@ export default function AdminSupport() {
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
         <div>
-          <h1 className="font-serif text-3xl">Support Tickets</h1>
+          <h1 className="font-serif text-2xl sm:text-3xl">Support Tickets</h1>
           {openCount > 0 && (
             <p className="text-sm text-muted-foreground mt-1">{openCount} open ticket{openCount !== 1 ? "s" : ""} awaiting reply</p>
           )}

@@ -49,7 +49,7 @@ function PassengerProfileInner() {
 
   return (
     <PortalLayout title="Passenger Portal" navItems={passengerNavItems}>
-      <h1 className="font-serif text-3xl mb-8">My Profile</h1>
+      <h1 className="font-serif text-2xl sm:text-3xl mb-6 sm:mb-8">My Profile</h1>
 
       {isLoading ? (
         <div className="text-center py-12 text-muted-foreground">Loading profile...</div>

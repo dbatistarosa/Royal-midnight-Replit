@@ -37,7 +37,7 @@ export function PortalLayout({ children, navItems, title }: PortalLayoutProps) {
             href={item.href}
             onClick={() => setDrawerOpen(false)}
             className={cn(
-              "flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-colors",
+              "flex items-center gap-3 px-3 min-h-[44px] text-sm font-medium transition-colors",
               isActive
                 ? "bg-sidebar-accent text-sidebar-accent-foreground"
                 : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -78,7 +78,7 @@ export function PortalLayout({ children, navItems, title }: PortalLayoutProps) {
       >
         <div className="flex items-center justify-between p-5 border-b border-border">
           <h2 className="font-serif text-xl font-semibold text-primary">{title}</h2>
-          <button onClick={() => setDrawerOpen(false)} className="p-1 text-muted-foreground hover:text-foreground">
+          <button onClick={() => setDrawerOpen(false)} className="w-11 h-11 flex items-center justify-center text-muted-foreground hover:text-foreground -mr-1" aria-label="Close navigation">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -93,7 +93,7 @@ export function PortalLayout({ children, navItems, title }: PortalLayoutProps) {
         <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-border bg-sidebar sticky top-0 z-30">
           <button
             onClick={() => setDrawerOpen(true)}
-            className="p-2 -ml-2 text-muted-foreground hover:text-foreground"
+            className="w-11 h-11 flex items-center justify-center -ml-2 text-muted-foreground hover:text-foreground"
             aria-label="Open navigation"
           >
             <Menu className="w-5 h-5" />
