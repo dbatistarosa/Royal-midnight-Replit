@@ -1305,6 +1305,13 @@ components:
           type: ["number", "null"]
         totalRides:
           type: integer
+        latitude:
+          type: ["string", "null"]
+        longitude:
+          type: ["string", "null"]
+        locationUpdatedAt:
+          type: ["string", "null"]
+          format: date-time
         createdAt:
           type: string
           format: date-time

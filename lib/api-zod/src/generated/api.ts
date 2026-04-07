@@ -419,6 +419,9 @@ export const ListDriversResponseItem = zod.object({
   isOnline: zod.boolean(),
   rating: zod.number().nullish(),
   totalRides: zod.number(),
+  latitude: zod.string().nullish(),
+  longitude: zod.string().nullish(),
+  locationUpdatedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 export const ListDriversResponse = zod.array(ListDriversResponseItem);
@@ -460,6 +463,9 @@ export const GetDriverResponse = zod.object({
   isOnline: zod.boolean(),
   rating: zod.number().nullish(),
   totalRides: zod.number(),
+  latitude: zod.string().nullish(),
+  longitude: zod.string().nullish(),
+  locationUpdatedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -505,6 +511,9 @@ export const UpdateDriverResponse = zod.object({
   isOnline: zod.boolean(),
   rating: zod.number().nullish(),
   totalRides: zod.number(),
+  latitude: zod.string().nullish(),
+  longitude: zod.string().nullish(),
+  locationUpdatedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -538,6 +547,9 @@ export const ToggleDriverAvailabilityResponse = zod.object({
   isOnline: zod.boolean(),
   rating: zod.number().nullish(),
   totalRides: zod.number(),
+  latitude: zod.string().nullish(),
+  longitude: zod.string().nullish(),
+  locationUpdatedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -1113,6 +1125,9 @@ export const GetDispatchBoardResponse = zod.object({
       isOnline: zod.boolean(),
       rating: zod.number().nullish(),
       totalRides: zod.number(),
+      latitude: zod.string().nullish(),
+      longitude: zod.string().nullish(),
+      locationUpdatedAt: zod.coerce.date().nullish(),
       createdAt: zod.coerce.date(),
     }),
   ),

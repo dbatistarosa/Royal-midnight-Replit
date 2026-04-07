@@ -186,6 +186,12 @@ export interface Driver {
   /** @nullable */
   rating?: number | null;
   totalRides: number;
+  /** @nullable */
+  latitude?: string | null;
+  /** @nullable */
+  longitude?: string | null;
+  /** @nullable */
+  locationUpdatedAt?: string | null;
   createdAt: string;
 }
 

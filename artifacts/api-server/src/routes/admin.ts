@@ -45,7 +45,7 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   const [driverStats] = await db
     .select({
       total: sql<number>`count(*)::int`,
-      active: sql<number>`count(*) filter (where status = 'active')::int`,
+      active: sql<number>`count(*) filter (where is_online = true)::int`,
       avgRating: sql<number>`coalesce(avg(rating::numeric), 0)::float`,
     })
     .from(driversTable);
