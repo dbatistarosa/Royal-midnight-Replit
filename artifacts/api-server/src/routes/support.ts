@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
-import { eq, and } from "drizzle-orm";
-import { db, supportTicketsTable } from "@workspace/db";
+import { eq, and, asc } from "drizzle-orm";
+import { db, supportTicketsTable, ticketMessagesTable } from "@workspace/db";
+import { requireAuth, requireAdmin } from "../middleware/auth.js";
 import {
   ListTicketsQueryParams,
   ListTicketsResponse,
@@ -11,6 +12,14 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+function parseTicket(t: typeof supportTicketsTable.$inferSelect) {
+  return {
+    ...t,
+    createdAt: t.createdAt.toISOString(),
+    updatedAt: t.updatedAt.toISOString(),
+  };
+}
 
 router.get("/support", async (req, res): Promise<void> => {
   const parsed = ListTicketsQueryParams.safeParse(req.query);
@@ -28,15 +37,7 @@ router.get("/support", async (req, res): Promise<void> => {
     .from(supportTicketsTable)
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-  res.json(
-    ListTicketsResponse.parse(
-      tickets.map((t) => ({
-        ...t,
-        createdAt: t.createdAt.toISOString(),
-        updatedAt: t.updatedAt.toISOString(),
-      }))
-    )
-  );
+  res.json(ListTicketsResponse.parse(tickets.map(parseTicket)));
 });
 
 router.post("/support", async (req, res): Promise<void> => {
@@ -47,14 +48,10 @@ router.post("/support", async (req, res): Promise<void> => {
   }
 
   const [ticket] = await db.insert(supportTicketsTable).values(parsed.data).returning();
-  res.status(201).json({
-    ...ticket,
-    createdAt: ticket.createdAt.toISOString(),
-    updatedAt: ticket.updatedAt.toISOString(),
-  });
+  res.status(201).json(parseTicket(ticket));
 });
 
-router.patch("/support/:id", async (req, res): Promise<void> => {
+router.patch("/support/:id", requireAuth, async (req, res): Promise<void> => {
   const params = UpdateTicketParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -82,13 +79,82 @@ router.patch("/support/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(
-    UpdateTicketResponse.parse({
-      ...ticket,
-      createdAt: ticket.createdAt.toISOString(),
-      updatedAt: ticket.updatedAt.toISOString(),
-    })
-  );
+  res.json(UpdateTicketResponse.parse(parseTicket(ticket)));
+});
+
+// GET /support/:id/messages — fetch thread for a ticket
+router.get("/support/:id/messages", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid ticket id" });
+    return;
+  }
+
+  const [ticket] = await db.select().from(supportTicketsTable).where(eq(supportTicketsTable.id, id));
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && ticket.userId !== caller.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  const messages = await db
+    .select()
+    .from(ticketMessagesTable)
+    .where(eq(ticketMessagesTable.ticketId, id))
+    .orderBy(asc(ticketMessagesTable.createdAt));
+
+  res.json(messages.map(m => ({ ...m, createdAt: m.createdAt.toISOString() })));
+});
+
+// POST /support/:id/messages — post a reply to a ticket
+router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid ticket id" });
+    return;
+  }
+
+  const message = (req.body?.message as string | undefined)?.trim();
+  if (!message || message.length === 0) {
+    res.status(400).json({ error: "message is required" });
+    return;
+  }
+
+  const [ticket] = await db.select().from(supportTicketsTable).where(eq(supportTicketsTable.id, id));
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && ticket.userId !== caller.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  if (ticket.status === "closed" && caller.role !== "admin") {
+    res.status(400).json({ error: "Cannot reply to a closed ticket" });
+    return;
+  }
+
+  const authorRole = caller.role === "admin" ? "admin" : "passenger";
+
+  const [msg] = await db
+    .insert(ticketMessagesTable)
+    .values({ ticketId: id, userId: caller.userId, authorRole, message })
+    .returning();
+
+  // Re-open ticket if passenger replies to a non-closed ticket
+  if (authorRole === "passenger" && ticket.status === "open") {
+    await db.update(supportTicketsTable).set({ status: "open" }).where(eq(supportTicketsTable.id, id));
+  }
+
+  res.status(201).json({ ...msg, createdAt: msg.createdAt.toISOString() });
 });
 
 export default router;

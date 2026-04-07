@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
-import { db, usersTable, driversTable, sessionsTable } from "@workspace/db";
+import { db, usersTable, driversTable, sessionsTable, passwordResetTokensTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
@@ -284,6 +284,78 @@ router.post("/auth/admin-register", requireAdmin, async (req, res): Promise<void
       createdAt: user.createdAt.toISOString(),
     },
   });
+});
+
+// POST /auth/forgot-password — generate reset token and return link
+router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+  const email = (req.body?.email as string | undefined)?.trim().toLowerCase();
+  if (!email) {
+    res.status(400).json({ error: "email is required" });
+    return;
+  }
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  if (!user) {
+    // Return 200 to avoid user enumeration
+    res.json({ message: "If that email is registered, a reset link has been generated." });
+    return;
+  }
+
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+  await db.insert(passwordResetTokensTable).values({ userId: user.id, token, expiresAt });
+
+  const resetLink = `/auth/reset-password?token=${token}`;
+
+  res.json({
+    message: "Reset link generated. In production this would be emailed.",
+    resetLink,
+    token,
+  });
+});
+
+// POST /auth/reset-password — validate token and set new password
+router.post("/auth/reset-password", async (req, res): Promise<void> => {
+  const token = (req.body?.token as string | undefined)?.trim();
+  const password = (req.body?.password as string | undefined);
+
+  if (!token || !password || password.length < 6) {
+    res.status(400).json({ error: "token and password (min 6 chars) are required" });
+    return;
+  }
+
+  const [resetToken] = await db
+    .select()
+    .from(passwordResetTokensTable)
+    .where(eq(passwordResetTokensTable.token, token));
+
+  if (!resetToken) {
+    res.status(400).json({ error: "Invalid or expired reset token" });
+    return;
+  }
+
+  if (resetToken.usedAt) {
+    res.status(400).json({ error: "Reset token has already been used" });
+    return;
+  }
+
+  if (new Date() > resetToken.expiresAt) {
+    res.status(400).json({ error: "Reset token has expired" });
+    return;
+  }
+
+  await db
+    .update(usersTable)
+    .set({ passwordHash: hashPassword(password) })
+    .where(eq(usersTable.id, resetToken.userId));
+
+  await db
+    .update(passwordResetTokensTable)
+    .set({ usedAt: new Date() })
+    .where(eq(passwordResetTokensTable.id, resetToken.id));
+
+  res.json({ message: "Password updated successfully. You can now sign in." });
 });
 
 export default router;

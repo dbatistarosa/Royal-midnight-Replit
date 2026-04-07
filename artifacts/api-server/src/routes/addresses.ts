@@ -40,6 +40,38 @@ router.post("/addresses", async (req, res): Promise<void> => {
   res.status(201).json({ ...address, createdAt: address.createdAt.toISOString() });
 });
 
+router.patch("/addresses/:id", async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const label = (req.body?.label as string | undefined)?.trim();
+  const address = (req.body?.address as string | undefined)?.trim();
+  if (!label && !address) {
+    res.status(400).json({ error: "label or address required" });
+    return;
+  }
+
+  const updateData: Record<string, unknown> = {};
+  if (label) updateData.label = label;
+  if (address) updateData.address = address;
+
+  const [updated] = await db
+    .update(savedAddressesTable)
+    .set(updateData)
+    .where(eq(savedAddressesTable.id, id))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Address not found" });
+    return;
+  }
+
+  res.json({ ...updated, createdAt: updated.createdAt.toISOString() });
+});
+
 router.delete("/addresses/:id", async (req, res): Promise<void> => {
   const params = DeleteAddressParams.safeParse(req.params);
   if (!params.success) {

@@ -29,6 +29,8 @@ Dark midnight/champagne gold branding. Playfair Display headings, Inter body. No
 - `saved_addresses` — User saved addresses
 - `reviews` — Post-ride reviews
 - `support_tickets` — Customer support tickets
+- `ticket_messages` — Threaded replies on support tickets (authorRole: admin|passenger)
+- `password_reset_tokens` — Secure 30-min password reset tokens
 - `notifications` — In-app notifications (system-generated)
 - `promo_codes` — Discount codes (percentage or fixed)
 - `pricing_rules` — Per-vehicle-class pricing configuration
@@ -52,9 +54,10 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 ### Drivers: /api/drivers (GET/POST), /api/drivers/:id (GET/PATCH), /api/drivers/:id/toggle-availability, /api/drivers/:id/earnings
 ### Users: /api/users (GET/POST), /api/users/:id (GET/PATCH), /api/users/:id/bookings
 ### Quote: POST /api/quote
-### Addresses: /api/addresses (GET/POST), /api/addresses/:id (DELETE)
+### Addresses: /api/addresses (GET/POST), /api/addresses/:id (PATCH/DELETE)
 ### Reviews: /api/reviews (GET/POST)
-### Support: /api/support (GET/POST), /api/support/:id (PATCH)
+### Support: /api/support (GET/POST), /api/support/:id (PATCH), /api/support/:id/messages (GET/POST)
+### Auth extras: POST /api/auth/forgot-password, POST /api/auth/reset-password
 ### Notifications: /api/notifications (GET), /api/notifications/:id/read (PATCH)
 ### Promos: /api/promos (GET/POST), /api/promos/:id (PATCH/DELETE), POST /api/promos/validate
 ### Pricing: /api/pricing (GET/POST), /api/pricing/:id (PATCH/DELETE)

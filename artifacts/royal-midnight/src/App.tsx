@@ -30,6 +30,7 @@ import Privacy from "@/pages/privacy";
 // Auth
 import Login from "@/pages/auth/login";
 import Signup from "@/pages/auth/signup";
+import ResetPassword from "@/pages/auth/reset-password";
 
 // Passenger Portal
 import PassengerDashboard from "@/pages/passenger/dashboard";
@@ -184,6 +185,9 @@ function Router() {
       </Route>
       <Route path="/auth/signup">
         <PortalWrapper><Signup /></PortalWrapper>
+      </Route>
+      <Route path="/auth/reset-password">
+        <PortalWrapper><ResetPassword /></PortalWrapper>
       </Route>
 
       {/* Passenger Portal */}
