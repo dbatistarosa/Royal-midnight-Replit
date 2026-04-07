@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, and, isNull } from "drizzle-orm";
+import { eq, desc, and, isNull, ne } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
@@ -67,6 +67,12 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   if (parsed.data.status) conditions.push(eq(bookingsTable.status, parsed.data.status));
   if (parsed.data.driverId != null) conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
   if (parsed.data.userId != null) conditions.push(eq(bookingsTable.userId, parsed.data.userId));
+
+  // Admins and drivers never see unconfirmed/unpaid bookings unless explicitly filtering for that status.
+  // Passengers can still see their own awaiting_payment bookings so they can complete payment.
+  if ((caller.role === "admin" || caller.role === "driver") && !parsed.data.status) {
+    conditions.push(ne(bookingsTable.status, "awaiting_payment"));
+  }
 
   // Non-admin drivers: either see their own assigned bookings, or unassigned open pool
   if (caller.role === "driver") {
