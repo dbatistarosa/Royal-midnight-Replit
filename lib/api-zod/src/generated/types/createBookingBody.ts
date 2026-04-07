@@ -5,6 +5,7 @@
  * Royal Midnight luxury black car service API
  * OpenAPI spec version: 0.2.0
  */
+import type { CreateBookingBodyPaymentType } from "./createBookingBodyPaymentType";
 import type { CreateBookingBodyVehicleClass } from "./createBookingBodyVehicleClass";
 
 export interface CreateBookingBody {
@@ -27,4 +28,6 @@ export interface CreateBookingBody {
   discountAmount?: number | null;
   /** @nullable */
   userId?: number | null;
+  /** @nullable */
+  paymentType?: CreateBookingBodyPaymentType;
 }

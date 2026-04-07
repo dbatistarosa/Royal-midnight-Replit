@@ -286,6 +286,63 @@ router.post("/auth/admin-register", requireAdmin, async (req, res): Promise<void
   });
 });
 
+// Admin-only: create a corporate account
+const CreateCorporateBody = z.object({
+  companyName: z.string().min(1),
+  contactName: z.string().min(1),
+  email: z.string().email(),
+  password: z.string().min(8),
+  phone: z.string().nullish(),
+});
+
+router.post("/auth/corporate-register", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = CreateCorporateBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const { companyName, contactName, email, password, phone } = parsed.data;
+
+  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  if (existing) {
+    res.status(400).json({ error: "Email already registered" });
+    return;
+  }
+
+  const [user] = await db
+    .insert(usersTable)
+    .values({
+      name: `${companyName} — ${contactName}`,
+      email,
+      phone: phone ?? null,
+      role: "corporate",
+      passwordHash: hashPassword(password),
+    })
+    .returning();
+
+  res.status(201).json({
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      createdAt: user.createdAt.toISOString(),
+    },
+  });
+});
+
+// Admin-only: list all corporate accounts
+router.get("/auth/corporate-accounts", requireAdmin, async (req, res): Promise<void> => {
+  const accounts = await db
+    .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone, createdAt: usersTable.createdAt })
+    .from(usersTable)
+    .where(eq(usersTable.role, "corporate"));
+
+  res.json(accounts.map(a => ({ ...a, createdAt: a.createdAt.toISOString() })));
+});
+
 // POST /auth/forgot-password — generate reset token and return link
 router.post("/auth/forgot-password", async (req, res): Promise<void> => {
   const email = (req.body?.email as string | undefined)?.trim().toLowerCase();

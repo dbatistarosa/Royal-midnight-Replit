@@ -5,7 +5,7 @@ export interface AuthUser {
   name: string;
   email: string;
   phone: string | null;
-  role: "passenger" | "driver" | "admin";
+  role: "passenger" | "driver" | "admin" | "corporate";
   driverId?: number | null;
 }
 

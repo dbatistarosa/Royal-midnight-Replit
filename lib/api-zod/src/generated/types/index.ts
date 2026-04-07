@@ -13,6 +13,7 @@ export * from "./bookingStatus";
 export * from "./bookingVehicleClass";
 export * from "./createAddressBody";
 export * from "./createBookingBody";
+export * from "./createBookingBodyPaymentType";
 export * from "./createBookingBodyVehicleClass";
 export * from "./createDriverBody";
 export * from "./createPricingRuleBody";

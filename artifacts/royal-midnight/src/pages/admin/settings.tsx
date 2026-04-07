@@ -4,7 +4,8 @@ import { AuthGuard } from "@/components/layout/AuthGuard";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
-import { Loader2, Save, Settings, LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, UserPlus, CheckCircle2 } from "lucide-react";
+import { format } from "date-fns";
+import { Loader2, Save, Settings, LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, UserPlus, CheckCircle2, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,6 +67,11 @@ const SETTING_FIELDS: SettingField[] = [
 type AdminForm = { name: string; email: string; password: string; confirmPassword: string; phone: string };
 const EMPTY_ADMIN: AdminForm = { name: "", email: "", password: "", confirmPassword: "", phone: "" };
 
+type CorporateForm = { companyName: string; contactName: string; email: string; password: string; confirmPassword: string; phone: string };
+const EMPTY_CORP: CorporateForm = { companyName: "", contactName: "", email: "", password: "", confirmPassword: "", phone: "" };
+
+type CorporateAccount = { id: number; name: string; email: string; phone: string | null; createdAt: string };
+
 function AdminSettingsInner() {
   const { toast } = useToast();
   const { token } = useAuth();
@@ -76,6 +82,11 @@ function AdminSettingsInner() {
   const [adminForm, setAdminForm] = useState<AdminForm>(EMPTY_ADMIN);
   const [adminSaving, setAdminSaving] = useState(false);
   const [adminCreated, setAdminCreated] = useState<{ email: string; name: string } | null>(null);
+  const [corporateForm, setCorporateForm] = useState<CorporateForm>(EMPTY_CORP);
+  const [corporateSaving, setCorporateSaving] = useState(false);
+  const [corporateCreated, setCorporateCreated] = useState<{ email: string; companyName: string } | null>(null);
+  const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
+  const [corporateLoading, setCorporateLoading] = useState(true);
 
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -97,6 +108,16 @@ function AdminSettingsInner() {
       })
       .catch(() => toast({ title: "Error", description: "Could not load settings.", variant: "destructive" }))
       .finally(() => setIsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${API_BASE}/auth/corporate-accounts`, { headers: authHeader })
+      .then(r => r.ok ? r.json() as Promise<CorporateAccount[]> : Promise.reject())
+      .then(data => setCorporateAccounts(data))
+      .catch(() => setCorporateAccounts([]))
+      .finally(() => setCorporateLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -155,6 +176,44 @@ function AdminSettingsInner() {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Could not create admin.", variant: "destructive" });
     }
     setAdminSaving(false);
+  };
+
+  const handleCreateCorporate = async () => {
+    if (!corporateForm.companyName || !corporateForm.contactName || !corporateForm.email || !corporateForm.password) {
+      toast({ title: "Missing fields", description: "Company name, contact name, email, and password are required.", variant: "destructive" });
+      return;
+    }
+    if (corporateForm.password !== corporateForm.confirmPassword) {
+      toast({ title: "Passwords do not match", description: "Please re-enter matching passwords.", variant: "destructive" });
+      return;
+    }
+    if (corporateForm.password.length < 8) {
+      toast({ title: "Password too short", description: "Password must be at least 8 characters.", variant: "destructive" });
+      return;
+    }
+    setCorporateSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/corporate-register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({
+          companyName: corporateForm.companyName,
+          contactName: corporateForm.contactName,
+          email: corporateForm.email,
+          password: corporateForm.password,
+          phone: corporateForm.phone || null,
+        }),
+      });
+      if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
+      const created = await res.json() as { user: CorporateAccount };
+      setCorporateCreated({ email: corporateForm.email, companyName: corporateForm.companyName });
+      setCorporateAccounts(prev => [...prev, created.user]);
+      setCorporateForm(EMPTY_CORP);
+      toast({ title: "Corporate account created", description: `${corporateForm.companyName} can now sign in.` });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not create account.", variant: "destructive" });
+    }
+    setCorporateSaving(false);
   };
 
   return (
@@ -300,6 +359,138 @@ function AdminSettingsInner() {
               {adminSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</> : <><UserPlus className="w-4 h-4 mr-2" />Create Admin</>}
             </Button>
           </div>
+        </div>
+      </div>
+
+      {/* Corporate Accounts Section */}
+      <div className="mt-12">
+        <div className="flex items-center gap-3 mb-6">
+          <Building2 className="w-5 h-5 text-primary" />
+          <h2 className="font-serif text-2xl">Corporate Accounts</h2>
+        </div>
+
+        {corporateCreated && (
+          <div className="bg-green-400/10 border border-green-400/20 rounded-none p-5 mb-6 flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-green-400 shrink-0" />
+            <div className="text-sm">
+              <strong className="text-green-400">{corporateCreated.companyName}</strong>
+              <span className="text-muted-foreground"> ({corporateCreated.email}) can now sign in to the corporate portal.</span>
+            </div>
+            <button onClick={() => setCorporateCreated(null)} className="ml-auto text-muted-foreground hover:text-white text-xs uppercase tracking-widest">Dismiss</button>
+          </div>
+        )}
+
+        <div className="bg-card border border-border rounded-none p-7 mb-6">
+          <p className="text-sm text-muted-foreground mb-6">Create a portal login for a hotel, law firm, or business. Corporate accounts can book trips on behalf of their clients without payment at time of booking.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Company Name *</Label>
+              <Input
+                value={corporateForm.companyName}
+                onChange={e => setCorporateForm(p => ({ ...p, companyName: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="Acme Hotels"
+              />
+            </div>
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Contact Name *</Label>
+              <Input
+                value={corporateForm.contactName}
+                onChange={e => setCorporateForm(p => ({ ...p, contactName: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="Concierge Manager"
+              />
+            </div>
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Email Address *</Label>
+              <Input
+                type="email"
+                value={corporateForm.email}
+                onChange={e => setCorporateForm(p => ({ ...p, email: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="concierge@acmehotels.com"
+              />
+            </div>
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Phone (Optional)</Label>
+              <Input
+                value={corporateForm.phone}
+                onChange={e => setCorporateForm(p => ({ ...p, phone: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="+1 (305) 555-0000"
+              />
+            </div>
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Password *</Label>
+              <Input
+                type="password"
+                value={corporateForm.password}
+                onChange={e => setCorporateForm(p => ({ ...p, password: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="Min. 8 characters"
+              />
+            </div>
+            <div>
+              <Label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">Confirm Password *</Label>
+              <Input
+                type="password"
+                value={corporateForm.confirmPassword}
+                onChange={e => setCorporateForm(p => ({ ...p, confirmPassword: e.target.value }))}
+                className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
+                placeholder="Repeat password"
+              />
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end">
+            <Button
+              onClick={() => void handleCreateCorporate()}
+              disabled={corporateSaving}
+              className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-8 h-10"
+            >
+              {corporateSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</> : <><Building2 className="w-4 h-4 mr-2" />Create Corporate Account</>}
+            </Button>
+          </div>
+        </div>
+
+        {/* List existing corporate accounts */}
+        <div className="bg-card border border-border rounded-none overflow-hidden">
+          <div className="px-6 py-4 border-b border-border">
+            <h3 className="text-sm font-medium uppercase tracking-widest text-muted-foreground">Existing Corporate Accounts</h3>
+          </div>
+          {corporateLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-5 h-5 text-primary animate-spin" />
+            </div>
+          ) : corporateAccounts.length === 0 ? (
+            <div className="px-6 py-8 text-center text-muted-foreground text-sm">No corporate accounts created yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left min-w-[400px]">
+                <thead className="bg-background/50 border-b border-border">
+                  <tr>
+                    <th className="px-5 py-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">Company / Contact</th>
+                    <th className="px-5 py-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">Email</th>
+                    <th className="px-5 py-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">Created</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {corporateAccounts.map(acct => {
+                    const [company, contact] = acct.name.split(" — ");
+                    return (
+                      <tr key={acct.id} className="hover:bg-white/5 transition-colors">
+                        <td className="px-5 py-3">
+                          <div className="font-medium">{company}</div>
+                          {contact && <div className="text-xs text-muted-foreground">{contact}</div>}
+                        </td>
+                        <td className="px-5 py-3 text-muted-foreground">{acct.email}</td>
+                        <td className="px-5 py-3 text-muted-foreground whitespace-nowrap">{format(new Date(acct.createdAt), "MMM d, yyyy")}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </PortalLayout>

@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react";
 
 interface AuthGuardProps {
   children: React.ReactNode;
-  requiredRole?: "passenger" | "driver" | "admin";
+  requiredRole?: "passenger" | "driver" | "admin" | "corporate";
   redirectTo?: string;
 }
 

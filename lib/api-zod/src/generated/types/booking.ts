@@ -34,6 +34,8 @@ export interface Booking {
   vehicleId?: number | null;
   /** @nullable */
   userId?: number | null;
+  /** @nullable */
+  paymentType?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

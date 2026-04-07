@@ -47,6 +47,12 @@ import DriverHistory from "@/pages/driver/history";
 import DriverEarnings from "@/pages/driver/earnings";
 import DriverProfile from "@/pages/driver/profile";
 
+// Corporate Portal
+import CorporateDashboard from "@/pages/corporate/dashboard";
+import CorporateBook from "@/pages/corporate/book";
+import CorporateBookings from "@/pages/corporate/bookings";
+import CorporateProfile from "@/pages/corporate/profile";
+
 // Admin Portal
 import AdminDashboard from "@/pages/admin";
 import AdminBookings from "@/pages/admin/bookings";
@@ -69,7 +75,7 @@ const queryClient = new QueryClient({
   },
 });
 
-const PORTAL_PATHS = ["/passenger", "/driver", "/admin", "/auth"];
+const PORTAL_PATHS = ["/passenger", "/driver", "/admin", "/corporate", "/auth"];
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -166,6 +172,16 @@ function DriverRoute({ component: Component }: { component: React.ComponentType 
   );
 }
 
+function CorporateRoute({ component: Component }: { component: React.ComponentType }) {
+  return (
+    <PortalWrapper>
+      <AuthGuard requiredRole="corporate">
+        <Component />
+      </AuthGuard>
+    </PortalWrapper>
+  );
+}
+
 function PassengerRoute({ component: Component }: { component: React.ComponentType }) {
   return (
     <PortalWrapper>
@@ -208,6 +224,23 @@ function Router() {
       </Route>
       <Route path="/passenger/support">
         <PassengerRoute component={PassengerSupport} />
+      </Route>
+
+      {/* Corporate Portal */}
+      <Route path="/corporate/book">
+        <CorporateRoute component={CorporateBook} />
+      </Route>
+      <Route path="/corporate/bookings">
+        <CorporateRoute component={CorporateBookings} />
+      </Route>
+      <Route path="/corporate/profile">
+        <CorporateRoute component={CorporateProfile} />
+      </Route>
+      <Route path="/corporate/dashboard">
+        <CorporateRoute component={CorporateDashboard} />
+      </Route>
+      <Route path="/corporate">
+        <CorporateRoute component={CorporateDashboard} />
       </Route>
 
       {/* Driver Portal */}

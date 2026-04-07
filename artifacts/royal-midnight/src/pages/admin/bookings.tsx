@@ -37,6 +37,7 @@ type BookingRow = {
   driverId: number | null;
   flightNumber?: string | null;
   specialRequests?: string | null;
+  paymentType?: string | null;
 };
 
 type DriverOption = { id: number; name: string; status: string };
@@ -259,9 +260,16 @@ export default function AdminBookings() {
                       {b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}
                     </td>
                     <td className="px-5 py-4">
-                      <span className={`px-2 py-1 border text-xs uppercase tracking-widest ${STATUS_COLORS[b.status] ?? "text-muted-foreground"}`}>
-                        {b.status.replace("_", " ")}
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`px-2 py-1 border text-xs uppercase tracking-widest ${STATUS_COLORS[b.status] ?? "text-muted-foreground"}`}>
+                          {b.status.replace("_", " ")}
+                        </span>
+                        {b.paymentType === "corporate_account" && (
+                          <span className="px-2 py-0.5 border border-purple-500/30 bg-purple-500/10 text-purple-400 text-xs uppercase tracking-widest">
+                            Corporate
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-4 hidden md:table-cell font-medium text-primary">${b.priceQuoted?.toFixed(2)}</td>
                     <td className="px-5 py-4">

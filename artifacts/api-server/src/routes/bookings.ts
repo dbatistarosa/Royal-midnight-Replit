@@ -85,8 +85,8 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     }
   }
 
-  // Passengers can only see their own bookings
-  if (caller.role === "passenger") {
+  // Passengers and corporate accounts can only see their own bookings
+  if (caller.role === "passenger" || caller.role === "corporate") {
     const requestedUserId = parsed.data.userId;
     if (requestedUserId != null && requestedUserId !== caller.userId) {
       res.status(403).json({ error: "Access denied" });
@@ -124,6 +124,8 @@ router.post("/bookings", async (req, res): Promise<void> => {
     return;
   }
 
+  const isCorporate = parsed.data.paymentType === "corporate_account";
+
   const [booking] = await db
     .insert(bookingsTable)
     .values({
@@ -131,6 +133,9 @@ router.post("/bookings", async (req, res): Promise<void> => {
       pickupAt: new Date(parsed.data.pickupAt),
       priceQuoted: String(parsed.data.priceQuoted),
       discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
+      paymentType: parsed.data.paymentType ?? "standard",
+      // Corporate bookings are confirmed immediately — no payment required
+      status: isCorporate ? "confirmed" : "pending",
     })
     .returning();
 
@@ -192,8 +197,8 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // Authenticated passenger: can only access their own bookings
-  if (caller.role === "passenger" && booking.userId !== caller.userId) {
+  // Passengers and corporate accounts: can only access their own bookings
+  if ((caller.role === "passenger" || caller.role === "corporate") && booking.userId !== caller.userId) {
     res.status(403).json({ error: "Access denied" });
     return;
   }

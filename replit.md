@@ -98,9 +98,15 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - `/driver/profile` — Profile
 - `/driver/onboarding` — Multi-step onboarding
 
+### Corporate Portal (/corporate/*)
+- `/corporate/dashboard` — Overview, upcoming trips, quick book button
+- `/corporate/book` — Simplified booking form (no payment, billed to account)
+- `/corporate/bookings` — All trips for this corporate account
+- `/corporate/profile` — Company info and contact details
+
 ### Admin Dashboard (/admin/*)
 - `/admin` — KPIs, revenue, recent bookings ("Director's Office")
-- `/admin/bookings` — All bookings with filters
+- `/admin/bookings` — All bookings with filters; corporate bookings show "Corporate" badge
 - `/admin/passengers` — Passenger list
 - `/admin/drivers` — Driver management
 - `/admin/fleet` — Fleet management
@@ -109,6 +115,7 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - `/admin/promos` — Promo code management
 - `/admin/support` — Support tickets
 - `/admin/reports` — Revenue charts
+- `/admin/settings` — System settings + Create Admin + Create Corporate Account sections
 
 ## Code Conventions
 - Express 5: `res.status().json(); return;` pattern with `Promise<void>` annotations
@@ -127,8 +134,10 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - Token-based auth (SHA-256 of userId + timestamp) stored in localStorage
 - `AuthProvider` context (`src/contexts/auth.tsx`) wraps the entire app
 - `AuthGuard` component redirects unauthenticated users to /auth/login
-- Role-based access: passenger, driver, admin
+- Role-based access: passenger, driver, admin, corporate
 - Admin routes protected via `AdminRoute` wrapper in App.tsx (requires role=admin)
+- Corporate routes protected via `CorporateRoute` wrapper (requires role=corporate)
+- Corporate accounts created by admin only via POST /api/auth/corporate-register
 - Navbar shows "SIGN IN" button when logged out; user name dropdown when logged in
 
 ## Seed Data

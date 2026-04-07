@@ -64,12 +64,13 @@ export default function Login() {
         name: result.user.name,
         email: result.user.email,
         phone: result.user.phone ?? null,
-        role: result.user.role as "passenger" | "driver" | "admin",
+        role: result.user.role as "passenger" | "driver" | "admin" | "corporate",
       }, result.token, result.driverId ?? null);
       toast({ title: "Welcome back", description: `Signed in as ${result.user.name}` });
 
       if (result.user.role === "admin") setLocation("/admin");
       else if (result.user.role === "driver") setLocation("/driver/dashboard");
+      else if (result.user.role === "corporate") setLocation("/corporate/dashboard");
       else setLocation("/passenger/dashboard");
     } catch {
       toast({ title: "Sign in failed", description: "Could not connect to server. Please try again.", variant: "destructive" });

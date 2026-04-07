@@ -1363,6 +1363,8 @@ components:
           type: ["integer", "null"]
         userId:
           type: ["integer", "null"]
+        paymentType:
+          type: ["string", "null"]
         createdAt:
           type: string
           format: date-time
@@ -1403,6 +1405,9 @@ components:
           type: ["number", "null"]
         userId:
           type: ["integer", "null"]
+        paymentType:
+          type: ["string", "null"]
+          enum: [standard, corporate_account, null]
       required: [passengerName, passengerEmail, passengerPhone, pickupAddress, dropoffAddress, pickupAt, vehicleClass, passengers, priceQuoted]
 
     UpdateBookingBody:

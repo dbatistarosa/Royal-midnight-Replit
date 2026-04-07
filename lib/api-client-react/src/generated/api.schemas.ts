@@ -281,6 +281,8 @@ export interface Booking {
   vehicleId?: number | null;
   /** @nullable */
   userId?: number | null;
+  /** @nullable */
+  paymentType?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -294,6 +296,18 @@ export const CreateBookingBodyVehicleClass = {
   first_class: "first_class",
   suv: "suv",
   van: "van",
+} as const;
+
+/**
+ * @nullable
+ */
+export type CreateBookingBodyPaymentType =
+  | (typeof CreateBookingBodyPaymentType)[keyof typeof CreateBookingBodyPaymentType]
+  | null;
+
+export const CreateBookingBodyPaymentType = {
+  standard: "standard",
+  corporate_account: "corporate_account",
 } as const;
 
 export interface CreateBookingBody {
@@ -316,6 +330,8 @@ export interface CreateBookingBody {
   discountAmount?: number | null;
   /** @nullable */
   userId?: number | null;
+  /** @nullable */
+  paymentType?: CreateBookingBodyPaymentType;
 }
 
 /**
