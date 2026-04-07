@@ -210,10 +210,10 @@ export default function AdminDispatch() {
     }
   }, [board]);
 
-  // Initial fetch + 30-second polling
+  // Initial fetch + 10-second polling for live location tracking
   useEffect(() => {
     void fetchBoard();
-    const interval = setInterval(() => void fetchBoard(), 30000);
+    const interval = setInterval(() => void fetchBoard(), 10000);
     return () => clearInterval(interval);
   }, [fetchBoard]);
 

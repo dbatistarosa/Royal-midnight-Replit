@@ -1,12 +1,23 @@
 import { useState, useEffect, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2 } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
+import { AIRLINES_BY_AIRPORT } from "@/data/airlines";
+
+type AirportCode = "FLL" | "MIA" | "PBI";
+function detectAirportCode(address: string): AirportCode | null {
+  const upper = address.toUpperCase();
+  if (/\bFLL\b/.test(upper)) return "FLL";
+  if (/\bMIA\b/.test(upper)) return "MIA";
+  if (/\bPBI\b/.test(upper)) return "PBI";
+  return null;
+}
 
 const adminNavItems = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
@@ -64,6 +75,7 @@ type FormData = {
   pickupAt: string;
   vehicleClass: string;
   passengers: string;
+  luggageCount: string;
   flightNumber: string;
   specialRequests: string;
   priceQuoted: string;
@@ -73,8 +85,13 @@ type FormData = {
 const EMPTY_FORM: FormData = {
   passengerName: "", passengerEmail: "", passengerPhone: "",
   pickupAddress: "", dropoffAddress: "", pickupAt: "",
-  vehicleClass: "business", passengers: "1",
+  vehicleClass: "business", passengers: "1", luggageCount: "0",
   flightNumber: "", specialRequests: "", priceQuoted: "", driverId: "",
+};
+
+const VEHICLE_LIMITS = {
+  business: { maxPassengers: 3, maxLuggage: 3 },
+  suv:      { maxPassengers: 6, maxLuggage: 6 },
 };
 
 function Modal({ title, onClose, onSubmit, submitting, children }: {
@@ -114,8 +131,15 @@ export default function AdminBookings() {
   const [assignSaving, setAssignSaving] = useState(false);
   const [createForm, setCreateForm] = useState<FormData>(EMPTY_FORM);
   const [createSaving, setCreateSaving] = useState(false);
+  const [isGettingQuote, setIsGettingQuote] = useState(false);
+  const [pickupAirline, setPickupAirline] = useState("");
+  const [dropoffAirline, setDropoffAirline] = useState("");
 
   const authHdr = token ? `Bearer ${token}` : "";
+
+  const pickupAirportCode = detectAirportCode(createForm.pickupAddress);
+  const dropoffAirportCode = detectAirportCode(createForm.dropoffAddress);
+  const limits = VEHICLE_LIMITS[createForm.vehicleClass as keyof typeof VEHICLE_LIMITS] ?? VEHICLE_LIMITS.business;
 
   const refetch = useCallback(() => {
     if (!token) return;
@@ -152,7 +176,8 @@ export default function AdminBookings() {
         pickupAt: new Date(createForm.pickupAt).toISOString(),
         vehicleClass: createForm.vehicleClass,
         passengers: parseInt(createForm.passengers) || 1,
-        flightNumber: createForm.flightNumber || null,
+        luggageCount: parseInt(createForm.luggageCount) || 0,
+        flightNumber: (pickupAirline || dropoffAirline || createForm.flightNumber) ? (createForm.flightNumber || null) : null,
         specialRequests: createForm.specialRequests || null,
         priceQuoted: parseFloat(createForm.priceQuoted),
       };
@@ -213,7 +238,48 @@ export default function AdminBookings() {
     setAssignSaving(false);
   };
 
-  const setField = (k: keyof FormData, v: string) => setCreateForm(prev => ({ ...prev, [k]: v }));
+  const setField = (k: keyof FormData, v: string) => setCreateForm(prev => {
+    const updated = { ...prev, [k]: v };
+    if (k === "vehicleClass") {
+      const lim = VEHICLE_LIMITS[v as keyof typeof VEHICLE_LIMITS] ?? VEHICLE_LIMITS.business;
+      if (parseInt(updated.passengers) > lim.maxPassengers) updated.passengers = String(lim.maxPassengers);
+      if (parseInt(updated.luggageCount) > lim.maxLuggage) updated.luggageCount = String(lim.maxLuggage);
+    }
+    return updated;
+  });
+
+  // Reset airline selections when airport changes
+  useEffect(() => { setPickupAirline(""); }, [pickupAirportCode]);
+  useEffect(() => { setDropoffAirline(""); }, [dropoffAirportCode]);
+
+  // Auto-fetch price quote when required fields are filled
+  useEffect(() => {
+    if (!createForm.pickupAddress || !createForm.dropoffAddress || !createForm.pickupAt || !createForm.vehicleClass) return;
+    const timeout = setTimeout(async () => {
+      setIsGettingQuote(true);
+      try {
+        const res = await fetch(`${API_BASE}/quote`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pickupAddress: createForm.pickupAddress,
+            dropoffAddress: createForm.dropoffAddress,
+            vehicleClass: createForm.vehicleClass,
+            passengers: parseInt(createForm.passengers) || 1,
+            pickupAt: new Date(createForm.pickupAt).toISOString(),
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json() as { totalWithTax?: number };
+          if (data.totalWithTax != null) {
+            setCreateForm(prev => ({ ...prev, priceQuoted: data.totalWithTax!.toFixed(2) }));
+          }
+        }
+      } catch {}
+      setIsGettingQuote(false);
+    }, 700);
+    return () => clearTimeout(timeout);
+  }, [createForm.pickupAddress, createForm.dropoffAddress, createForm.pickupAt, createForm.vehicleClass, createForm.passengers]);
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
@@ -318,8 +384,9 @@ export default function AdminBookings() {
       </div>
 
       {showCreate && (
-        <Modal title="New Booking" onClose={() => { setShowCreate(false); setCreateForm(EMPTY_FORM); }} onSubmit={handleCreate} submitting={createSaving}>
+        <Modal title="New Booking" onClose={() => { setShowCreate(false); setCreateForm(EMPTY_FORM); setPickupAirline(""); setDropoffAirline(""); }} onSubmit={handleCreate} submitting={createSaving}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Passenger info */}
             <div>
               <label className={LABEL}>Passenger Name *</label>
               <Input value={createForm.passengerName} onChange={e => setField("passengerName", e.target.value)} className={INPUT} placeholder="Full name" />
@@ -335,34 +402,105 @@ export default function AdminBookings() {
             <div>
               <label className={LABEL}>Vehicle Class *</label>
               <select value={createForm.vehicleClass} onChange={e => setField("vehicleClass", e.target.value)} className={SELECT}>
-                <option value="business">Business Class Sedan</option>
-                <option value="suv">Premium SUV</option>
+                <option value="business">Business Class Sedan (max 3 pax / 3 bags)</option>
+                <option value="suv">Premium SUV (max 6 pax / 6 bags)</option>
               </select>
             </div>
+
+            {/* Addresses with autocomplete */}
             <div className="md:col-span-2">
               <label className={LABEL}>Pick-up Address *</label>
-              <Input value={createForm.pickupAddress} onChange={e => setField("pickupAddress", e.target.value)} className={INPUT} placeholder="Pick-up location" />
+              <PlacesAutocomplete
+                value={createForm.pickupAddress}
+                onChange={v => setField("pickupAddress", v)}
+                placeholder="Pick-up location"
+                className={`${INPUT} w-full px-3`}
+              />
             </div>
+            {pickupAirportCode && (
+              <div className="md:col-span-2">
+                <label className={LABEL}><Plane className="w-3 h-3 inline mr-1" />Airline at {pickupAirportCode} (Pick-up)</label>
+                <select value={pickupAirline} onChange={e => setPickupAirline(e.target.value)} className={SELECT}>
+                  <option value="">— Select airline (optional) —</option>
+                  {AIRLINES_BY_AIRPORT[pickupAirportCode].map(a => (
+                    <option key={a.code} value={a.code}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="md:col-span-2">
               <label className={LABEL}>Drop-off Address *</label>
-              <Input value={createForm.dropoffAddress} onChange={e => setField("dropoffAddress", e.target.value)} className={INPUT} placeholder="Destination" />
+              <PlacesAutocomplete
+                value={createForm.dropoffAddress}
+                onChange={v => setField("dropoffAddress", v)}
+                placeholder="Destination"
+                className={`${INPUT} w-full px-3`}
+              />
             </div>
+            {dropoffAirportCode && (
+              <div className="md:col-span-2">
+                <label className={LABEL}><Plane className="w-3 h-3 inline mr-1" />Airline at {dropoffAirportCode} (Drop-off)</label>
+                <select value={dropoffAirline} onChange={e => setDropoffAirline(e.target.value)} className={SELECT}>
+                  <option value="">— Select airline (optional) —</option>
+                  {AIRLINES_BY_AIRPORT[dropoffAirportCode].map(a => (
+                    <option key={a.code} value={a.code}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Date/time */}
             <div>
               <label className={LABEL}>Pickup Date & Time *</label>
               <Input type="datetime-local" value={createForm.pickupAt} onChange={e => setField("pickupAt", e.target.value)} className={INPUT} />
             </div>
+
+            {/* Passengers */}
             <div>
-              <label className={LABEL}>Passengers</label>
-              <Input type="number" min="1" max="14" value={createForm.passengers} onChange={e => setField("passengers", e.target.value)} className={INPUT} />
+              <label className={LABEL}>Passengers (max {limits.maxPassengers})</label>
+              <select value={createForm.passengers} onChange={e => setField("passengers", e.target.value)} className={SELECT}>
+                {Array.from({ length: limits.maxPassengers }, (_, i) => i + 1).map(n => (
+                  <option key={n} value={n}>{n} {n === 1 ? "passenger" : "passengers"}</option>
+                ))}
+              </select>
             </div>
+
+            {/* Luggage */}
             <div>
-              <label className={LABEL}>Price Quoted ($) *</label>
-              <Input type="number" step="0.01" value={createForm.priceQuoted} onChange={e => setField("priceQuoted", e.target.value)} className={INPUT} placeholder="0.00" />
+              <label className={LABEL}>Luggage (max {limits.maxLuggage})</label>
+              <select value={createForm.luggageCount} onChange={e => setField("luggageCount", e.target.value)} className={SELECT}>
+                {Array.from({ length: limits.maxLuggage + 1 }, (_, i) => i).map(n => (
+                  <option key={n} value={n}>{n} {n === 1 ? "bag" : "bags"}</option>
+                ))}
+              </select>
             </div>
+
+            {/* Price quoted — auto-filled from quote API */}
+            <div>
+              <label className={LABEL}>
+                Price Quoted ($) *
+                {isGettingQuote && <Loader2 className="w-3 h-3 inline-block animate-spin ml-1.5 text-primary" />}
+              </label>
+              <Input
+                type="number"
+                step="0.01"
+                value={createForm.priceQuoted}
+                onChange={e => setField("priceQuoted", e.target.value)}
+                className={INPUT}
+                placeholder={isGettingQuote ? "Calculating..." : "0.00"}
+              />
+              {createForm.priceQuoted && !isGettingQuote && (
+                <p className="text-[10px] text-primary mt-1 uppercase tracking-widest">Auto-calculated from route</p>
+              )}
+            </div>
+
+            {/* Flight number */}
             <div>
               <label className={LABEL}>Flight Number</label>
               <Input value={createForm.flightNumber} onChange={e => setField("flightNumber", e.target.value)} className={INPUT} placeholder="AA1234 (optional)" />
             </div>
+
             <div>
               <label className={LABEL}>Assign Driver</label>
               <select value={createForm.driverId} onChange={e => setField("driverId", e.target.value)} className={SELECT}>

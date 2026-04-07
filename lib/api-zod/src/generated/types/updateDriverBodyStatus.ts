@@ -18,4 +18,7 @@ export const UpdateDriverBodyStatus = {
   active: "active",
   inactive: "inactive",
   suspended: "suspended",
+  available: "available",
+  on_break: "on_break",
+  unavailable: "unavailable",
 } as const;

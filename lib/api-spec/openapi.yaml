@@ -1298,7 +1298,7 @@ components:
           type: string
         status:
           type: string
-          enum: [pending, active, inactive, suspended]
+          enum: [pending, active, inactive, suspended, available, on_break, unavailable]
         isOnline:
           type: boolean
         rating:
@@ -1330,7 +1330,7 @@ components:
       properties:
         status:
           type: ["string", "null"]
-          enum: [pending, active, inactive, suspended, null]
+          enum: [pending, active, inactive, suspended, available, on_break, unavailable, null]
         rating:
           type: ["number", "null"]
 
