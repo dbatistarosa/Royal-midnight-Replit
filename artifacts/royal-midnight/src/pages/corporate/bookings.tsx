@@ -100,7 +100,7 @@ function CorporateBookingsInner() {
       ) : (
         <div className="bg-card border border-border overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left min-w-[560px]">
+            <table className="w-full text-sm text-left min-w-[680px]">
               <thead className="bg-background/50 border-b border-border">
                 <tr>
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Ref</th>
@@ -108,6 +108,7 @@ function CorporateBookingsInner() {
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Pickup</th>
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Date</th>
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Class</th>
+                  <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Cost</th>
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Status</th>
                 </tr>
               </thead>
@@ -124,6 +125,9 @@ function CorporateBookingsInner() {
                     </td>
                     <td className="px-5 py-4 text-muted-foreground whitespace-nowrap">
                       {CLASS_LABELS[b.vehicleClass] ?? b.vehicleClass}
+                    </td>
+                    <td className="px-5 py-4 font-medium text-primary whitespace-nowrap">
+                      {b.priceQuoted > 0 ? `$${b.priceQuoted.toFixed(2)}` : <span className="text-muted-foreground text-xs italic">Billed to account</span>}
                     </td>
                     <td className="px-5 py-4 whitespace-nowrap">
                       <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_COLORS[b.status] ?? "bg-gray-500/10 text-gray-400 border-gray-500/20"}`}>

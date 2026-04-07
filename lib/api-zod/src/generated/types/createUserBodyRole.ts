@@ -13,4 +13,5 @@ export const CreateUserBodyRole = {
   passenger: "passenger",
   driver: "driver",
   admin: "admin",
+  corporate: "corporate",
 } as const;

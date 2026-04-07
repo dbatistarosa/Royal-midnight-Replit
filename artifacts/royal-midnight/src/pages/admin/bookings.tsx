@@ -38,6 +38,7 @@ type BookingRow = {
   flightNumber?: string | null;
   specialRequests?: string | null;
   paymentType?: string | null;
+  userRole?: string | null;
 };
 
 type DriverOption = { id: number; name: string; status: string };
@@ -264,7 +265,7 @@ export default function AdminBookings() {
                         <span className={`px-2 py-1 border text-xs uppercase tracking-widest ${STATUS_COLORS[b.status] ?? "text-muted-foreground"}`}>
                           {b.status.replace("_", " ")}
                         </span>
-                        {b.paymentType === "corporate_account" && (
+                        {b.userRole === "corporate" && (
                           <span className="px-2 py-0.5 border border-purple-500/30 bg-purple-500/10 text-purple-400 text-xs uppercase tracking-widest">
                             Corporate
                           </span>

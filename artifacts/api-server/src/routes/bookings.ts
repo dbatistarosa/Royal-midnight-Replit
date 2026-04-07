@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, and, isNull } from "drizzle-orm";
-import { db, bookingsTable, driversTable, settingsTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, settingsTable, usersTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
   ListBookingsQueryParams,
@@ -97,6 +97,19 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     }
   }
 
+  if (caller.role === "admin") {
+    // Admin gets a joined result with the user's role so the UI can distinguish corporate vs standard bookings
+    const rows = await db
+      .select({ booking: bookingsTable, userRole: usersTable.role })
+      .from(bookingsTable)
+      .leftJoin(usersTable, eq(bookingsTable.userId, usersTable.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(bookingsTable.createdAt));
+
+    res.json(rows.map(({ booking, userRole }) => ({ ...parseBooking(booking), userRole: userRole ?? null })));
+    return;
+  }
+
   const bookings = await db
     .select()
     .from(bookingsTable)
@@ -111,20 +124,33 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // Return data as-is for admin/passenger — skip Zod re-validation to avoid
+  // Return data as-is for passenger/corporate — skip Zod re-validation to avoid
   // enum mismatches from legacy seeded rows with old vehicleClass values
   res.json(parsed2);
 });
 
-router.post("/bookings", async (req, res): Promise<void> => {
-  // public endpoint — allows anonymous booking creation from the booking form
+router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
+  // Public endpoint — allows anonymous booking creation from the booking form.
+  // Corporate account paymentType is restricted: caller must be authenticated as role=corporate (or admin).
   const parsed = CreateBookingBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
+  const caller = req.currentUser;
   const isCorporate = parsed.data.paymentType === "corporate_account";
+
+  if (isCorporate) {
+    if (!caller || (caller.role !== "corporate" && caller.role !== "admin")) {
+      res.status(403).json({ error: "Corporate account bookings require a corporate or admin account" });
+      return;
+    }
+    // Force userId to caller's own id (unless admin is booking on behalf)
+    if (caller.role === "corporate") {
+      parsed.data.userId = caller.userId;
+    }
+  }
 
   const [booking] = await db
     .insert(bookingsTable)

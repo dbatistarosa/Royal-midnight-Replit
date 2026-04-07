@@ -40,7 +40,7 @@ export const LoginResponse = zod.object({
     name: zod.string(),
     email: zod.string(),
     phone: zod.string().nullish(),
-    role: zod.enum(["passenger", "driver", "admin"]),
+    role: zod.enum(["passenger", "driver", "admin", "corporate"]),
     createdAt: zod.coerce.date(),
   }),
 });
@@ -71,7 +71,7 @@ export const VerifyOtpResponse = zod.object({
     name: zod.string(),
     email: zod.string(),
     phone: zod.string().nullish(),
-    role: zod.enum(["passenger", "driver", "admin"]),
+    role: zod.enum(["passenger", "driver", "admin", "corporate"]),
     createdAt: zod.coerce.date(),
   }),
 });
@@ -509,7 +509,7 @@ export const ListUsersResponseItem = zod.object({
   name: zod.string(),
   email: zod.string(),
   phone: zod.string().nullish(),
-  role: zod.enum(["passenger", "driver", "admin"]),
+  role: zod.enum(["passenger", "driver", "admin", "corporate"]),
   createdAt: zod.coerce.date(),
 });
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
@@ -521,7 +521,7 @@ export const CreateUserBody = zod.object({
   name: zod.string(),
   email: zod.string(),
   phone: zod.string().nullish(),
-  role: zod.enum(["passenger", "driver", "admin"]),
+  role: zod.enum(["passenger", "driver", "admin", "corporate"]),
 });
 
 /**
@@ -536,7 +536,7 @@ export const GetUserResponse = zod.object({
   name: zod.string(),
   email: zod.string(),
   phone: zod.string().nullish(),
-  role: zod.enum(["passenger", "driver", "admin"]),
+  role: zod.enum(["passenger", "driver", "admin", "corporate"]),
   createdAt: zod.coerce.date(),
 });
 
@@ -557,7 +557,7 @@ export const UpdateUserResponse = zod.object({
   name: zod.string(),
   email: zod.string(),
   phone: zod.string().nullish(),
-  role: zod.enum(["passenger", "driver", "admin"]),
+  role: zod.enum(["passenger", "driver", "admin", "corporate"]),
   createdAt: zod.coerce.date(),
 });
 

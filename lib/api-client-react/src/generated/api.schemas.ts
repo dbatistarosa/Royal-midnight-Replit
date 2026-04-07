@@ -54,6 +54,7 @@ export const UserRole = {
   passenger: "passenger",
   driver: "driver",
   admin: "admin",
+  corporate: "corporate",
 } as const;
 
 export interface User {
@@ -78,6 +79,7 @@ export const CreateUserBodyRole = {
   passenger: "passenger",
   driver: "driver",
   admin: "admin",
+  corporate: "corporate",
 } as const;
 
 export interface CreateUserBody {

@@ -1131,7 +1131,7 @@ components:
           type: ["string", "null"]
         role:
           type: string
-          enum: [passenger, driver, admin]
+          enum: [passenger, driver, admin, corporate]
         createdAt:
           type: string
           format: date-time
@@ -1148,7 +1148,7 @@ components:
           type: ["string", "null"]
         role:
           type: string
-          enum: [passenger, driver, admin]
+          enum: [passenger, driver, admin, corporate]
       required: [name, email, role]
 
     UpdateUserBody:
