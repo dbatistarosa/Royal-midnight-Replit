@@ -149,9 +149,9 @@ router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void
     .values({ ticketId: id, userId: caller.userId, authorRole, message })
     .returning();
 
-  // Re-open ticket if passenger replies to a non-closed ticket
-  if (authorRole === "passenger" && ticket.status === "open") {
-    await db.update(supportTicketsTable).set({ status: "open" }).where(eq(supportTicketsTable.id, id));
+  // Move ticket to in_progress when admin replies
+  if (authorRole === "admin" && ticket.status === "open") {
+    await db.update(supportTicketsTable).set({ status: "in_progress" }).where(eq(supportTicketsTable.id, id));
   }
 
   res.status(201).json({ ...msg, createdAt: msg.createdAt.toISOString() });

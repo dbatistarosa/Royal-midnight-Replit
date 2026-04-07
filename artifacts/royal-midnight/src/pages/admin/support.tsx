@@ -145,7 +145,7 @@ function TicketPanel({ ticket, authHeader, onStatusChange }: {
   };
 
   const cfg = STATUS_CONFIG[ticket.status] ?? STATUS_CONFIG["open"]!;
-  const priCfg = PRIORITY_CONFIG[ticket.priority] ?? PRIORITY_CONFIG["normal"]!;
+  const priCfg = PRIORITY_CONFIG[ticket.priority] ?? { label: ticket.priority, color: "text-muted-foreground" };
 
   return (
     <div className="bg-card border border-border">
