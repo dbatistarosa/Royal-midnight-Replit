@@ -13,6 +13,7 @@ Dark midnight/champagne gold branding. Playfair Display headings, Inter body. No
 - `lib/api-spec` — OpenAPI v0.2.0 spec (openapi.yaml)
 - `lib/api-client-react` — Generated TanStack React Query hooks (@workspace/api-client-react)
 - `lib/api-zod` — Generated Zod validation schemas (@workspace/api-zod)
+- `lib/object-storage-web` — Uppy-based presigned URL upload hook (@workspace/object-storage-web)
 
 ### Ports
 - API server: 8080

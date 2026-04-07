@@ -34,6 +34,7 @@ export function Navbar() {
     { name: "Services", path: "/services" },
     { name: "Fleet", path: "/fleet" },
     { name: "Contact", path: "/contact" },
+    { name: "Drive with Us", path: "/driver/onboarding" },
   ];
 
   function handleLogout() {

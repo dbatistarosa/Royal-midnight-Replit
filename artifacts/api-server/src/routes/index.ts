@@ -17,6 +17,7 @@ import paymentsRouter from "./payments";
 import githubRouter from "./github";
 import settingsRouter from "./settings";
 import autocompleteRouter from "./autocomplete";
+import storageRouter from "./storage";
 
 const router: IRouter = Router();
 
@@ -38,5 +39,6 @@ router.use(paymentsRouter);
 router.use(githubRouter);
 router.use(settingsRouter);
 router.use(autocompleteRouter);
+router.use(storageRouter);
 
 export default router;

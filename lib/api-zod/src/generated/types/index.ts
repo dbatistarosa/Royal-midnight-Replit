@@ -76,6 +76,8 @@ export * from "./updateTicketBodyPriority";
 export * from "./updateTicketBodyStatus";
 export * from "./updateUserBody";
 export * from "./updateVehicleBody";
+export * from "./uploadUrlRequest";
+export * from "./uploadUrlResponse";
 export * from "./user";
 export * from "./userRole";
 export * from "./validatePromoBody";

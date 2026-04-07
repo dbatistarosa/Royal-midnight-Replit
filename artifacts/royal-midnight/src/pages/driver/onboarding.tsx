@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useLocation, Link } from "wouter";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CheckCircle2, ChevronLeft, ArrowRight, Loader2, Car, User, MapPin, FileText } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ArrowRight, Loader2, Car, User, MapPin, FileText, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -12,6 +12,88 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { useUpload } from "@workspace/object-storage-web";
+
+type DocUploadFieldProps = {
+  label: string;
+  hint?: string;
+  accept?: string;
+  objectPath: string | null;
+  onChange: (path: string | null) => void;
+};
+
+function DocUploadField({ label, hint, accept = "image/*,.pdf", objectPath, onChange }: DocUploadFieldProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+
+  const { uploadFile, isUploading, progress } = useUpload({
+    basePath: `${API_BASE}/storage`,
+    onSuccess: (res) => {
+      onChange(res.objectPath);
+    },
+    onError: (err) => {
+      console.error("Upload error:", err);
+    },
+  });
+
+  const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    await uploadFile(file);
+  };
+
+  const handleRemove = () => {
+    onChange(null);
+    setFileName(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-gray-400 uppercase tracking-widest text-xs">{label}</p>
+      {hint && <p className="text-gray-600 text-xs">{hint}</p>}
+
+      {objectPath ? (
+        <div className="flex items-center gap-3 bg-primary/5 border border-primary/20 p-3">
+          <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+          <span className="text-white text-sm flex-1 truncate">{fileName ?? "Uploaded"}</span>
+          <button type="button" onClick={handleRemove} className="text-gray-600 hover:text-white transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+          className="w-full border border-dashed border-white/15 hover:border-primary/40 bg-white/3 hover:bg-primary/5 transition-all p-5 flex flex-col items-center gap-2 group disabled:opacity-60"
+        >
+          {isUploading ? (
+            <>
+              <Loader2 className="w-5 h-5 text-primary animate-spin" />
+              <span className="text-xs text-gray-500">Uploading... {progress}%</span>
+            </>
+          ) : (
+            <>
+              <Upload className="w-5 h-5 text-gray-600 group-hover:text-primary transition-colors" />
+              <span className="text-xs text-gray-500 group-hover:text-gray-300 transition-colors">
+                Click to upload <span className="text-gray-700">— JPG, PNG, or PDF</span>
+              </span>
+            </>
+          )}
+        </button>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={handleChange}
+      />
+    </div>
+  );
+}
 
 const STEPS = [
   { num: 1, label: "Personal Info", icon: User },
@@ -48,13 +130,10 @@ const step3Schema = z.object({
 const step4Schema = z.object({
   licenseNumber: z.string().min(1, "License number is required"),
   licenseExpiry: z.string().min(1, "License expiry is required"),
-  licenseDoc: z.string().optional(),
   regVin: z.string().optional(),
   regPlate: z.string().optional(),
   regExpiry: z.string().optional(),
-  regDoc: z.string().optional(),
   insuranceExpiry: z.string().optional(),
-  insuranceDoc: z.string().optional(),
 });
 
 type Step1Values = z.infer<typeof step1Schema>;
@@ -78,10 +157,14 @@ export default function DriverOnboarding() {
   const [step2Data, setStep2Data] = useState<Step2Values | null>(null);
   const [step3Data, setStep3Data] = useState<Step3Values | null>(null);
 
+  const [licenseDocPath, setLicenseDocPath] = useState<string | null>(null);
+  const [regDocPath, setRegDocPath] = useState<string | null>(null);
+  const [insuranceDocPath, setInsuranceDocPath] = useState<string | null>(null);
+
   const form1 = useForm<Step1Values>({ resolver: zodResolver(step1Schema), defaultValues: { name: "", email: "", phone: "", password: "", confirmPassword: "" } });
   const form2 = useForm<Step2Values>({ resolver: zodResolver(step2Schema), defaultValues: { serviceArea: "" } });
   const form3 = useForm<Step3Values>({ resolver: zodResolver(step3Schema), defaultValues: { vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: 4, luggageCapacity: 3, hasCarSeat: false } });
-  const form4 = useForm<Step4Values>({ resolver: zodResolver(step4Schema), defaultValues: { licenseNumber: "", licenseExpiry: "", licenseDoc: "", regVin: "", regPlate: "", regExpiry: "", regDoc: "", insuranceExpiry: "", insuranceDoc: "" } });
+  const form4 = useForm<Step4Values>({ resolver: zodResolver(step4Schema), defaultValues: { licenseNumber: "", licenseExpiry: "", regVin: "", regPlate: "", regExpiry: "", insuranceExpiry: "" } });
 
   const handleStep1 = form1.handleSubmit((data) => {
     setStep1Data(data);
@@ -101,6 +184,20 @@ export default function DriverOnboarding() {
   // Step 4: Single atomic submission of all collected data
   const handleStep4 = form4.handleSubmit(async (step4Data) => {
     if (!step1Data || !step2Data || !step3Data) return;
+
+    if (!licenseDocPath) {
+      toast({ title: "Driver's License required", description: "Please upload a photo or scan of your driver's license.", variant: "destructive" });
+      return;
+    }
+    if (!insuranceDocPath) {
+      toast({ title: "Insurance Certificate required", description: "Please upload your car insurance certificate.", variant: "destructive" });
+      return;
+    }
+    if (!regDocPath) {
+      toast({ title: "Vehicle Registration required", description: "Please upload your vehicle registration document.", variant: "destructive" });
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -119,13 +216,13 @@ export default function DriverOnboarding() {
         hasCarSeat: Boolean(step3Data.hasCarSeat),
         licenseNumber: step4Data.licenseNumber,
         licenseExpiry: step4Data.licenseExpiry,
-        licenseDoc: step4Data.licenseDoc || "",
+        licenseDoc: licenseDocPath,
         regVin: step4Data.regVin || "",
         regPlate: step4Data.regPlate || "",
         regExpiry: step4Data.regExpiry || "",
-        regDoc: step4Data.regDoc || "",
+        regDoc: regDocPath,
         insuranceExpiry: step4Data.insuranceExpiry || "",
-        insuranceDoc: step4Data.insuranceDoc || "",
+        insuranceDoc: insuranceDocPath,
       };
 
       const res = await fetch(`${API_BASE}/auth/driver-register`, {
@@ -500,12 +597,12 @@ export default function DriverOnboarding() {
                       </FormItem>
                     )} />
                   </div>
-                  <FormField control={form4.control} name="licenseDoc" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className={labelClass}>Photo / Scan Filename <span className="normal-case text-gray-700">(upload reference)</span></FormLabel>
-                      <FormControl><Input placeholder="license_front.jpg" className={inputClass} {...field} /></FormControl>
-                    </FormItem>
-                  )} />
+                  <DocUploadField
+                    label="License Photo or Scan (required)"
+                    hint="Front and/or back of your valid Florida driver's license"
+                    objectPath={licenseDocPath}
+                    onChange={setLicenseDocPath}
+                  />
                 </div>
 
                 {/* Vehicle Registration */}
@@ -531,12 +628,12 @@ export default function DriverOnboarding() {
                       </FormItem>
                     )} />
                   </div>
-                  <FormField control={form4.control} name="regDoc" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className={labelClass}>Registration Doc Filename <span className="normal-case text-gray-700">(upload reference)</span></FormLabel>
-                      <FormControl><Input placeholder="registration.pdf" className={inputClass} {...field} /></FormControl>
-                    </FormItem>
-                  )} />
+                  <DocUploadField
+                    label="Registration Document (required)"
+                    hint="Current vehicle registration certificate"
+                    objectPath={regDocPath}
+                    onChange={setRegDocPath}
+                  />
                 </div>
 
                 {/* Insurance */}
@@ -549,17 +646,17 @@ export default function DriverOnboarding() {
                         <FormControl><Input type="date" className={inputClass} {...field} /></FormControl>
                       </FormItem>
                     )} />
-                    <FormField control={form4.control} name="insuranceDoc" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className={labelClass}>Certificate Filename <span className="normal-case text-gray-700">(upload reference)</span></FormLabel>
-                        <FormControl><Input placeholder="insurance_cert.pdf" className={inputClass} {...field} /></FormControl>
-                      </FormItem>
-                    )} />
                   </div>
+                  <DocUploadField
+                    label="Insurance Certificate (required)"
+                    hint="Certificate of insurance showing minimum required liability coverage"
+                    objectPath={insuranceDocPath}
+                    onChange={setInsuranceDocPath}
+                  />
                 </div>
 
                 <div className="bg-primary/5 border border-primary/15 p-4 text-xs text-gray-500">
-                  By submitting, you confirm all provided information is accurate and that you meet Royal Midnight's professional chauffeur standards.
+                  All three documents are required. By submitting, you confirm all provided information is accurate and that you meet Royal Midnight's professional chauffeur standards.
                 </div>
 
                 <div className="flex justify-between pt-2">
