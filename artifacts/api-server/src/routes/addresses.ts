@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, savedAddressesTable } from "@workspace/db";
 import {
   ListAddressesQueryParams,
@@ -7,6 +7,7 @@ import {
   CreateAddressBody,
   DeleteAddressParams,
 } from "@workspace/api-zod";
+import { requireAuth } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
@@ -40,7 +41,7 @@ router.post("/addresses", async (req, res): Promise<void> => {
   res.status(201).json({ ...address, createdAt: address.createdAt.toISOString() });
 });
 
-router.patch("/addresses/:id", async (req, res): Promise<void> => {
+router.patch("/addresses/:id", requireAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
@@ -51,6 +52,19 @@ router.patch("/addresses/:id", async (req, res): Promise<void> => {
   const address = (req.body?.address as string | undefined)?.trim();
   if (!label && !address) {
     res.status(400).json({ error: "label or address required" });
+    return;
+  }
+
+  // Fetch address and verify ownership (admins may bypass)
+  const [existing] = await db.select().from(savedAddressesTable).where(eq(savedAddressesTable.id, id));
+  if (!existing) {
+    res.status(404).json({ error: "Address not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && existing.userId !== caller.userId) {
+    res.status(403).json({ error: "Access denied" });
     return;
   }
 

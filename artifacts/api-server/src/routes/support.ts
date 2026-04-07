@@ -51,7 +51,7 @@ router.post("/support", async (req, res): Promise<void> => {
   res.status(201).json(parseTicket(ticket));
 });
 
-router.patch("/support/:id", requireAuth, async (req, res): Promise<void> => {
+router.patch("/support/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = UpdateTicketParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
