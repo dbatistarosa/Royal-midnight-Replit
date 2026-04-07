@@ -227,7 +227,7 @@ export default function AdminBookings() {
 
       <div className="bg-card border border-border rounded-none overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
+          <table className="w-full text-sm text-left min-w-[640px]">
             <thead className="bg-background/50 border-b border-border">
               <tr>
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">ID</th>

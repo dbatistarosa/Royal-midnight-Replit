@@ -24,8 +24,8 @@ function PassengerRideDetailInner() {
         <Link href="/passenger/rides" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4">
           <ChevronLeft className="w-4 h-4 mr-1" /> Back to Rides
         </Link>
-        <div className="flex justify-between items-start">
-          <h1 className="font-serif text-3xl">Ride #{id}</h1>
+        <div className="flex justify-between items-start gap-3">
+          <h1 className="font-serif text-2xl sm:text-3xl">Ride #{id}</h1>
           {booking && (
             <span className="px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 text-sm font-medium">
               {booking.status.toUpperCase()}

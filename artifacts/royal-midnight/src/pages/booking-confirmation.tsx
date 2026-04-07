@@ -61,7 +61,7 @@ export default function BookingConfirmation() {
           
           <CheckCircle2 className="w-20 h-20 text-primary mx-auto mb-8" />
           
-          <h1 className="text-4xl font-serif text-white mb-2">Reservation Confirmed</h1>
+          <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Reservation Confirmed</h1>
           <p className="text-gray-400 text-lg mb-8">Thank you for choosing Royal Midnight. Your vehicle has been secured.</p>
           
           <div className="inline-block bg-white/5 border border-white/10 px-8 py-4 mb-12">

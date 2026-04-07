@@ -214,7 +214,7 @@ export default function AdminDrivers() {
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
+          <table className="w-full text-sm text-left min-w-[600px]">
             <thead className="bg-background/50 border-b border-border">
               <tr>
                 <th className="px-5 py-4 font-medium text-muted-foreground">ID</th>
