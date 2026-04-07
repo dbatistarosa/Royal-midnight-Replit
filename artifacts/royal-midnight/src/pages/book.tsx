@@ -376,14 +376,22 @@ export default function Book() {
     }
   };
 
-  const handlePaymentSuccess = (_paymentIntentId: string) => {
-    // Booking was already created in pending state before payment.
-    // The Stripe webhook will update status to "confirmed".
-    // Redirect to confirmation page immediately.
+  const handlePaymentSuccess = async (paymentIntentId: string) => {
     const bookingId = pendingBookingId;
-    if (bookingId) {
-      setLocation(`/booking-confirmation/${bookingId}`);
+    if (!bookingId) return;
+
+    // Confirm the payment server-side immediately — do not rely solely on webhook
+    try {
+      await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentIntentId }),
+      });
+    } catch {
+      // Best-effort: webhook will handle it if this fails
     }
+
+    setLocation(`/booking-confirmation/${bookingId}`);
   };
 
   const handlePaymentError = (message: string) => {

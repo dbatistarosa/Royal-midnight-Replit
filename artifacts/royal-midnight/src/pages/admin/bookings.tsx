@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -43,13 +43,18 @@ type BookingRow = {
   pickupAt: string;
   vehicleClass: string;
   passengers: number;
+  luggageCount?: number | null;
   status: string;
   priceQuoted: number;
+  discountAmount?: number | null;
+  promoCode?: string | null;
   driverId: number | null;
   flightNumber?: string | null;
   specialRequests?: string | null;
   paymentType?: string | null;
   userRole?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 type DriverOption = { id: number; name: string; status: string };
@@ -135,6 +140,7 @@ export default function AdminBookings() {
   const [isGettingQuote, setIsGettingQuote] = useState(false);
   const [pickupAirline, setPickupAirline] = useState("");
   const [dropoffAirline, setDropoffAirline] = useState("");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const authHdr = token ? `Bearer ${token}` : "";
 
@@ -324,15 +330,16 @@ export default function AdminBookings() {
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Status</th>
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs hidden md:table-cell">Amount</th>
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Driver</th>
+                <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {isLoading ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-muted-foreground">
+                <tr><td colSpan={8} className="px-5 py-10 text-center text-muted-foreground">
                   <Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading...
                 </td></tr>
               ) : !bookings.length ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-muted-foreground">No bookings found.</td></tr>
+                <tr><td colSpan={8} className="px-5 py-10 text-center text-muted-foreground">No bookings found.</td></tr>
               ) : bookings.map(b => (
                 <>
                   <tr key={b.id} className="hover:bg-background/50 transition-colors">
@@ -348,7 +355,7 @@ export default function AdminBookings() {
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`px-2 py-1 border text-xs uppercase tracking-widest ${STATUS_COLORS[b.status] ?? "text-muted-foreground"}`}>
-                          {b.status.replace("_", " ")}
+                          {b.status.replace(/_/g, " ")}
                         </span>
                         {b.userRole === "corporate" && (
                           <span className="px-2 py-0.5 border border-purple-500/30 bg-purple-500/10 text-purple-400 text-xs uppercase tracking-widest">
@@ -402,7 +409,144 @@ export default function AdminBookings() {
                         </div>
                       )}
                     </td>
+                    <td className="px-5 py-4">
+                      <button
+                        onClick={() => setExpandedId(expandedId === b.id ? null : b.id)}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors whitespace-nowrap"
+                      >
+                        {expandedId === b.id ? (
+                          <><ChevronUp className="w-3.5 h-3.5" /> Hide</>
+                        ) : (
+                          <><ChevronDown className="w-3.5 h-3.5" /> View</>
+                        )}
+                      </button>
+                    </td>
                   </tr>
+                  {expandedId === b.id && (
+                    <tr key={`${b.id}-detail`} className="bg-background/30">
+                      <td colSpan={8} className="px-6 py-6 border-t border-border/50">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          {/* Customer Info */}
+                          <div className="space-y-3">
+                            <h4 className="text-[10px] uppercase tracking-widest text-primary flex items-center gap-1.5 border-b border-white/8 pb-2">
+                              <User className="w-3.5 h-3.5" /> Customer
+                            </h4>
+                            <div className="space-y-2 text-sm">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Name</p>
+                                <p className="text-white">{b.passengerName}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Email</p>
+                                <p className="text-white break-all">{b.passengerEmail}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Phone</p>
+                                <p className="text-white flex items-center gap-1.5">
+                                  <Phone className="w-3 h-3 text-primary" />
+                                  {b.passengerPhone || "—"}
+                                </p>
+                              </div>
+                              {b.userRole && (
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Account Type</p>
+                                  <p className="capitalize text-white">{b.userRole}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Trip Info */}
+                          <div className="space-y-3">
+                            <h4 className="text-[10px] uppercase tracking-widest text-primary flex items-center gap-1.5 border-b border-white/8 pb-2">
+                              <Car className="w-3.5 h-3.5" /> Trip Details
+                            </h4>
+                            <div className="space-y-2 text-sm">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Pick-up</p>
+                                <p className="text-white">{b.pickupAddress}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Drop-off</p>
+                                <p className="text-white">{b.dropoffAddress}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> Pickup Time</p>
+                                <p className="text-white">{format(new Date(b.pickupAt), "PPP 'at' p")}</p>
+                              </div>
+                              <div className="flex gap-6">
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Vehicle</p>
+                                  <p className="text-white capitalize">{b.vehicleClass === "suv" ? "Premium SUV" : "Business Sedan"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><Users className="w-3 h-3" /> Pax</p>
+                                  <p className="text-white">{b.passengers}</p>
+                                </div>
+                                {b.luggageCount != null && (
+                                  <div>
+                                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><Briefcase className="w-3 h-3" /> Bags</p>
+                                    <p className="text-white">{b.luggageCount}</p>
+                                  </div>
+                                )}
+                              </div>
+                              {b.flightNumber && (
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><Plane className="w-3 h-3" /> Flight</p>
+                                  <p className="text-white font-mono">{b.flightNumber}</p>
+                                </div>
+                              )}
+                              {b.specialRequests && (
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><MessageSquare className="w-3 h-3" /> Special Requests</p>
+                                  <p className="text-muted-foreground italic">{b.specialRequests}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Payment & Driver Info */}
+                          <div className="space-y-3">
+                            <h4 className="text-[10px] uppercase tracking-widest text-primary flex items-center gap-1.5 border-b border-white/8 pb-2">
+                              <CreditCard className="w-3.5 h-3.5" /> Payment & Assignment
+                            </h4>
+                            <div className="space-y-2 text-sm">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Amount Charged</p>
+                                <p className="text-primary font-medium text-base">${b.priceQuoted?.toFixed(2)}</p>
+                              </div>
+                              {b.discountAmount != null && b.discountAmount > 0 && (
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Discount Applied</p>
+                                  <p className="text-green-400">−${b.discountAmount.toFixed(2)} {b.promoCode && <span className="font-mono text-[10px] ml-1">({b.promoCode})</span>}</p>
+                                </div>
+                              )}
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Payment Type</p>
+                                <p className="text-white capitalize">{b.paymentType?.replace("_", " ") || "Standard"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Driver</p>
+                                <p className="text-white">{b.driverId ? `Driver #${b.driverId}` : "Not assigned"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Status</p>
+                                <span className={`inline-block px-2 py-0.5 border text-xs uppercase tracking-widest ${STATUS_COLORS[b.status] ?? "text-muted-foreground"}`}>
+                                  {b.status.replace(/_/g, " ")}
+                                </span>
+                              </div>
+                              {b.createdAt && (
+                                <div>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><FileText className="w-3 h-3" /> Booked On</p>
+                                  <p className="text-muted-foreground text-xs">{format(new Date(b.createdAt), "PPP 'at' p")}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                 </>
               ))}
             </tbody>

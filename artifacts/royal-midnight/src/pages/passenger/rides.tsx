@@ -254,7 +254,7 @@ function PassengerRidesInner() {
   const userId = user?.id ?? 0;
   const { data: bookings, isLoading } = useGetUserBookings(userId, { query: { enabled: !!userId } });
 
-  const upcomingBookings = (bookings?.filter(b => ['pending', 'confirmed', 'in_progress'].includes(b.status)) || []) as Booking[];
+  const upcomingBookings = (bookings?.filter(b => ['awaiting_payment', 'pending', 'confirmed', 'in_progress'].includes(b.status)) || []) as Booking[];
   const pastBookings = (bookings?.filter(b => ['completed', 'cancelled'].includes(b.status)) || []) as Booking[];
 
   return (
