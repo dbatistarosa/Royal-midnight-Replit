@@ -27,6 +27,7 @@ function parseDriver(d: typeof driversTable.$inferSelect) {
     ...d,
     rating: d.rating != null ? parseFloat(d.rating) : null,
     createdAt: d.createdAt.toISOString(),
+    locationUpdatedAt: d.locationUpdatedAt ? d.locationUpdatedAt.toISOString() : null,
   };
 }
 
@@ -129,7 +130,7 @@ router.get("/admin/revenue", async (_req, res): Promise<void> => {
 router.get("/admin/dispatch", async (_req, res): Promise<void> => {
   const [activeTripsRaw, availableDriversRaw, pendingRaw] = await Promise.all([
     db.select().from(bookingsTable).where(eq(bookingsTable.status, "in_progress")),
-    db.select().from(driversTable).where(sql`status = 'active' and is_online = true`),
+    db.select().from(driversTable).where(sql`approval_status = 'approved'`),
     db.select().from(bookingsTable).where(eq(bookingsTable.status, "pending")).orderBy(bookingsTable.pickupAt),
   ]);
 

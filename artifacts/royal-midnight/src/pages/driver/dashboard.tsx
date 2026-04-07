@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, Star } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, Star, MapPin } from "lucide-react";
 import { format } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useDriverStatus } from "@/contexts/driverStatus";
@@ -9,6 +9,8 @@ import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
+const LOCATION_LS_KEY = "rm_driver_location_sharing";
 
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
@@ -123,6 +125,92 @@ function StatusToggle({ driverId, currentStatus, authHeader }: { driverId: numbe
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function LocationShareToggle({ driverId, authHeader }: { driverId: number; authHeader: string }) {
+  const { toast } = useToast();
+  const [sharing, setSharing] = useState<boolean>(() => {
+    try { return localStorage.getItem(LOCATION_LS_KEY) === "true"; } catch { return false; }
+  });
+  const [geoError, setGeoError] = useState<string | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const sendLocation = useCallback(async (lat: number, lng: number) => {
+    try {
+      await fetch(`${API_BASE}/drivers/${driverId}/location`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: authHeader },
+        body: JSON.stringify({ lat, lng }),
+      });
+    } catch {
+      // Silently ignore network errors — will retry on next interval
+    }
+  }, [driverId, authHeader]);
+
+  const startSharing = useCallback(() => {
+    if (!navigator.geolocation) {
+      setGeoError("Geolocation is not supported by this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        void sendLocation(coords.latitude, coords.longitude);
+        setGeoError(null);
+        intervalRef.current = setInterval(() => {
+          navigator.geolocation.getCurrentPosition(
+            ({ coords: c }) => void sendLocation(c.latitude, c.longitude),
+            () => {},
+          );
+        }, 30000);
+      },
+      (err) => {
+        setGeoError(err.message || "Location access denied.");
+        setSharing(false);
+        localStorage.setItem(LOCATION_LS_KEY, "false");
+      },
+    );
+  }, [sendLocation]);
+
+  const stopSharing = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (sharing) startSharing();
+    return () => stopSharing();
+  }, [sharing, startSharing, stopSharing]);
+
+  const toggle = () => {
+    const next = !sharing;
+    setSharing(next);
+    localStorage.setItem(LOCATION_LS_KEY, String(next));
+    if (!next) {
+      toast({ title: "Location sharing disabled", description: "Dispatch will no longer see your position." });
+    } else {
+      toast({ title: "Location sharing enabled", description: "Your position will update every 30 seconds." });
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        onClick={toggle}
+        className={`flex items-center gap-2 px-4 py-2 border text-sm font-medium transition-colors ${
+          sharing
+            ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
+            : "bg-white/5 border-white/10 text-muted-foreground"
+        }`}
+        title={sharing ? "Disable location sharing" : "Enable location sharing"}
+      >
+        <MapPin className={`w-4 h-4 ${sharing ? "text-blue-400" : ""}`} />
+        {sharing ? "Sharing Location" : "Share Location"}
+      </button>
+      {geoError && <span className="text-xs text-red-400 max-w-[200px] text-right">{geoError}</span>}
     </div>
   );
 }
@@ -536,9 +624,12 @@ export default function DriverDashboard() {
           </div>
         </div>
         {driverRecord && (
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground uppercase tracking-widest">Status</span>
-            <StatusToggle driverId={driverRecord.id} currentStatus={normalizedStatus} authHeader={authHeader} />
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            <LocationShareToggle driverId={driverRecord.id} authHeader={authHeader} />
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground uppercase tracking-widest">Status</span>
+              <StatusToggle driverId={driverRecord.id} currentStatus={normalizedStatus} authHeader={authHeader} />
+            </div>
           </div>
         )}
       </div>

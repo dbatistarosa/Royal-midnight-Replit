@@ -211,6 +211,42 @@ router.patch("/drivers/:id/contact", requireAuth, async (req, res): Promise<void
   res.json(parseDriver(updated));
 });
 
+// Driver location update — driver sends GPS coords every 30 seconds when sharing is enabled
+router.patch("/drivers/:id/location", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const lat = parseFloat(req.body?.lat);
+  const lng = parseFloat(req.body?.lng);
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    res.status(400).json({ error: "lat and lng are required and must be valid coordinates" });
+    return;
+  }
+
+  const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== driver.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(driversTable)
+    .set({ latitude: String(lat), longitude: String(lng), locationUpdatedAt: new Date() })
+    .where(eq(driversTable.id, id))
+    .returning();
+
+  res.json({ id: updated.id, latitude: updated.latitude, longitude: updated.longitude, locationUpdatedAt: updated.locationUpdatedAt });
+});
+
 // Driver self-service status update (available / on_break / unavailable)
 router.patch("/drivers/:id/status", requireAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);

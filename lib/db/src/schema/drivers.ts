@@ -39,6 +39,10 @@ export const driversTable = pgTable("drivers", {
 
   approvalStatus: text("approval_status").notNull().default("pending"),
   rejectionReason: text("rejection_reason"),
+
+  latitude: numeric("latitude", { precision: 10, scale: 7 }),
+  longitude: numeric("longitude", { precision: 10, scale: 7 }),
+  locationUpdatedAt: timestamp("location_updated_at", { withTimezone: true }),
 });
 
 export const insertDriverSchema = createInsertSchema(driversTable).omit({ id: true, createdAt: true, updatedAt: true });
