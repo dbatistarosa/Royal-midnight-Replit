@@ -6,8 +6,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock, Plane } from "lucide-react";
 
-import { useCreateBooking, useGetQuote } from "@workspace/api-client-react";
-import { QuoteRequestVehicleClass, CreateBookingBodyVehicleClass } from "@workspace/api-client-react/src/generated/api.schemas";
+import { useGetQuote } from "@workspace/api-client-react";
+import { QuoteRequestVehicleClass } from "@workspace/api-client-react/src/generated/api.schemas";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
@@ -99,6 +99,7 @@ export default function Book() {
   const [isGettingQuotes, setIsGettingQuotes] = useState(false);
   const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null);
   const [paymentPublishableKey, setPaymentPublishableKey] = useState<string | null>(null);
+  const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [minBookingHours, setMinBookingHours] = useState(2);
@@ -106,7 +107,6 @@ export default function Book() {
   const [dropoffAirline, setDropoffAirline] = useState("");
 
   const getQuote = useGetQuote();
-  const createBooking = useCreateBooking();
 
   const searchParams = new URLSearchParams(window.location.search);
 
@@ -292,56 +292,70 @@ export default function Book() {
     setIsConfirming(true);
     setPaymentError("");
     try {
+      // Step 1: Ensure the user has an account
       const userId = await ensureAccount(values.passengerName, values.passengerEmail, values.passengerPhone, values.password || "");
       if (userId === null) { setIsConfirming(false); return; }
 
+      // Step 2: Create the booking in pending state FIRST so it's always in the database
+      const isoDate = new Date(`${format(values.pickupDate, "yyyy-MM-dd")}T${values.pickupTime}:00`).toISOString();
+      const bookingRes = await fetch(`${API_BASE}/bookings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          passengerName: values.passengerName,
+          passengerEmail: values.passengerEmail,
+          passengerPhone: values.passengerPhone,
+          pickupAddress: values.pickupAddress,
+          dropoffAddress: values.dropoffAddress,
+          vehicleClass: selectedVehicle,
+          passengers: Number(values.passengers),
+          luggageCount: Number(values.luggage),
+          pickupAt: isoDate,
+          flightNumber: values.flightNumber || null,
+          specialRequests: values.specialRequests || null,
+          priceQuoted: selectedQuote.totalWithTax,
+          userId: userId,
+          paymentType: "standard",
+        }),
+      });
+      if (!bookingRes.ok) {
+        const err = await bookingRes.json() as { error?: string };
+        throw new Error(err.error || "Could not create reservation. Please try again.");
+      }
+      const booking = await bookingRes.json() as { id: number };
+      const bookingId = booking.id;
+      setPendingBookingId(bookingId);
+
+      // Step 3: Get Stripe publishable key
       const configRes = await fetch(`${API_BASE}/payments/config`);
       if (!configRes.ok) throw new Error("Payment configuration failed.");
       const { publishableKey } = await configRes.json() as { publishableKey: string };
 
+      // Step 4: Create a payment intent tied to this booking
       const intentRes = await fetch(`${API_BASE}/payments/create-intent`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: selectedQuote.totalWithTax }),
+        body: JSON.stringify({ amount: selectedQuote.totalWithTax, bookingId }),
       });
-      if (!intentRes.ok) throw new Error("Could not initiate payment.");
+      if (!intentRes.ok) throw new Error("Could not initiate payment. Please try again.");
       const { clientSecret } = await intentRes.json() as { clientSecret: string };
 
       setPaymentClientSecret(clientSecret);
       setPaymentPublishableKey(publishableKey);
     } catch (err: any) {
       setPaymentError(err?.message || "Could not initiate payment. Please try again.");
-      toast({ title: "Payment Error", description: err?.message, variant: "destructive" });
+      toast({ title: "Error", description: err?.message, variant: "destructive" });
     }
     setIsConfirming(false);
   };
 
-  const handlePaymentSuccess = async (paymentIntentId: string) => {
-    if (!selectedQuote || !selectedVehicle) return;
-    const values = form.getValues();
-    const isoDate = new Date(`${format(values.pickupDate, "yyyy-MM-dd")}T${values.pickupTime}:00`).toISOString();
-    try {
-      const result = await createBooking.mutateAsync({
-        data: {
-          pickupAddress: values.pickupAddress,
-          dropoffAddress: values.dropoffAddress,
-          vehicleClass: selectedVehicle as CreateBookingBodyVehicleClass,
-          passengers: Number(values.passengers),
-          luggageCount: Number(values.luggage),
-          pickupAt: isoDate,
-          passengerName: values.passengerName,
-          passengerEmail: values.passengerEmail,
-          passengerPhone: values.passengerPhone,
-          flightNumber: values.flightNumber || undefined,
-          specialRequests: values.specialRequests || undefined,
-          priceQuoted: selectedQuote.totalWithTax,
-          taxAmount: selectedQuote.taxAmount,
-          userId: user?.id as any,
-        },
-      });
-      setLocation(`/booking-confirmation/${result.id}`);
-    } catch (err: any) {
-      toast({ title: "Booking Error", description: err?.message || "Payment received but booking failed. Please contact support.", variant: "destructive" });
+  const handlePaymentSuccess = (_paymentIntentId: string) => {
+    // Booking was already created in pending state before payment.
+    // The Stripe webhook will update status to "confirmed".
+    // Redirect to confirmation page immediately.
+    const bookingId = pendingBookingId;
+    if (bookingId) {
+      setLocation(`/booking-confirmation/${bookingId}`);
     }
   };
 

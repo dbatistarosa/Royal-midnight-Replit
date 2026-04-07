@@ -1403,6 +1403,9 @@ components:
           type: ["string", "null"]
         discountAmount:
           type: ["number", "null"]
+        luggageCount:
+          type: integer
+          default: 0
         userId:
           type: ["integer", "null"]
         paymentType:

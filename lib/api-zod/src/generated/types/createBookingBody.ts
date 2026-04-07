@@ -26,6 +26,7 @@ export interface CreateBookingBody {
   promoCode?: string | null;
   /** @nullable */
   discountAmount?: number | null;
+  luggageCount?: number;
   /** @nullable */
   userId?: number | null;
   /** @nullable */

@@ -119,6 +119,8 @@ export const ListBookingsResponse = zod.array(ListBookingsResponseItem);
 /**
  * @summary Create a new booking
  */
+export const createBookingBodyLuggageCountDefault = 0;
+
 export const CreateBookingBody = zod.object({
   passengerName: zod.string(),
   passengerEmail: zod.string(),
@@ -133,6 +135,7 @@ export const CreateBookingBody = zod.object({
   priceQuoted: zod.number(),
   promoCode: zod.string().nullish(),
   discountAmount: zod.number().nullish(),
+  luggageCount: zod.number().default(createBookingBodyLuggageCountDefault),
   userId: zod.number().nullish(),
   paymentType: zod
     .union([

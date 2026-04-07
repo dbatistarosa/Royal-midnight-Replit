@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react";
-import { useRoute } from "wouter";
-import { Link } from "wouter";
+import { useState, useEffect, useRef } from "react";
+import { useRoute, Link } from "wouter";
 import { API_BASE } from "@/lib/constants";
 import { format } from "date-fns";
-import { CheckCircle2, Loader2, FileText } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, Calendar, MapPin, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type PublicBooking = {
@@ -16,6 +15,12 @@ type PublicBooking = {
   pickupAt: string;
 };
 
+async function fetchBooking(id: number): Promise<PublicBooking> {
+  const res = await fetch(`${API_BASE}/bookings/${id}/track`);
+  if (!res.ok) throw new Error("Not found");
+  return res.json() as Promise<PublicBooking>;
+}
+
 export default function BookingConfirmation() {
   const [, params] = useRoute("/booking-confirmation/:id");
   const id = params?.id ? parseInt(params.id) : 0;
@@ -23,14 +28,29 @@ export default function BookingConfirmation() {
   const [booking, setBooking] = useState<PublicBooking | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const load = async () => {
+    if (!id) return;
+    try {
+      const data = await fetchBooking(id);
+      setBooking(data);
+      setError(false);
+      if (data.status === "confirmed" || data.status === "in_progress" || data.status === "completed" || data.status === "cancelled") {
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      }
+    } catch {
+      setError(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!id) return;
-    fetch(`${API_BASE}/bookings/${id}/track`)
-      .then(r => r.ok ? r.json() as Promise<PublicBooking> : Promise.reject())
-      .then(data => setBooking(data))
-      .catch(() => setError(true))
-      .finally(() => setIsLoading(false));
+    void load();
+    pollRef.current = setInterval(() => { void load(); }, 4000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   if (isLoading) {
@@ -53,56 +73,88 @@ export default function BookingConfirmation() {
     );
   }
 
+  const isPending = booking.status === "pending";
+
   return (
     <div className="min-h-screen bg-[#050505] pt-32 pb-24">
       <div className="container mx-auto px-6 max-w-3xl">
         <div className="bg-black border border-white/10 p-8 md:p-16 text-center relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50"></div>
-          
-          <CheckCircle2 className="w-20 h-20 text-primary mx-auto mb-8" />
-          
-          <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Reservation Confirmed</h1>
-          <p className="text-gray-400 text-lg mb-8">Thank you for choosing Royal Midnight. Your vehicle has been secured.</p>
-          
-          <div className="inline-block bg-white/5 border border-white/10 px-8 py-4 mb-12">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
+
+          {isPending ? (
+            <>
+              <div className="w-20 h-20 mx-auto mb-8 flex items-center justify-center border border-primary/30 bg-primary/5">
+                <Clock className="w-10 h-10 text-primary animate-pulse" />
+              </div>
+              <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Payment Processing</h1>
+              <p className="text-gray-400 text-base mb-6">Your payment is being confirmed. This page will update automatically.</p>
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mb-8">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Checking payment status...
+              </div>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="w-20 h-20 text-primary mx-auto mb-8" />
+              <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Reservation Confirmed</h1>
+              <p className="text-gray-400 text-base mb-8">Thank you for choosing Royal Midnight. Your vehicle has been secured.</p>
+            </>
+          )}
+
+          <div className="inline-block bg-white/5 border border-white/10 px-8 py-4 mb-10">
             <span className="block text-xs uppercase tracking-widest text-gray-500 mb-1">Reference Number</span>
-            <span className="text-2xl font-mono text-primary tracking-widest">RM-{booking.id.toString().padStart(6, '0')}</span>
+            <span className="text-2xl font-mono text-primary tracking-widest">RM-{booking.id.toString().padStart(6, "0")}</span>
           </div>
 
-          <div className="text-left bg-white/5 p-8 border border-white/5 mb-10">
-            <h3 className="text-xl font-serif text-white mb-6 border-b border-white/10 pb-4">Itinerary Details</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
-              <div>
-                <p className="text-gray-500 uppercase tracking-widest text-xs mb-1">Date & Time</p>
-                <p className="text-white text-lg">{format(new Date(booking.pickupAt), "PPP 'at' p")}</p>
+          <div className="text-left bg-white/5 p-6 sm:p-8 border border-white/5 mb-8 space-y-5">
+            <h3 className="text-lg font-serif text-white border-b border-white/10 pb-3 mb-2">Itinerary Details</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-sm">
+              <div className="flex gap-3">
+                <Calendar className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Date & Time</p>
+                  <p className="text-white">{format(new Date(booking.pickupAt), "PPP 'at' p")}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-gray-500 uppercase tracking-widest text-xs mb-1">Passenger</p>
-                <p className="text-white text-lg">{booking.passengerName}</p>
+              <div className="flex gap-3">
+                <User className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Passenger</p>
+                  <p className="text-white">{booking.passengerName}</p>
+                </div>
               </div>
-              <div className="md:col-span-2">
-                <p className="text-gray-500 uppercase tracking-widest text-xs mb-1">Pick-up</p>
-                <p className="text-white text-lg">{booking.pickupAddress}</p>
+              <div className="flex gap-3 sm:col-span-2">
+                <MapPin className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Pick-up</p>
+                  <p className="text-white">{booking.pickupAddress}</p>
+                </div>
               </div>
-              <div className="md:col-span-2">
-                <p className="text-gray-500 uppercase tracking-widest text-xs mb-1">Drop-off</p>
-                <p className="text-white text-lg">{booking.dropoffAddress}</p>
+              <div className="flex gap-3 sm:col-span-2">
+                <MapPin className="w-4 h-4 text-primary/50 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Drop-off</p>
+                  <p className="text-white">{booking.dropoffAddress}</p>
+                </div>
               </div>
             </div>
           </div>
 
-          <p className="text-gray-400 text-sm mb-8">A confirmation email has been sent to {booking.passengerEmail}.</p>
+          {!isPending && booking.passengerEmail && (
+            <p className="text-gray-500 text-sm mb-8">A confirmation has been sent to {booking.passengerEmail}.</p>
+          )}
 
           <div className="flex flex-col sm:flex-row justify-center gap-4">
-            <Link href={`/track/${booking.id}`}>
+            <Link href="/passenger/rides">
               <Button className="w-full sm:w-auto bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
-                Track Ride Status
+                View My Bookings
               </Button>
             </Link>
-            <Button variant="outline" className="w-full sm:w-auto border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
-              <FileText className="w-4 h-4 mr-2" /> Download Receipt
-            </Button>
+            <Link href="/">
+              <Button variant="outline" className="w-full sm:w-auto border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                Return Home
+              </Button>
+            </Link>
           </div>
         </div>
       </div>
