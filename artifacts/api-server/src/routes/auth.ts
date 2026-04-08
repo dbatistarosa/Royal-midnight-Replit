@@ -171,6 +171,7 @@ const DriverRegisterBody = z.object({
   vehicleMake: z.string().optional(),
   vehicleModel: z.string().optional(),
   vehicleColor: z.string().optional(),
+  vehicleClass: z.string().optional(),
   passengerCapacity: z.coerce.number().optional(),
   luggageCapacity: z.coerce.number().optional(),
   hasCarSeat: z.boolean().optional(),

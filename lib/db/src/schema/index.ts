@@ -13,3 +13,4 @@ export * from "./sessions";
 export * from "./ticket-messages";
 export * from "./password-reset-tokens";
 export * from "./email-logs";
+export * from "./vehicle-catalog";

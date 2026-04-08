@@ -1,9 +1,9 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CheckCircle2, ChevronLeft, ArrowRight, Loader2, Car, User, MapPin, FileText, Upload, X } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ArrowRight, Loader2, Car, User, MapPin, FileText, Upload, X, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -13,6 +13,17 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
 import { useUpload } from "@workspace/object-storage-web";
+
+type CatalogEntry = {
+  id: number;
+  make: string;
+  model: string;
+  minYear: number;
+  vehicleTypes: string;
+  isActive: boolean;
+};
+
+const CURRENT_YEAR = new Date().getFullYear();
 
 type DocUploadFieldProps = {
   label: string;
@@ -121,6 +132,7 @@ const step3Schema = z.object({
   vehicleYear: z.string().min(4, "Year is required"),
   vehicleMake: z.string().min(1, "Make is required"),
   vehicleModel: z.string().min(1, "Model is required"),
+  vehicleClass: z.string().min(1, "Vehicle type is required"),
   vehicleColor: z.string().min(1, "Color is required"),
   passengerCapacity: z.coerce.number().min(1).max(10),
   luggageCapacity: z.coerce.number().min(0).max(10),
@@ -162,10 +174,49 @@ export default function DriverOnboarding() {
   const [regDocPath, setRegDocPath] = useState<string | null>(null);
   const [insuranceDocPath, setInsuranceDocPath] = useState<string | null>(null);
 
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/vehicle-catalog`)
+      .then(r => r.ok ? r.json() as Promise<CatalogEntry[]> : Promise.resolve([]))
+      .then(data => setCatalog(Array.isArray(data) ? data : []))
+      .catch(() => setCatalog([]));
+  }, []);
+
   const form1 = useForm<Step1Values>({ resolver: zodResolver(step1Schema), defaultValues: { name: "", email: "", phone: "", password: "", confirmPassword: "" } });
   const form2 = useForm<Step2Values>({ resolver: zodResolver(step2Schema), defaultValues: { serviceArea: "" } });
-  const form3 = useForm<Step3Values>({ resolver: zodResolver(step3Schema), defaultValues: { vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: 4, luggageCapacity: 3, hasCarSeat: false } });
+  const form3 = useForm<Step3Values>({ resolver: zodResolver(step3Schema), defaultValues: { vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleClass: "", vehicleColor: "", passengerCapacity: 4, luggageCapacity: 3, hasCarSeat: false } });
   const form4 = useForm<Step4Values>({ resolver: zodResolver(step4Schema), defaultValues: { licenseNumber: "", licenseExpiry: "", regVin: "", regPlate: "", regExpiry: "", insuranceExpiry: "" } });
+
+  const watchedMake = form3.watch("vehicleMake");
+  const watchedModel = form3.watch("vehicleModel");
+
+  const availableMakes = [...new Set(catalog.map(e => e.make))].sort();
+  const availableModels = catalog.filter(e => e.make === watchedMake).map(e => e.model).sort();
+  const matchedEntry = catalog.find(e => e.make === watchedMake && e.model === watchedModel);
+  const availableYears = matchedEntry
+    ? Array.from({ length: CURRENT_YEAR - matchedEntry.minYear + 1 }, (_, i) => CURRENT_YEAR - i)
+    : [];
+  const availableTypes = matchedEntry ? matchedEntry.vehicleTypes.split(",").map(t => t.trim()).filter(Boolean) : [];
+
+  // Reset downstream fields when Make changes
+  useEffect(() => {
+    form3.setValue("vehicleModel", "");
+    form3.setValue("vehicleYear", "");
+    form3.setValue("vehicleClass", "");
+  }, [watchedMake]);
+
+  // Reset year and type when Model changes
+  useEffect(() => {
+    form3.setValue("vehicleYear", "");
+    form3.setValue("vehicleClass", "");
+    // Auto-select type if only one available
+    const entry = catalog.find(e => e.make === watchedMake && e.model === watchedModel);
+    if (entry) {
+      const types = entry.vehicleTypes.split(",").map(t => t.trim()).filter(Boolean);
+      if (types.length === 1) form3.setValue("vehicleClass", types[0]);
+    }
+  }, [watchedModel]);
 
   const handleStep1 = form1.handleSubmit((data) => {
     setStep1Data(data);
@@ -211,6 +262,7 @@ export default function DriverOnboarding() {
         vehicleYear: step3Data.vehicleYear,
         vehicleMake: step3Data.vehicleMake,
         vehicleModel: step3Data.vehicleModel,
+        vehicleClass: step3Data.vehicleClass,
         vehicleColor: step3Data.vehicleColor,
         passengerCapacity: Number(step3Data.passengerCapacity),
         luggageCapacity: Number(step3Data.luggageCapacity),
@@ -467,43 +519,110 @@ export default function DriverOnboarding() {
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-1">Step 3 of 4</p>
                   <h2 className="text-2xl font-serif text-white">Vehicle Information</h2>
-                  <p className="text-sm text-gray-500 mt-1">Your vehicle must meet Royal Midnight luxury standards.</p>
+                  <p className="text-sm text-gray-500 mt-1">Select your vehicle from the approved Royal Midnight fleet catalog.</p>
                 </div>
 
+                {catalog.length === 0 ? (
+                  <div className="border border-amber-500/30 bg-amber-500/5 p-5 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-amber-300 font-medium text-sm">No approved vehicles in catalog</p>
+                      <p className="text-gray-500 text-xs mt-1">Vehicle registration is temporarily unavailable. Please contact Royal Midnight to be notified when vehicle types are available.</p>
+                    </div>
+                  </div>
+                ) : (
                 <div className="grid grid-cols-1 gap-5">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <FormField control={form3.control} name="vehicleYear" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className={labelClass}>Year</FormLabel>
-                        <FormControl><Input placeholder="2022" className={inputClass} {...field} /></FormControl>
-                        <FormMessage className="text-red-400 text-xs" />
-                      </FormItem>
-                    )} />
-
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form3.control} name="vehicleMake" render={({ field }) => (
                       <FormItem>
                         <FormLabel className={labelClass}>Make</FormLabel>
-                        <FormControl><Input placeholder="Chevrolet" className={inputClass} {...field} /></FormControl>
+                        <Select value={field.value} onValueChange={v => { field.onChange(v); }}>
+                          <FormControl>
+                            <SelectTrigger className={`${inputClass} [&>span]:text-white`}>
+                              <SelectValue placeholder="Select make..." />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent className="bg-[#0d0d0d] border-white/15 text-white">
+                            {availableMakes.map(make => (
+                              <SelectItem key={make} value={make}>{make}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage className="text-red-400 text-xs" />
                       </FormItem>
                     )} />
 
                     <FormField control={form3.control} name="vehicleModel" render={({ field }) => (
-                      <FormItem className="col-span-2 md:col-span-1">
+                      <FormItem>
                         <FormLabel className={labelClass}>Model</FormLabel>
-                        <FormControl><Input placeholder="Suburban" className={inputClass} {...field} /></FormControl>
+                        <Select value={field.value} onValueChange={field.onChange} disabled={!watchedMake || availableModels.length === 0}>
+                          <FormControl>
+                            <SelectTrigger className={`${inputClass} [&>span]:text-white`}>
+                              <SelectValue placeholder={watchedMake ? "Select model..." : "Select make first"} />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent className="bg-[#0d0d0d] border-white/15 text-white">
+                            {availableModels.map(model => (
+                              <SelectItem key={model} value={model}>{model}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage className="text-red-400 text-xs" />
                       </FormItem>
                     )} />
 
-                    <FormField control={form3.control} name="vehicleColor" render={({ field }) => (
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form3.control} name="vehicleYear" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className={labelClass}>Color</FormLabel>
-                        <FormControl><Input placeholder="Black" className={inputClass} {...field} /></FormControl>
+                        <FormLabel className={labelClass}>Year</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange} disabled={!watchedModel || availableYears.length === 0}>
+                          <FormControl>
+                            <SelectTrigger className={`${inputClass} [&>span]:text-white`}>
+                              <SelectValue placeholder={watchedModel ? "Select year..." : "Select model first"} />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent className="bg-[#0d0d0d] border-white/15 text-white">
+                            {availableYears.map(y => (
+                              <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {matchedEntry && (
+                          <p className="text-xs text-gray-500 mt-1">Accepted: {matchedEntry.minYear} – {CURRENT_YEAR}</p>
+                        )}
+                        <FormMessage className="text-red-400 text-xs" />
+                      </FormItem>
+                    )} />
+
+                    <FormField control={form3.control} name="vehicleClass" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className={labelClass}>Vehicle Type</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange} disabled={!watchedModel || availableTypes.length === 0}>
+                          <FormControl>
+                            <SelectTrigger className={`${inputClass} [&>span]:text-white`}>
+                              <SelectValue placeholder={watchedModel ? "Select type..." : "Select model first"} />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent className="bg-[#0d0d0d] border-white/15 text-white">
+                            {availableTypes.map(t => (
+                              <SelectItem key={t} value={t}>{t}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage className="text-red-400 text-xs" />
                       </FormItem>
                     )} />
                   </div>
+
+                  <FormField control={form3.control} name="vehicleColor" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className={labelClass}>Color</FormLabel>
+                      <FormControl><Input placeholder="Black" className={inputClass} {...field} /></FormControl>
+                      <FormMessage className="text-red-400 text-xs" />
+                    </FormItem>
+                  )} />
 
                   <div className="grid grid-cols-2 gap-4">
                     <FormField control={form3.control} name="passengerCapacity" render={({ field }) => (
@@ -557,6 +676,7 @@ export default function DriverOnboarding() {
                     </FormItem>
                   )} />
                 </div>
+                )}
 
                 <div className="flex justify-between pt-2">
                   <Button type="button" variant="outline" onClick={() => setStep(2)} className="border-white/15 text-white/60 hover:text-white rounded-none uppercase tracking-widest text-xs px-6 h-11">

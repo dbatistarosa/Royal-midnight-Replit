@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { sql, desc, eq } from "drizzle-orm";
-import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
@@ -419,6 +419,54 @@ router.patch("/admin/drivers/:id/bank", requireAdmin, async (req, res): Promise<
   if (!updated) { res.status(404).json({ error: "Driver not found" }); return; }
   res.json({ ok: true, driverId: id });
 });
+
+// ─── Vehicle Catalog ────────────────────────────────────────────────────────
+
+// GET /admin/vehicle-catalog
+router.get("/admin/vehicle-catalog", requireAdmin, async (_req, res): Promise<void> => {
+  const entries = await db.select().from(vehicleCatalogTable).orderBy(vehicleCatalogTable.make, vehicleCatalogTable.model);
+  res.json(entries);
+});
+
+// POST /admin/vehicle-catalog
+router.post("/admin/vehicle-catalog", requireAdmin, async (req, res): Promise<void> => {
+  const { make, model, minYear, vehicleTypes, notes } = req.body as {
+    make?: string; model?: string; minYear?: number; vehicleTypes?: string[]; notes?: string;
+  };
+  if (!make || !model || !minYear || !vehicleTypes?.length) {
+    res.status(400).json({ error: "make, model, minYear, and at least one vehicleType are required" });
+    return;
+  }
+  const [entry] = await db.insert(vehicleCatalogTable).values({
+    make: make.trim(),
+    model: model.trim(),
+    minYear: Number(minYear),
+    vehicleTypes: vehicleTypes.join(","),
+    notes: notes?.trim() || null,
+    isActive: true,
+  }).returning();
+  res.status(201).json(entry);
+});
+
+// PATCH /admin/vehicle-catalog/:id/toggle
+router.patch("/admin/vehicle-catalog/:id/toggle", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const [entry] = await db.select().from(vehicleCatalogTable).where(eq(vehicleCatalogTable.id, id));
+  if (!entry) { res.status(404).json({ error: "Not found" }); return; }
+  const [updated] = await db.update(vehicleCatalogTable).set({ isActive: !entry.isActive }).where(eq(vehicleCatalogTable.id, id)).returning();
+  res.json(updated);
+});
+
+// DELETE /admin/vehicle-catalog/:id
+router.delete("/admin/vehicle-catalog/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  await db.delete(vehicleCatalogTable).where(eq(vehicleCatalogTable.id, id));
+  res.json({ ok: true });
+});
+
+// ─── Mailer ──────────────────────────────────────────────────────────────────
 
 // GET /admin/mailer-status — check which email provider is active
 router.get("/admin/mailer-status", requireAdmin, (_req, res) => {

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and } from "drizzle-orm";
-import { db, vehiclesTable } from "@workspace/db";
+import { db, vehiclesTable, vehicleCatalogTable } from "@workspace/db";
 import {
   ListVehiclesQueryParams,
   ListVehiclesResponse,
@@ -97,6 +97,16 @@ router.patch("/vehicles/:id", async (req, res): Promise<void> => {
   }
 
   res.json(UpdateVehicleResponse.parse({ ...vehicle, createdAt: vehicle.createdAt.toISOString() }));
+});
+
+// Public: GET /vehicle-catalog — used by driver onboarding to build dropdowns
+router.get("/vehicle-catalog", async (_req, res): Promise<void> => {
+  const entries = await db
+    .select()
+    .from(vehicleCatalogTable)
+    .where(eq(vehicleCatalogTable.isActive, true))
+    .orderBy(vehicleCatalogTable.make, vehicleCatalogTable.model);
+  res.json(entries);
 });
 
 export default router;
