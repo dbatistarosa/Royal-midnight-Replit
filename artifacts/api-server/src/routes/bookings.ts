@@ -12,6 +12,8 @@ import {
   sendDriverAcceptedPassenger,
   sendDriverUnassignedAdmin,
   sendStatusChangedAdmin,
+  sendDriverOnWay,
+  sendDriverArrived,
 } from "../lib/mailer.js";
 import {
   ListBookingsQueryParams,
@@ -481,6 +483,165 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
       console.error("[bookings] accept email error:", err);
     }
   })();
+});
+
+// ─── Trip lifecycle endpoints (driver-only) ───────────────────────────────────
+
+/**
+ * Helper: verify the caller is the assigned driver for a booking.
+ * Returns the driver DB row and booking row, or sends an error response.
+ */
+async function resolveAssignedDriver(
+  req: import("express").Request,
+  res: import("express").Response,
+  bookingId: number,
+): Promise<{ booking: typeof bookingsTable.$inferSelect; driverRow: { id: number; userId: number } } | null> {
+  const caller = req.currentUser!;
+  if (caller.role !== "driver") {
+    res.status(403).json({ error: "Only drivers can update trip status" });
+    return null;
+  }
+
+  const [driverRow] = await db
+    .select({ id: driversTable.id, userId: driversTable.userId })
+    .from(driversTable)
+    .where(eq(driversTable.userId, caller.userId));
+
+  if (!driverRow) {
+    res.status(403).json({ error: "Driver profile not found" });
+    return null;
+  }
+
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId));
+  if (!booking) {
+    res.status(404).json({ error: "Booking not found" });
+    return null;
+  }
+
+  if (booking.driverId !== driverRow.id) {
+    res.status(403).json({ error: "You are not assigned to this booking" });
+    return null;
+  }
+
+  return { booking, driverRow };
+}
+
+// POST /bookings/:id/trip/on-way
+// Requires: caller = assigned driver, booking status = confirmed, pickup within 60 min
+router.post("/bookings/:id/trip/on-way", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const resolved = await resolveAssignedDriver(req, res, id);
+  if (!resolved) return;
+  const { booking } = resolved;
+
+  if (booking.status !== "confirmed") {
+    res.status(400).json({ error: `Cannot mark on-way from status: ${booking.status}` });
+    return;
+  }
+
+  const minsUntilPickup = (new Date(booking.pickupAt).getTime() - Date.now()) / 60_000;
+  if (minsUntilPickup > 60) {
+    res.status(400).json({ error: "On the Way can only be activated within 60 minutes of pickup", minsUntilPickup: Math.round(minsUntilPickup) });
+    return;
+  }
+
+  const [updated] = await db
+    .update(bookingsTable)
+    .set({ status: "on_way", updatedAt: new Date() })
+    .where(eq(bookingsTable.id, id))
+    .returning();
+
+  res.json(parseBooking(updated));
+
+  // Fire-and-forget: notify passenger
+  (async () => {
+    try {
+      const b = parseBooking(booking);
+      await sendDriverOnWay({ ...b, vehicleClass: b.vehicleClass ?? "business", passengers: b.passengers ?? 1 });
+    } catch (err) { console.error("[bookings] on-way email error:", err); }
+  })();
+});
+
+// POST /bookings/:id/trip/on-location
+// Requires: caller = assigned driver, booking status = on_way
+router.post("/bookings/:id/trip/on-location", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const resolved = await resolveAssignedDriver(req, res, id);
+  if (!resolved) return;
+  const { booking } = resolved;
+
+  if (booking.status !== "on_way") {
+    res.status(400).json({ error: `Cannot mark arrived from status: ${booking.status}` });
+    return;
+  }
+
+  const [updated] = await db
+    .update(bookingsTable)
+    .set({ status: "on_location", updatedAt: new Date() })
+    .where(eq(bookingsTable.id, id))
+    .returning();
+
+  res.json(parseBooking(updated));
+
+  // Fire-and-forget: notify passenger
+  (async () => {
+    try {
+      const b = parseBooking(booking);
+      await sendDriverArrived({ ...b, vehicleClass: b.vehicleClass ?? "business", passengers: b.passengers ?? 1 });
+    } catch (err) { console.error("[bookings] on-location email error:", err); }
+  })();
+});
+
+// POST /bookings/:id/trip/start
+// Requires: caller = assigned driver, booking status = on_location
+router.post("/bookings/:id/trip/start", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const resolved = await resolveAssignedDriver(req, res, id);
+  if (!resolved) return;
+  const { booking } = resolved;
+
+  if (booking.status !== "on_location") {
+    res.status(400).json({ error: `Cannot start trip from status: ${booking.status}` });
+    return;
+  }
+
+  const [updated] = await db
+    .update(bookingsTable)
+    .set({ status: "in_progress", updatedAt: new Date() })
+    .where(eq(bookingsTable.id, id))
+    .returning();
+
+  res.json(parseBooking(updated));
+});
+
+// POST /bookings/:id/trip/complete
+// Requires: caller = assigned driver, booking status = in_progress
+router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const resolved = await resolveAssignedDriver(req, res, id);
+  if (!resolved) return;
+  const { booking } = resolved;
+
+  if (booking.status !== "in_progress") {
+    res.status(400).json({ error: `Cannot complete trip from status: ${booking.status}` });
+    return;
+  }
+
+  const [updated] = await db
+    .update(bookingsTable)
+    .set({ status: "completed", updatedAt: new Date() })
+    .where(eq(bookingsTable.id, id))
+    .returning();
+
+  res.json(parseBooking(updated));
 });
 
 // Admin: unassign driver from a booking (puts it back in the open pool)

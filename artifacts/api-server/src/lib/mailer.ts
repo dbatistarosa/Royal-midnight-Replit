@@ -292,6 +292,48 @@ export async function sendBookingCancelledPassenger(b: BookingEmailData, cancell
   await send(b.passengerEmail, `Booking ${bookingRef} Cancelled — Royal Midnight`, html, "booking_cancelled_passenger");
 }
 
+export async function sendDriverOnWay(b: BookingEmailData) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Your Driver Is On the Way</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, your Royal Midnight driver is heading to your pickup location now.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking", bookingRef)}
+  ${row("Pickup", b.pickupAddress)}
+  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+</table>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  Please be ready at your pickup location. If you need to contact your driver, reply to this email or call our dispatch line.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>
+<p style="margin-top:20px">
+  <a href="${appUrl}/passenger/rides" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">VIEW MY BOOKING</a>
+</p>`);
+  await send(b.passengerEmail, `Your Driver Is On the Way — Royal Midnight ${bookingRef}`, html, "driver_on_way_passenger");
+}
+
+export async function sendDriverArrived(b: BookingEmailData) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
+  const html = wrap(`
+<h2 style="color:#22c55e;font-size:20px;margin:0 0 8px">Your Driver Has Arrived</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, your Royal Midnight driver is at your pickup location.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking", bookingRef)}
+  ${row("Pickup", b.pickupAddress)}
+  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+</table>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  Please proceed to your vehicle. If you need assistance locating your driver, reply to this email.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>
+<p style="margin-top:20px">
+  <a href="${appUrl}/passenger/rides" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">VIEW MY BOOKING</a>
+</p>`);
+  await send(b.passengerEmail, `Your Driver Has Arrived — Royal Midnight ${bookingRef}`, html, "driver_arrived_passenger");
+}
+
 export async function sendStatusChangedAdmin(bookingId: number, oldStatus: string, newStatus: string, passengerName: string) {
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 20px">Booking #${bookingId} Status Changed</h2>

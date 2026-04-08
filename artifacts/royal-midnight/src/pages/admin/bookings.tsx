@@ -62,11 +62,13 @@ type DriverOption = { id: number; name: string; status: string };
 
 const STATUS_COLORS: Record<string, string> = {
   awaiting_payment: "text-orange-400 bg-orange-400/10 border-orange-400/20",
-  pending:     "text-yellow-400 bg-yellow-400/10 border-yellow-400/20",
-  confirmed:   "text-primary bg-primary/10 border-primary/20",
-  in_progress: "text-blue-400 bg-blue-400/10 border-blue-400/20",
-  completed:   "text-green-400 bg-green-400/10 border-green-400/20",
-  cancelled:   "text-gray-400 bg-gray-400/10 border-gray-400/20",
+  pending:          "text-yellow-400 bg-yellow-400/10 border-yellow-400/20",
+  confirmed:        "text-primary bg-primary/10 border-primary/20",
+  on_way:           "text-sky-400 bg-sky-400/10 border-sky-400/20",
+  on_location:      "text-violet-400 bg-violet-400/10 border-violet-400/20",
+  in_progress:      "text-blue-400 bg-blue-400/10 border-blue-400/20",
+  completed:        "text-green-400 bg-green-400/10 border-green-400/20",
+  cancelled:        "text-gray-400 bg-gray-400/10 border-gray-400/20",
 };
 
 const LABEL = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";

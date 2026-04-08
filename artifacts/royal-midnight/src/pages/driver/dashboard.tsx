@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock } from "lucide-react";
 import { format } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useDriverStatus } from "@/contexts/driverStatus";
@@ -300,8 +300,124 @@ function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; sh
   );
 }
 
-function BookingCard({ booking }: { booking: BookingRow }) {
+const TRIP_STATUS_BADGE: Record<string, string> = {
+  confirmed:   "bg-primary/10 text-primary border-primary/20",
+  on_way:      "bg-sky-400/10 text-sky-400 border-sky-400/20",
+  on_location: "bg-violet-400/10 text-violet-400 border-violet-400/20",
+  in_progress: "bg-blue-400/10 text-blue-400 border-blue-400/20",
+};
+
+function TripActionButton({
+  bookingId,
+  authHeader,
+  currentStatus,
+  pickupAt,
+  onRefresh,
+}: {
+  bookingId: number;
+  authHeader: string;
+  currentStatus: string;
+  pickupAt: string;
+  onRefresh: () => void;
+}) {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
+  const [, setTick] = useState(0);
+
+  // Re-render every 30 s so the countdown / unlock state stays current
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const minsUntilPickup = (new Date(pickupAt).getTime() - Date.now()) / 60_000;
+  const onWayDisabled = minsUntilPickup > 60;
+
+  const callEndpoint = async (path: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${bookingId}/trip/${path}`, {
+        method: "POST",
+        headers: { Authorization: authHeader },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" })) as { error?: string };
+        toast({ title: "Error", description: err.error ?? "Could not update trip status.", variant: "destructive" });
+        return;
+      }
+      onRefresh();
+    } catch {
+      toast({ title: "Network error", description: "Could not reach the server. Please try again.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (currentStatus === "confirmed") {
+    const minsLabel = onWayDisabled ? `${Math.ceil(minsUntilPickup - 60)} min until unlock` : null;
+    return (
+      <button
+        onClick={() => void callEndpoint("on-way")}
+        disabled={loading || onWayDisabled}
+        className="w-full flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-widest bg-primary text-black font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Navigation className="w-3.5 h-3.5" />}
+        {onWayDisabled ? (
+          <span className="flex items-center gap-1.5">
+            On the Way <span className="font-normal opacity-60">({minsLabel})</span>
+          </span>
+        ) : "On the Way"}
+      </button>
+    );
+  }
+
+  if (currentStatus === "on_way") {
+    return (
+      <button
+        onClick={() => void callEndpoint("on-location")}
+        disabled={loading}
+        className="w-full flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-widest bg-sky-500 text-white font-semibold hover:bg-sky-500/90 transition-colors disabled:opacity-50"
+      >
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPinCheck className="w-3.5 h-3.5" />}
+        Arrived at Location
+      </button>
+    );
+  }
+
+  if (currentStatus === "on_location") {
+    return (
+      <button
+        onClick={() => void callEndpoint("start")}
+        disabled={loading}
+        className="w-full flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-widest bg-violet-500 text-white font-semibold hover:bg-violet-500/90 transition-colors disabled:opacity-50"
+      >
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PlayCircle className="w-3.5 h-3.5" />}
+        Start Trip (Passenger In Car)
+      </button>
+    );
+  }
+
+  if (currentStatus === "in_progress") {
+    return (
+      <button
+        onClick={() => void callEndpoint("complete")}
+        disabled={loading}
+        className="w-full flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-widest bg-green-600 text-white font-semibold hover:bg-green-600/90 transition-colors disabled:opacity-50"
+      >
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlagTriangleRight className="w-3.5 h-3.5" />}
+        Complete Trip (Drop Off)
+      </button>
+    );
+  }
+
+  return null;
+}
+
+function BookingCard({ booking, authHeader, onRefresh }: { booking: BookingRow; authHeader?: string; onRefresh?: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const hasTripActions = authHeader && onRefresh && ["confirmed", "on_way", "on_location", "in_progress"].includes(booking.status);
+  const badgeClass = TRIP_STATUS_BADGE[booking.status] ?? "bg-muted/30 text-muted-foreground border-border";
+
   return (
     <div className="bg-card border border-border rounded-none p-5">
       <div className="flex justify-between items-start mb-3">
@@ -310,7 +426,7 @@ function BookingCard({ booking }: { booking: BookingRow }) {
           <div className="font-medium">{booking.passengerName}</div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
-          <span className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20 capitalize">
+          <span className={`text-xs px-2 py-1 border capitalize ${badgeClass}`}>
             {booking.status.replace(/_/g, " ")}
           </span>
           {booking.driverEarnings != null && (
@@ -324,7 +440,8 @@ function BookingCard({ booking }: { booking: BookingRow }) {
         {booking.pickupAddress} → {booking.dropoffAddress}
       </div>
       {booking.pickupAt && (
-        <div className="text-xs text-muted-foreground mt-1">
+        <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+          <Clock className="w-3 h-3 flex-shrink-0" />
           {format(new Date(booking.pickupAt), "MMM d, yyyy 'at' h:mm a")}
         </div>
       )}
@@ -341,6 +458,18 @@ function BookingCard({ booking }: { booking: BookingRow }) {
           <><ChevronDown className="w-3 h-3" /> See Details</>
         )}
       </button>
+
+      {hasTripActions && (
+        <div className="mt-3 pt-3 border-t border-border">
+          <TripActionButton
+            bookingId={booking.id}
+            authHeader={authHeader}
+            currentStatus={booking.status}
+            pickupAt={booking.pickupAt}
+            onRefresh={onRefresh}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -487,23 +616,38 @@ function TabAvailable({ authHeader, onRideAccepted }: { authHeader: string; onRi
   );
 }
 
+const ACTIVE_TRIP_STATUSES = ["confirmed", "on_way", "on_location", "in_progress", "assigned"];
+
 function TabMyRides({ driverId, authHeader, refreshKey }: { driverId: number; authHeader: string; refreshKey?: number }) {
   const [rides, setRides] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadRides = useCallback(() => {
     setLoading(true);
     fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
-      .then(data => setRides(Array.isArray(data) ? data.filter(b => ["confirmed", "in_progress", "assigned"].includes(b.status)) : []))
+      .then(data => setRides(Array.isArray(data) ? data.filter(b => ACTIVE_TRIP_STATUSES.includes(b.status)) : []))
       .catch(() => setRides([]))
       .finally(() => setLoading(false));
-  }, [driverId, authHeader, refreshKey]);
+  }, [driverId, authHeader]);
+
+  useEffect(() => {
+    loadRides();
+  }, [loadRides, refreshKey]);
 
   if (loading) return <div className="space-y-3">{[1,2].map(i => <div key={i} className="h-24 bg-card/50 animate-pulse border border-border" />)}</div>;
 
   return rides.length > 0 ? (
-    <div className="space-y-3">{rides.map(b => <BookingCard key={b.id} booking={b} />)}</div>
+    <div className="space-y-3">
+      {rides.map(b => (
+        <BookingCard
+          key={b.id}
+          booking={b}
+          authHeader={authHeader}
+          onRefresh={loadRides}
+        />
+      ))}
+    </div>
   ) : (
     <div className="bg-card border border-border p-8 text-center text-muted-foreground text-sm">No active rides at this time.</div>
   );
