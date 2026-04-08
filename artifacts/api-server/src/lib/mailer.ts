@@ -374,6 +374,67 @@ export async function sendStatusChangedAdmin(bookingId: number, oldStatus: strin
   await send(ADMIN_EMAIL, `Booking #${bookingId} → ${newStatus} (${passengerName})`, html, "status_changed_admin");
 }
 
+export type ReminderEmailData = {
+  id: number;
+  passengerName: string;
+  passengerEmail: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  pickupAt: string;
+  vehicleClass: string;
+  passengers: number;
+  priceQuoted: number;
+  driverName?: string;
+  driverPhone?: string;
+  driverEarnings?: number;
+};
+
+export async function sendTripReminderPassenger(b: ReminderEmailData) {
+  const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Reminder: Your Ride is in 1 Hour</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, this is a reminder that your Royal Midnight ride is scheduled in approximately one hour. Please be ready at your pickup location.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking #", bookingRef)}
+  ${row("Pickup", b.pickupAddress)}
+  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+  ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
+  ${row("Passengers", String(b.passengers))}
+  ${b.driverName ? row("Driver", b.driverName) : ""}
+  ${b.driverPhone ? row("Driver Phone", b.driverPhone) : ""}
+  ${row("Total Fare", `<span style="color:#c9a84c;font-weight:bold">$${b.priceQuoted.toFixed(2)}</span>`)}
+</table>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  Please ensure you are at the pickup location on time. If you need to reach your driver, use the contact details above.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(b.passengerEmail, `Reminder: Your Royal Midnight Ride in 1 Hour — ${bookingRef}`, html, "trip_reminder_passenger");
+}
+
+export async function sendTripReminderDriver(b: ReminderEmailData, driverEmail: string) {
+  const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
+  const earnings = b.driverEarnings != null ? `$${b.driverEarnings.toFixed(2)}` : "—";
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Reminder: Upcoming Pickup in 1 Hour</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">This is a reminder that you have a scheduled pickup in approximately one hour. Please review the trip details and be on time.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking #", bookingRef)}
+  ${row("Passenger", b.passengerName)}
+  ${row("Pickup", b.pickupAddress)}
+  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+  ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
+  ${row("Passengers", String(b.passengers))}
+  ${row("Your Earnings", `<span style="color:#c9a84c;font-weight:bold">${earnings}</span>`)}
+</table>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  Please be at the pickup location promptly at the scheduled time.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(driverEmail, `Reminder: Pickup in 1 Hour — ${bookingRef} (${b.passengerName})`, html, "trip_reminder_driver");
+}
+
 export async function sendWeeklyDriverPayout(params: {
   driverName: string;
   driverEmail: string;

@@ -1,5 +1,5 @@
 import { eq, and, isNull } from "drizzle-orm";
-import { db, usersTable, settingsTable, bookingsTable } from "@workspace/db";
+import { db, pool, usersTable, settingsTable, bookingsTable } from "@workspace/db";
 import Stripe from "stripe";
 import app from "./app";
 import { logger } from "./lib/logger";
@@ -132,6 +132,116 @@ async function retroactiveEmailLink(): Promise<void> {
   }
 }
 
+// Trip reminder scheduler — runs every minute, sends emails 55–65 min before pickup.
+// Uses SELECT ... FOR UPDATE SKIP LOCKED inside a transaction to safely claim each
+// booking row across concurrent scheduler runs or multiple API instances. The
+// reminder_sent_at timestamp is only written after both emails are successfully sent,
+// so a transient email failure is retried on the next scheduler tick (until the row
+// falls outside the 55–65 min window).
+async function sendTripReminders(): Promise<void> {
+  try {
+    const now = new Date();
+    const windowStart = new Date(now.getTime() + 55 * 60 * 1000);
+    const windowEnd = new Date(now.getTime() + 65 * 60 * 1000);
+
+    const { driversTable, bookingsTable: bookTbl, settingsTable: settTbl } = await import("@workspace/db");
+    const { sendTripReminderPassenger, sendTripReminderDriver } = await import("./lib/mailer.js");
+
+    const [commRow] = await db.select({ value: settTbl.value }).from(settTbl).where(eq(settTbl.key, "driver_commission_pct"));
+    const rawPct = parseFloat(commRow?.value ?? "70");
+    const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+
+    // Find candidates outside the transaction first to avoid long-held locks
+    const candidates = await db
+      .select({ id: bookTbl.id })
+      .from(bookTbl)
+      .where(
+        and(
+          eq(bookTbl.status, "confirmed"),
+          isNull(bookTbl.reminderSentAt),
+        )
+      );
+
+    for (const { id } of candidates) {
+      // Use a per-booking transaction with FOR UPDATE SKIP LOCKED to claim each row.
+      // The lock is held for the entire send sequence — emails are sent while the
+      // transaction is open, and reminder_sent_at is stamped inside the same transaction
+      // before COMMIT. This guarantees: (a) only one instance processes each booking,
+      // (b) the stamp only lands if both emails succeed, and (c) a failure leaves the
+      // row unclaimed for the next scheduler tick.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { rows } = await client.query(
+          `SELECT id, passenger_name, passenger_email, pickup_address, dropoff_address,
+                  pickup_at, vehicle_class, passengers, price_quoted, driver_id
+           FROM bookings
+           WHERE id = $1
+             AND status = 'confirmed'
+             AND driver_id IS NOT NULL
+             AND pickup_at >= $2
+             AND pickup_at <= $3
+             AND reminder_sent_at IS NULL
+           FOR UPDATE SKIP LOCKED`,
+          [id, windowStart.toISOString(), windowEnd.toISOString()]
+        );
+
+        if (rows.length === 0) {
+          await client.query("ROLLBACK");
+          continue;
+        }
+
+        const row = rows[0] as any;
+
+        // Fetch driver while holding the lock (read-only, does not block long)
+        const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, row.driver_id));
+        if (!driver) {
+          await client.query("ROLLBACK");
+          continue;
+        }
+
+        const priceQuoted = parseFloat(row.price_quoted ?? "0");
+        const driverEarnings = Math.round(priceQuoted * commissionPct * 100) / 100;
+
+        const reminderData = {
+          id: row.id,
+          passengerName: row.passenger_name,
+          passengerEmail: row.passenger_email,
+          pickupAddress: row.pickup_address,
+          dropoffAddress: row.dropoff_address,
+          pickupAt: new Date(row.pickup_at).toISOString(),
+          vehicleClass: row.vehicle_class,
+          passengers: row.passengers,
+          priceQuoted,
+          driverName: driver.name,
+          driverPhone: driver.phone,
+          driverEarnings,
+        };
+
+        // Send both emails — if either throws, the catch block rolls back and the row
+        // remains unclaimed so the next scheduler tick retries.
+        await sendTripReminderPassenger(reminderData);
+        await sendTripReminderDriver(reminderData, driver.email);
+
+        // Stamp reminder_sent_at inside the same transaction (commits atomically)
+        await client.query(
+          `UPDATE bookings SET reminder_sent_at = $1 WHERE id = $2`,
+          [now.toISOString(), row.id]
+        );
+        await client.query("COMMIT");
+        logger.info({ bookingId: row.id, passengerEmail: row.passenger_email }, "Trip reminder sent");
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        logger.error({ err, bookingId: id }, "Failed to send trip reminder for booking (non-fatal)");
+      } finally {
+        client.release();
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "Trip reminder scheduler error (non-fatal)");
+  }
+}
+
 // Weekly payout scheduler — fires every Monday at ~8am server time
 async function runWeeklyPayoutIfNeeded(): Promise<void> {
   try {
@@ -221,5 +331,9 @@ seedDatabase()
       // Run payout check immediately on startup, then every hour
       void runWeeklyPayoutIfNeeded();
       setInterval(() => void runWeeklyPayoutIfNeeded(), 60 * 60 * 1000);
+
+      // Run trip reminder check immediately on startup, then every minute
+      void sendTripReminders();
+      setInterval(() => void sendTripReminders(), 60 * 1000);
     });
   });
