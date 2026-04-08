@@ -19,7 +19,19 @@ const WEBHOOK_URL = `${APP_URL}/api/webhook/stripe`;
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("STRIPE_SECRET_KEY is not configured");
-  return new Stripe(key, { apiVersion: "2024-06-20" as any });
+  return new Stripe(key, { apiVersion: "2024-06-20" as Stripe.LatestApiVersion });
+}
+
+async function getWebhookSecret(): Promise<string | null> {
+  // Prefer explicit env var (most secure)
+  if (process.env.STRIPE_WEBHOOK_SECRET) return process.env.STRIPE_WEBHOOK_SECRET;
+  // Fall back to DB-persisted secret (set during auto-registration)
+  const [row] = await db
+    .select({ value: settingsTable.value })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, "stripe_webhook_secret"))
+    .limit(1);
+  return row?.value ?? null;
 }
 
 async function getCommissionPct(): Promise<number> {
@@ -309,19 +321,29 @@ router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<voi
 // ─── Stripe webhook ──────────────────────────────────────────────────────────
 
 router.post("/webhook/stripe", async (req, res): Promise<void> => {
-  const sig = req.headers["stripe-signature"] as string;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const sig = req.headers["stripe-signature"] as string | undefined;
 
   let event: Stripe.Event;
 
   try {
     const stripe = getStripe();
-    if (webhookSecret && sig) {
-      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-    } else {
-      const payload = Buffer.isBuffer(req.body) ? req.body.toString("utf-8") : JSON.stringify(req.body);
-      event = JSON.parse(payload) as Stripe.Event;
+
+    // Look up signing secret: env var preferred, DB fallback (from auto-registration)
+    const webhookSecret = await getWebhookSecret();
+
+    if (!webhookSecret) {
+      console.error("[webhook] STRIPE_WEBHOOK_SECRET not set — refusing unsigned event");
+      res.status(503).json({ error: "Webhook signing secret not configured" });
+      return;
     }
+
+    if (!sig) {
+      res.status(400).json({ error: "Missing Stripe-Signature header" });
+      return;
+    }
+
+    // Signature verification is mandatory — no fallback to unsigned processing
+    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
 
     if (event.type === "payment_intent.succeeded") {
       const intent = event.data.object as Stripe.PaymentIntent;

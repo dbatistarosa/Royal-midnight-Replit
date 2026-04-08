@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { eq } from "drizzle-orm";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, settingsTable } from "@workspace/db";
 import Stripe from "stripe";
 import app from "./app";
 import { logger } from "./lib/logger";
@@ -63,17 +63,17 @@ async function seedDatabase(): Promise<void> {
 
 async function ensureStripeWebhook(): Promise<void> {
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const appUrl = process.env.APP_URL;
-  if (!stripeKey || !appUrl) {
-    if (!stripeKey) logger.warn("STRIPE_SECRET_KEY not set — skipping webhook check");
-    if (!appUrl) logger.warn("APP_URL not set — skipping webhook check");
+  if (!stripeKey) {
+    logger.warn("STRIPE_SECRET_KEY not set — skipping webhook check");
     return;
   }
 
+  // Default to production URL when APP_URL is not explicitly set
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
   const expectedUrl = `${appUrl}/api/webhook/stripe`;
 
   try {
-    const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" as any });
+    const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" as Stripe.LatestApiVersion });
     const existing = await stripe.webhookEndpoints.list({ limit: 20 });
     const found = existing.data.find(w => w.url === expectedUrl && w.status === "enabled");
 
@@ -88,8 +88,14 @@ async function ensureStripeWebhook(): Promise<void> {
       description: "Royal Midnight payment confirmation webhook",
     });
 
-    logger.info({ webhookId: webhook.id, url: expectedUrl }, "Stripe webhook auto-registered — set STRIPE_WEBHOOK_SECRET in env vars");
-    logger.info(`Signing secret (set as STRIPE_WEBHOOK_SECRET): ${webhook.secret}`);
+    // Persist signing secret to DB so webhook handler can use it without env var
+    if (webhook.secret) {
+      await db
+        .insert(settingsTable)
+        .values({ key: "stripe_webhook_secret", value: webhook.secret })
+        .onConflictDoUpdate({ target: settingsTable.key, set: { value: webhook.secret } });
+      logger.info({ webhookId: webhook.id, url: expectedUrl }, "Stripe webhook auto-registered — signing secret saved to DB. Set STRIPE_WEBHOOK_SECRET in env for best security.");
+    }
   } catch (err) {
     logger.error({ err }, "Stripe webhook ensure failed (non-fatal)");
   }
