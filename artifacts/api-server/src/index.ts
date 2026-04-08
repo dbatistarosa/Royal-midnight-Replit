@@ -19,6 +19,20 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+// Apply any missing schema columns that were added in recent releases.
+// Using IF NOT EXISTS makes each statement safe to run on every startup.
+async function runStartupMigrations(): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      ALTER TABLE bookings
+        ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ
+    `);
+  } finally {
+    client.release();
+  }
+}
+
 async function seedDatabase(): Promise<void> {
   try {
     const adminEmail = "admin@royalmidnight.com";
@@ -316,7 +330,8 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
   }
 }
 
-seedDatabase()
+runStartupMigrations()
+  .then(() => seedDatabase())
   .then(() => retroactiveEmailLink())
   .then(() => ensureStripeWebhook())
   .then(() => {
