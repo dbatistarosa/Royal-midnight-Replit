@@ -5,7 +5,7 @@ import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
 import { format } from "date-fns";
-import { Loader2, Save, Settings, LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, UserPlus, CheckCircle2, Building2 } from "lucide-react";
+import { Loader2, Save, Settings, LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, UserPlus, CheckCircle2, Building2, Webhook, Mail, AlertTriangle, RefreshCw, Copy, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -88,6 +88,25 @@ function AdminSettingsInner() {
   const [corporateAccounts, setCorporateAccounts] = useState<CorporateAccount[]>([]);
   const [corporateLoading, setCorporateLoading] = useState(true);
 
+  type WebhookStatus = {
+    stripeConfigured: boolean;
+    webhookSecretSet: boolean;
+    isRegistered?: boolean;
+    expectedUrl: string;
+    webhooks: { id: string; url: string; status: string; isOurs: boolean }[];
+    mailer: { configured: boolean; provider: string };
+    error?: string;
+  };
+  const [webhookStatus, setWebhookStatus] = useState<WebhookStatus | null>(null);
+  const [webhookLoading, setWebhookLoading] = useState(false);
+  const [registeringWebhook, setRegisteringWebhook] = useState(false);
+  const [webhookRegResult, setWebhookRegResult] = useState<{ signingSecret?: string; message: string; alreadyExists?: boolean } | null>(null);
+
+  type EmailLog = { id: number; to: string; subject: string; type: string; status: string; error: string | null; sentAt: string };
+  const [emailLogs, setEmailLogs] = useState<EmailLog[]>([]);
+  const [emailLogsLoading, setEmailLogsLoading] = useState(false);
+  const [showEmailLogs, setShowEmailLogs] = useState(false);
+
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   useEffect(() => {
@@ -120,6 +139,46 @@ function AdminSettingsInner() {
       .finally(() => setCorporateLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  const loadWebhookStatus = async () => {
+    setWebhookLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/stripe/webhook-status`, { headers: authHeader });
+      const data = await res.json() as WebhookStatus;
+      setWebhookStatus(data);
+    } catch {
+      toast({ title: "Error", description: "Could not load Stripe status.", variant: "destructive" });
+    }
+    setWebhookLoading(false);
+  };
+
+  const handleRegisterWebhook = async () => {
+    setRegisteringWebhook(true);
+    setWebhookRegResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/admin/stripe/register-webhook`, { method: "POST", headers: authHeader });
+      const data = await res.json() as { signingSecret?: string; message: string; alreadyExists?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed");
+      setWebhookRegResult(data);
+      void loadWebhookStatus();
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not register webhook.", variant: "destructive" });
+    }
+    setRegisteringWebhook(false);
+  };
+
+  const loadEmailLogs = async () => {
+    setEmailLogsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/email-logs?limit=100`, { headers: authHeader });
+      const data = await res.json() as EmailLog[];
+      setEmailLogs(data);
+    } catch {
+      toast({ title: "Error", description: "Could not load email logs.", variant: "destructive" });
+    }
+    setEmailLogsLoading(false);
+    setShowEmailLogs(true);
+  };
 
   const handleSave = async (field: SettingField) => {
     const raw = editValues[field.key] ?? "";
@@ -490,6 +549,232 @@ function AdminSettingsInner() {
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      </div>
+      {/* Stripe Webhook Setup */}
+      <div className="mt-12">
+        <div className="flex items-center gap-3 mb-6">
+          <Webhook className="w-5 h-5 text-primary" />
+          <h2 className="font-serif text-2xl">Stripe Integration</h2>
+        </div>
+
+        <div className="bg-card border border-border rounded-none p-7">
+          <p className="text-sm text-muted-foreground mb-5">
+            The Stripe webhook enables automatic booking confirmation after payment.
+            Without it, bookings may stay stuck in "awaiting payment" even after successful payment.
+          </p>
+
+          {!webhookStatus ? (
+            <Button
+              onClick={() => void loadWebhookStatus()}
+              disabled={webhookLoading}
+              variant="outline"
+              className="rounded-none text-xs uppercase tracking-widest border-white/20"
+            >
+              {webhookLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Loading...</> : <><RefreshCw className="w-4 h-4 mr-2" />Check Stripe Status</>}
+            </Button>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-white/5 border border-white/10 p-4">
+                  <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Stripe Keys</p>
+                  <p className={`text-sm font-medium ${webhookStatus.stripeConfigured ? "text-green-400" : "text-red-400"}`}>
+                    {webhookStatus.stripeConfigured ? "Configured" : "Missing"}
+                  </p>
+                  {!webhookStatus.stripeConfigured && (
+                    <p className="text-xs text-muted-foreground mt-1">Set STRIPE_SECRET_KEY env var</p>
+                  )}
+                </div>
+                <div className="bg-white/5 border border-white/10 p-4">
+                  <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Webhook Registered</p>
+                  <p className={`text-sm font-medium ${webhookStatus.isRegistered ? "text-green-400" : "text-orange-400"}`}>
+                    {webhookStatus.isRegistered ? "Active" : "Not registered"}
+                  </p>
+                </div>
+                <div className="bg-white/5 border border-white/10 p-4">
+                  <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Signing Secret</p>
+                  <p className={`text-sm font-medium ${webhookStatus.webhookSecretSet ? "text-green-400" : "text-orange-400"}`}>
+                    {webhookStatus.webhookSecretSet ? "Set" : "Missing — set STRIPE_WEBHOOK_SECRET"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-white/5 border border-white/10 p-4">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Expected Webhook URL</p>
+                <code className="text-xs text-primary break-all">{webhookStatus.expectedUrl}</code>
+              </div>
+
+              {!webhookStatus.isRegistered && webhookStatus.stripeConfigured && (
+                <div className="flex items-start gap-3 bg-orange-400/5 border border-orange-400/20 p-4">
+                  <AlertTriangle className="w-4 h-4 text-orange-400 mt-0.5 shrink-0" />
+                  <div className="text-sm">
+                    <p className="text-orange-400 font-medium mb-1">Webhook not registered</p>
+                    <p className="text-muted-foreground text-xs">Click the button below to automatically register the webhook in your Stripe dashboard.</p>
+                  </div>
+                </div>
+              )}
+
+              {webhookRegResult && (
+                <div className={`border p-5 ${webhookRegResult.signingSecret ? "bg-green-400/5 border-green-400/20" : "bg-blue-400/5 border-blue-400/20"}`}>
+                  <p className={`text-sm font-medium mb-1 ${webhookRegResult.signingSecret ? "text-green-400" : "text-blue-400"}`}>
+                    {webhookRegResult.message}
+                  </p>
+                  {webhookRegResult.signingSecret && (
+                    <div className="mt-3">
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
+                        Signing Secret — Copy and set as STRIPE_WEBHOOK_SECRET environment variable
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs text-primary bg-white/5 px-3 py-2 border border-white/10 break-all flex-1">
+                          {webhookRegResult.signingSecret}
+                        </code>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            void navigator.clipboard.writeText(webhookRegResult.signingSecret ?? "");
+                            toast({ title: "Copied", description: "Signing secret copied to clipboard." });
+                          }}
+                          className="rounded-none border-white/20 shrink-0"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-3">
+                {webhookStatus.stripeConfigured && !webhookStatus.isRegistered && (
+                  <Button
+                    onClick={() => void handleRegisterWebhook()}
+                    disabled={registeringWebhook}
+                    className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest"
+                  >
+                    {registeringWebhook ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Registering...</> : <><Webhook className="w-4 h-4 mr-2" />Register Webhook</>}
+                  </Button>
+                )}
+                <Button
+                  onClick={() => void loadWebhookStatus()}
+                  disabled={webhookLoading}
+                  variant="outline"
+                  className="rounded-none text-xs uppercase tracking-widest border-white/20"
+                >
+                  {webhookLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+                  Refresh
+                </Button>
+                <a
+                  href="https://dashboard.stripe.com/webhooks"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-xs uppercase tracking-widest border border-white/20 text-muted-foreground hover:text-white hover:border-white/40 px-4 py-2 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Stripe Dashboard
+                </a>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Email Configuration & Logs */}
+      <div className="mt-12 mb-12">
+        <div className="flex items-center gap-3 mb-6">
+          <Mail className="w-5 h-5 text-primary" />
+          <h2 className="font-serif text-2xl">Email Configuration</h2>
+        </div>
+
+        <div className="bg-card border border-border rounded-none p-7 mb-6">
+          <p className="text-sm text-muted-foreground mb-4">
+            Royal Midnight sends transactional emails for booking confirmations, driver assignments, and notifications.
+            Configure one of the following:
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+            <div className="bg-white/5 border border-white/10 p-5">
+              <p className="text-sm font-medium text-white mb-1">Option A — Resend (Recommended)</p>
+              <p className="text-xs text-muted-foreground mb-3">Create a free account at resend.com and add your API key.</p>
+              <code className="text-xs text-primary">RESEND_API_KEY=re_xxxx</code>
+            </div>
+            <div className="bg-white/5 border border-white/10 p-5">
+              <p className="text-sm font-medium text-white mb-1">Option B — SMTP</p>
+              <p className="text-xs text-muted-foreground mb-3">Works with Gmail, SendGrid, Mailgun, etc.</p>
+              <div className="space-y-1">
+                <code className="text-xs text-primary block">SMTP_HOST=smtp.gmail.com</code>
+                <code className="text-xs text-primary block">SMTP_PORT=587</code>
+                <code className="text-xs text-primary block">SMTP_USER=you@gmail.com</code>
+                <code className="text-xs text-primary block">SMTP_PASS=app-password</code>
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Also set <code className="text-primary">SMTP_FROM</code> (display name + address, e.g. "Royal Midnight &lt;noreply@yourdomain.com&gt;")
+            and <code className="text-primary">ADMIN_EMAIL</code> to receive admin notifications.
+          </p>
+        </div>
+
+        {/* Email Audit Log */}
+        <div className="bg-card border border-border rounded-none overflow-hidden">
+          <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+            <h3 className="text-sm font-medium uppercase tracking-widest text-muted-foreground">Email Audit Log</h3>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (showEmailLogs) {
+                  setShowEmailLogs(false);
+                } else {
+                  void loadEmailLogs();
+                }
+              }}
+              disabled={emailLogsLoading}
+              className="rounded-none text-xs uppercase tracking-widest border-white/20"
+            >
+              {emailLogsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : showEmailLogs ? "Hide" : "View Logs"}
+            </Button>
+          </div>
+
+          {showEmailLogs && (
+            emailLogs.length === 0 ? (
+              <div className="px-6 py-8 text-center text-muted-foreground text-sm">No email logs yet.</div>
+            ) : (
+              <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                <table className="w-full text-sm text-left min-w-[640px]">
+                  <thead className="bg-background/50 border-b border-border sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">Date</th>
+                      <th className="px-4 py-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">To</th>
+                      <th className="px-4 py-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">Type</th>
+                      <th className="px-4 py-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">Status</th>
+                      <th className="px-4 py-3 text-xs text-muted-foreground font-medium uppercase tracking-widest">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {emailLogs.map(log => (
+                      <tr key={log.id} className="hover:bg-white/5 transition-colors">
+                        <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                          {format(new Date(log.sentAt), "MMM d, HH:mm")}
+                        </td>
+                        <td className="px-4 py-3 text-xs truncate max-w-[180px]">{log.to}</td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">{log.type.replace(/_/g, " ")}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs px-2 py-0.5 border uppercase tracking-widest ${
+                            log.status === "sent" ? "text-green-400 border-green-400/20 bg-green-400/10" :
+                            log.status === "failed" ? "text-red-400 border-red-400/20 bg-red-400/10" :
+                            "text-orange-400 border-orange-400/20 bg-orange-400/10"
+                          }`}>{log.status}</span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[200px]">
+                          {log.error ?? "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )}
         </div>
       </div>

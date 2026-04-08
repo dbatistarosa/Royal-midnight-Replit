@@ -7,9 +7,13 @@ import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
   sendNewBookingAvailableToDrivers,
+  getMailerStatus,
 } from "../lib/mailer.js";
 
 const router: IRouter = Router();
+
+const APP_URL = process.env.APP_URL ?? "https://royalmidnight.com";
+const WEBHOOK_URL = `${APP_URL}/api/webhook/stripe`;
 
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -58,6 +62,8 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
   ]);
 }
 
+// ─── Public endpoints ───────────────────────────────────────────────────────
+
 router.get("/payments/config", async (_req, res): Promise<void> => {
   const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
   if (!publishableKey) {
@@ -94,6 +100,7 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
       currency: "usd",
+      automatic_payment_methods: { enabled: true },
       metadata,
       description,
     });
@@ -107,16 +114,22 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
   const { bookingId } = req.params;
   const { paymentIntentId } = req.body as { paymentIntentId: string };
   const bId = parseInt(bookingId ?? "", 10);
+  if (!bId || !paymentIntentId) {
+    res.status(400).json({ error: "bookingId and paymentIntentId required" });
+    return;
+  }
   try {
     const stripe = getStripe();
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
     if (intent.status === "succeeded") {
-      await db.update(bookings)
-        .set({ status: "pending", updatedAt: new Date() })
-        .where(eq(bookings.id, bId));
+      const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bId));
+      if (current && current.status === "awaiting_payment") {
+        await db.update(bookings)
+          .set({ status: "pending", updatedAt: new Date() })
+          .where(eq(bookings.id, bId));
+        firePostPaymentEmails(bId).catch(err => console.error("[payments] post-confirm email error:", err));
+      }
       res.json({ success: true, status: "pending" });
-      // Fire-and-forget: send confirmation + notify drivers
-      firePostPaymentEmails(bId).catch(err => console.error("[payments] post-confirm email error:", err));
     } else {
       res.status(400).json({ error: "Payment not completed", status: intent.status });
     }
@@ -125,7 +138,124 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
   }
 });
 
-// Admin: send a Stripe Invoice to the passenger's email for manual bookings
+// ─── Admin: manual payment confirmation for stuck awaiting_payment bookings ──
+
+router.post("/admin/payments/check/:bookingId", async (req, res): Promise<void> => {
+  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+  try {
+    const stripe = getStripe();
+    const intents = await stripe.paymentIntents.search({
+      query: `metadata["bookingId"]:"${bId}"`,
+      limit: 5,
+    });
+
+    const succeeded = intents.data.find(pi => pi.status === "succeeded");
+    if (succeeded) {
+      if (booking.status === "awaiting_payment") {
+        await db.update(bookings)
+          .set({ status: "pending", updatedAt: new Date() })
+          .where(eq(bookings.id, bId));
+        firePostPaymentEmails(bId).catch(() => {});
+        res.json({ confirmed: true, paymentIntentId: succeeded.id, message: "Payment confirmed — booking moved to pending." });
+      } else {
+        res.json({ confirmed: false, message: `Booking is already in '${booking.status}' status.` });
+      }
+    } else {
+      const statuses = intents.data.map(pi => pi.status).join(", ") || "none found";
+      res.json({ confirmed: false, message: `No succeeded payment intent found. Found: ${statuses}` });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Admin: Stripe webhook management ───────────────────────────────────────
+
+router.get("/admin/stripe/webhook-status", async (_req, res): Promise<void> => {
+  const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
+  const webhookSecretSet = !!process.env.STRIPE_WEBHOOK_SECRET;
+  const mailerStatus = getMailerStatus();
+
+  if (!stripeConfigured) {
+    res.json({
+      stripeConfigured: false,
+      webhookSecretSet: false,
+      webhooks: [],
+      expectedUrl: WEBHOOK_URL,
+      mailer: mailerStatus,
+    });
+    return;
+  }
+
+  try {
+    const stripe = getStripe();
+    const webhookList = await stripe.webhookEndpoints.list({ limit: 20 });
+    const webhooks = webhookList.data.map(w => ({
+      id: w.id,
+      url: w.url,
+      status: w.status,
+      enabledEvents: w.enabled_events,
+      isOurs: w.url === WEBHOOK_URL,
+    }));
+    const isRegistered = webhooks.some(w => w.isOurs && w.status === "enabled");
+    res.json({
+      stripeConfigured: true,
+      webhookSecretSet,
+      webhooks,
+      expectedUrl: WEBHOOK_URL,
+      isRegistered,
+      mailer: mailerStatus,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/admin/stripe/register-webhook", async (_req, res): Promise<void> => {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    res.status(503).json({ error: "STRIPE_SECRET_KEY is not configured" });
+    return;
+  }
+  try {
+    const stripe = getStripe();
+
+    const existing = await stripe.webhookEndpoints.list({ limit: 20 });
+    const alreadyExists = existing.data.find(w => w.url === WEBHOOK_URL);
+    if (alreadyExists) {
+      res.json({
+        alreadyExists: true,
+        webhookId: alreadyExists.id,
+        url: alreadyExists.url,
+        message: "Webhook already registered. The signing secret was set when it was first created — update STRIPE_WEBHOOK_SECRET if needed.",
+      });
+      return;
+    }
+
+    const webhook = await stripe.webhookEndpoints.create({
+      url: WEBHOOK_URL,
+      enabled_events: ["payment_intent.succeeded", "invoice.payment_succeeded"],
+      description: "Royal Midnight payment confirmation webhook",
+    });
+
+    res.json({
+      alreadyExists: false,
+      webhookId: webhook.id,
+      url: webhook.url,
+      signingSecret: webhook.secret,
+      message: "Webhook registered successfully. Copy the signing secret below and set it as STRIPE_WEBHOOK_SECRET environment variable.",
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Admin: send a Stripe Invoice to the passenger's email for manual bookings
+
 router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<void> => {
   const bId = parseInt(req.params["bookingId"] ?? "", 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
@@ -140,7 +270,6 @@ router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<voi
     const stripe = getStripe();
     const amount = Math.round(parseFloat(String(booking.priceQuoted)) * 100);
 
-    // Find or create a Stripe customer for the passenger
     const existingCustomers = await stripe.customers.list({ email: booking.passengerEmail, limit: 1 });
     const customer = existingCustomers.data.length > 0
       ? existingCustomers.data[0]
@@ -152,7 +281,6 @@ router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<voi
 
     const bookingRef = `RM-${String(bId).padStart(4, "0")}`;
 
-    // Create an invoice item then a finalised invoice (auto-sends payment link)
     await stripe.invoiceItems.create({
       customer: customer.id,
       amount,
@@ -176,6 +304,8 @@ router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<voi
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── Stripe webhook ──────────────────────────────────────────────────────────
 
 router.post("/webhook/stripe", async (req, res): Promise<void> => {
   const sig = req.headers["stripe-signature"] as string;
@@ -206,7 +336,6 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       }
     }
 
-    // Invoice paid via emailed link
     if (event.type === "invoice.payment_succeeded") {
       const invoice = event.data.object as Stripe.Invoice;
       const bookingId = parseInt((invoice.metadata as Record<string, string>)?.bookingId || "0");

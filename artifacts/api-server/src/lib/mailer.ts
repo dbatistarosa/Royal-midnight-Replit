@@ -1,18 +1,32 @@
 import nodemailer from "nodemailer";
+import { Resend } from "resend";
+import { db } from "@workspace/db";
+import { emailLogsTable } from "@workspace/db/schema";
 
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = parseInt(process.env.SMTP_PORT ?? "587");
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const SMTP_FROM = process.env.SMTP_FROM ?? "Royal Midnight <noreply@royalmidnight.com>";
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
 export const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@royalmidnight.com";
 
-function isConfigured() {
+function isSmtpConfigured() {
   return !!(SMTP_HOST && SMTP_USER && SMTP_PASS);
 }
 
-function createTransport() {
-  if (!isConfigured()) return null;
+function isResendConfigured() {
+  return !!RESEND_API_KEY;
+}
+
+export function getMailerStatus() {
+  if (isResendConfigured()) return { configured: true, provider: "resend" as const };
+  if (isSmtpConfigured()) return { configured: true, provider: "smtp" as const };
+  return { configured: false, provider: "none" as const };
+}
+
+function createSmtpTransport() {
+  if (!isSmtpConfigured()) return null;
   return nodemailer.createTransport({
     host: SMTP_HOST,
     port: SMTP_PORT,
@@ -21,17 +35,48 @@ function createTransport() {
   });
 }
 
-async function send(to: string | string[], subject: string, html: string) {
-  const transport = createTransport();
-  if (!transport) {
-    console.log(`[mailer] SMTP not configured — would send to ${Array.isArray(to) ? to.join(", ") : to}: ${subject}`);
+async function logEmail(to: string | string[], subject: string, type: string, status: "sent" | "skipped" | "failed", error?: string) {
+  try {
+    const toStr = Array.isArray(to) ? to.join(", ") : to;
+    await db.insert(emailLogsTable).values({ to: toStr, subject, type, status, error: error ?? null });
+  } catch {}
+}
+
+async function send(to: string | string[], subject: string, html: string, type = "general") {
+  const toArr = Array.isArray(to) ? to : [to];
+
+  if (isResendConfigured()) {
+    try {
+      const resend = new Resend(RESEND_API_KEY);
+      await resend.emails.send({
+        from: SMTP_FROM,
+        to: toArr,
+        subject,
+        html,
+      });
+      await logEmail(to, subject, type, "sent");
+    } catch (err: any) {
+      console.error("[mailer] Resend failed:", err.message);
+      await logEmail(to, subject, type, "failed", err.message);
+    }
     return;
   }
-  try {
-    await transport.sendMail({ from: SMTP_FROM, to, subject, html });
-  } catch (err) {
-    console.error("[mailer] Failed to send email:", err);
+
+  if (isSmtpConfigured()) {
+    const transport = createSmtpTransport();
+    if (!transport) { await logEmail(to, subject, type, "skipped", "SMTP transport creation failed"); return; }
+    try {
+      await transport.sendMail({ from: SMTP_FROM, to, subject, html });
+      await logEmail(to, subject, type, "sent");
+    } catch (err: any) {
+      console.error("[mailer] SMTP failed:", err.message);
+      await logEmail(to, subject, type, "failed", err.message);
+    }
+    return;
   }
+
+  console.log(`[mailer] No email provider configured — would send to ${Array.isArray(to) ? to.join(", ") : to}: ${subject}`);
+  await logEmail(to, subject, type, "skipped", "No email provider configured (set RESEND_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS)");
 }
 
 function wrap(body: string) {
@@ -87,7 +132,7 @@ export async function sendBookingConfirmationPassenger(b: BookingEmailData) {
   Questions? Reply to this email or contact our support team.<br>
   <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
 </p>`);
-  await send(b.passengerEmail, `Booking Confirmed — Royal Midnight #${b.id}`, html);
+  await send(b.passengerEmail, `Booking Confirmed — Royal Midnight #${b.id}`, html, "booking_confirmation_passenger");
 }
 
 export async function sendNewBookingAdmin(b: BookingEmailData) {
@@ -105,7 +150,7 @@ export async function sendNewBookingAdmin(b: BookingEmailData) {
   ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
   ${b.specialRequests ? row("Requests", b.specialRequests) : ""}
 </table>`);
-  await send(ADMIN_EMAIL, `New Booking #${b.id} — ${b.passengerName}`, html);
+  await send(ADMIN_EMAIL, `New Booking #${b.id} — ${b.passengerName}`, html, "new_booking_admin");
 }
 
 export async function sendNewBookingAvailableToDrivers(b: BookingEmailData, driverEmails: string[]) {
@@ -125,7 +170,7 @@ export async function sendNewBookingAvailableToDrivers(b: BookingEmailData, driv
   ${b.specialRequests ? row("Special Requests", b.specialRequests) : ""}
 </table>
 <p style="margin-top:24px"><a href="${process.env.APP_URL ?? "https://royalmidnight.com"}/driver/dashboard" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">ACCEPT RIDE</a></p>`);
-  await send(driverEmails, `New Ride Available — Booking #${b.id}`, html);
+  await send(driverEmails, `New Ride Available — Booking #${b.id}`, html, "new_booking_drivers");
 }
 
 export async function sendBookingCancelledAdmin(b: BookingEmailData) {
@@ -139,7 +184,7 @@ export async function sendBookingCancelledAdmin(b: BookingEmailData) {
   ${row("Was Scheduled", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York" }))}
   ${row("Total Fare", `$${b.priceQuoted.toFixed(2)}`)}
 </table>`);
-  await send(ADMIN_EMAIL, `Booking #${b.id} Cancelled — ${b.passengerName}`, html);
+  await send(ADMIN_EMAIL, `Booking #${b.id} Cancelled — ${b.passengerName}`, html, "booking_cancelled_admin");
 }
 
 export async function sendDriverAcceptedPassenger(
@@ -167,7 +212,7 @@ export async function sendDriverAcceptedPassenger(
   Please be ready at the pickup location at the scheduled time.<br>
   <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
 </p>`);
-  await send(b.passengerEmail, `Your Driver is Confirmed — Royal Midnight #RM-${String(b.id).padStart(4, "0")}`, html);
+  await send(b.passengerEmail, `Your Driver is Confirmed — Royal Midnight #RM-${String(b.id).padStart(4, "0")}`, html, "driver_accepted_passenger");
 }
 
 export async function sendDriverAcceptedAdmin(b: BookingEmailData, driverName: string, driverEmail: string) {
@@ -182,7 +227,7 @@ export async function sendDriverAcceptedAdmin(b: BookingEmailData, driverName: s
   ${row("Scheduled", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York" }))}
   ${row("Driver Earnings", b.driverEarnings != null ? `$${b.driverEarnings.toFixed(2)}` : "—")}
 </table>`);
-  await send(ADMIN_EMAIL, `Driver Accepted — Booking #${b.id} (${driverName})`, html);
+  await send(ADMIN_EMAIL, `Driver Accepted — Booking #${b.id} (${driverName})`, html, "driver_accepted_admin");
 }
 
 export async function sendDriverUnassignedAdmin(bookingId: number, driverName: string, passengerName: string) {
@@ -194,7 +239,7 @@ export async function sendDriverUnassignedAdmin(bookingId: number, driverName: s
   ${row("Unassigned Driver", driverName)}
 </table>
 <p style="margin-top:16px;color:#888;font-size:13px">The booking is now back in the available pool for drivers to accept.</p>`);
-  await send(ADMIN_EMAIL, `Driver Unassigned — Booking #${bookingId}`, html);
+  await send(ADMIN_EMAIL, `Driver Unassigned — Booking #${bookingId}`, html, "driver_unassigned_admin");
 }
 
 export async function sendStatusChangedAdmin(bookingId: number, oldStatus: string, newStatus: string, passengerName: string) {
@@ -206,5 +251,5 @@ export async function sendStatusChangedAdmin(bookingId: number, oldStatus: strin
   ${row("Previous Status", oldStatus.replace(/_/g, " "))}
   ${row("New Status", newStatus.replace(/_/g, " "))}
 </table>`);
-  await send(ADMIN_EMAIL, `Booking #${bookingId} → ${newStatus} (${passengerName})`, html);
+  await send(ADMIN_EMAIL, `Booking #${bookingId} → ${newStatus} (${passengerName})`, html, "status_changed_admin");
 }

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { sql, desc, eq } from "drizzle-orm";
-import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable } from "@workspace/db";
 import {
   GetAdminStatsResponse,
   GetRecentBookingsQueryParams,
@@ -152,6 +152,16 @@ router.get("/admin/revenue", async (_req, res): Promise<void> => {
     commissionPct,
     completedRides: totals?.completedCount ?? 0,
   }));
+});
+
+router.get("/admin/email-logs", async (req, res): Promise<void> => {
+  const limit = Math.min(parseInt((req.query["limit"] as string) ?? "50", 10), 200);
+  const logs = await db
+    .select()
+    .from(emailLogsTable)
+    .orderBy(desc(emailLogsTable.sentAt))
+    .limit(limit);
+  res.json(logs.map(l => ({ ...l, sentAt: l.sentAt.toISOString() })));
 });
 
 router.get("/admin/dispatch", async (_req, res): Promise<void> => {
