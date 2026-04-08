@@ -143,7 +143,10 @@ function LocationShareToggle({ driverId, authHeader }: { driverId: number; authH
     try { return localStorage.getItem(LOCATION_LS_KEY) === "true"; } catch { return false; }
   });
   const [geoError, setGeoError] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Track last known position so the heartbeat can ping even when stationary
+  const lastPosRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const sendLocation = useCallback(async (lat: number, lng: number) => {
     try {
@@ -153,7 +156,7 @@ function LocationShareToggle({ driverId, authHeader }: { driverId: number; authH
         body: JSON.stringify({ lat, lng }),
       });
     } catch {
-      // Silently ignore network errors — will retry on next interval
+      // Silently ignore network errors — will retry on next tick
     }
   }, [driverId, authHeader]);
 
@@ -162,30 +165,60 @@ function LocationShareToggle({ driverId, authHeader }: { driverId: number; authH
       setGeoError("Geolocation is not supported by this browser.");
       return;
     }
-    navigator.geolocation.getCurrentPosition(
+
+    const geoOptions: PositionOptions = {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 5000,
+    };
+
+    // watchPosition fires continuously as the device moves, and on many mobile
+    // browsers (iOS Safari, Chrome Android) continues even when the tab is in
+    // the background or the screen is locked.
+    watchIdRef.current = navigator.geolocation.watchPosition(
       ({ coords }) => {
+        lastPosRef.current = { lat: coords.latitude, lng: coords.longitude };
         void sendLocation(coords.latitude, coords.longitude);
         setGeoError(null);
-        intervalRef.current = setInterval(() => {
-          navigator.geolocation.getCurrentPosition(
-            ({ coords: c }) => void sendLocation(c.latitude, c.longitude),
-            () => {},
-          );
-        }, 30000);
       },
       (err) => {
         setGeoError(err.message || "Location access denied.");
         setSharing(false);
         localStorage.setItem(LOCATION_LS_KEY, "false");
       },
+      geoOptions,
     );
+
+    // Heartbeat: send a ping every 5 seconds even when the device hasn't moved
+    // (watchPosition only fires on position changes, so we need this to keep
+    // the "last updated" timestamp fresh in the admin dispatch view).
+    heartbeatRef.current = setInterval(() => {
+      if (lastPosRef.current) {
+        void sendLocation(lastPosRef.current.lat, lastPosRef.current.lng);
+      } else {
+        // Haven't received a fix yet — ask for a one-shot position
+        navigator.geolocation.getCurrentPosition(
+          ({ coords: c }) => {
+            lastPosRef.current = { lat: c.latitude, lng: c.longitude };
+            void sendLocation(c.latitude, c.longitude);
+          },
+          () => {},
+          geoOptions,
+        );
+      }
+    }, 5000);
   }, [sendLocation]);
 
   const stopSharing = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
     }
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    }
+    lastPosRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -200,7 +233,7 @@ function LocationShareToggle({ driverId, authHeader }: { driverId: number; authH
     if (!next) {
       toast({ title: "Location sharing disabled", description: "Dispatch will no longer see your position." });
     } else {
-      toast({ title: "Location sharing enabled", description: "Your position will update every 30 seconds." });
+      toast({ title: "Location sharing enabled", description: "Your position will update every 5 seconds." });
     }
   };
 

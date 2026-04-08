@@ -211,10 +211,10 @@ export default function AdminDispatch() {
     }
   }, [board]);
 
-  // Initial fetch + 10-second polling for live location tracking
+  // Initial fetch + 5-second polling for live location tracking
   useEffect(() => {
     void fetchBoard();
-    const interval = setInterval(() => void fetchBoard(), 10000);
+    const interval = setInterval(() => void fetchBoard(), 5000);
     return () => clearInterval(interval);
   }, [fetchBoard]);
 
