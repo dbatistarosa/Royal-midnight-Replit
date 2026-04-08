@@ -167,19 +167,24 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
     }
 
     if (intent.status === "succeeded") {
-      const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bId));
+      const [current] = await db.select({ status: bookings.status, stripePaymentIntentId: bookings.stripePaymentIntentId }).from(bookings).where(eq(bookings.id, bId));
       if (!current) {
         res.status(404).json({ error: "Booking not found" });
         return;
       }
       if (current.status === "awaiting_payment") {
         await db.update(bookings)
-          .set({ status: "pending", updatedAt: new Date() })
+          .set({ status: "pending", stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
           .where(eq(bookings.id, bId));
         firePostPaymentEmails(bId).catch(err => console.error("[payments] post-confirm email error:", err));
+      } else if (!current.stripePaymentIntentId) {
+        // Store PI ID even if booking was already moved to pending (e.g. by webhook)
+        await db.update(bookings)
+          .set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
+          .where(eq(bookings.id, bId));
       }
       // Return success even if already confirmed (webhook may have beaten us)
-      res.json({ success: true, status: current.status === "awaiting_payment" ? "pending" : current.status });
+      res.json({ success: true, status: current.status === "awaiting_payment" ? "pending" : current.status, paymentIntentId });
     } else {
       res.status(400).json({ error: "Payment not completed", status: intent.status });
     }
@@ -197,8 +202,14 @@ router.post("/admin/payments/check/:bookingId", requireAdmin, async (req, res): 
   const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
   if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
 
+  // If already paid/confirmed, return success immediately
   if (booking.status !== "awaiting_payment") {
-    res.json({ confirmed: false, message: `Booking is already in '${booking.status}' status.` });
+    res.json({
+      confirmed: true,
+      alreadyPaid: true,
+      message: `Booking is already confirmed (status: ${booking.status}).`,
+      paymentIntentId: booking.stripePaymentIntentId ?? undefined,
+    });
     return;
   }
 
@@ -213,7 +224,7 @@ router.post("/admin/payments/check/:bookingId", requireAdmin, async (req, res): 
     const succeededIntent = intents.data.find(pi => pi.status === "succeeded");
     if (succeededIntent) {
       await db.update(bookings)
-        .set({ status: "pending", updatedAt: new Date() })
+        .set({ status: "pending", stripePaymentIntentId: succeededIntent.id, updatedAt: new Date() })
         .where(eq(bookings.id, bId));
       firePostPaymentEmails(bId).catch(() => {});
       res.json({ confirmed: true, source: "payment_intent", paymentIntentId: succeededIntent.id, message: "Payment confirmed — booking moved to pending." });
@@ -499,12 +510,13 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       const invoice = event.data.object as Stripe.Invoice;
       const bookingId = parseInt(invoice.metadata?.bookingId || "0");
       if (bookingId) {
+        const piId = typeof invoice.payment_intent === "string" ? invoice.payment_intent : (invoice.payment_intent as any)?.id ?? null;
         const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
         if (current && current.status === "awaiting_payment") {
           await db.update(bookings)
-            .set({ status: "pending", updatedAt: new Date() })
+            .set({ status: "pending", stripePaymentIntentId: piId ?? undefined, updatedAt: new Date() })
             .where(eq(bookings.id, bookingId));
-          console.log(`[payments] Invoice paid → Booking #${bookingId} → pending`);
+          console.log(`[payments] Invoice paid → Booking #${bookingId} → pending (PI: ${piId ?? "N/A"})`);
           firePostPaymentEmails(bookingId).catch(err => console.error("[payments] invoice.paid email error:", err));
         }
       }
@@ -518,7 +530,7 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
         // row has not yet been committed (e.g. webhook arrived before the booking
         // creation transaction completed — a narrow but real race condition).
         const confirmBookingWithRetry = async (attemptsLeft: number): Promise<void> => {
-          const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
+          const [current] = await db.select({ status: bookings.status, stripePaymentIntentId: bookings.stripePaymentIntentId }).from(bookings).where(eq(bookings.id, bookingId));
           if (!current) {
             if (attemptsLeft > 0) {
               console.warn(`[payments] webhook: booking #${bookingId} not found yet — retrying in 2 s (${attemptsLeft} left)`);
@@ -530,9 +542,14 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
           }
           if (current.status === "awaiting_payment") {
             await db.update(bookings)
-              .set({ status: "pending", updatedAt: new Date() })
+              .set({ status: "pending", stripePaymentIntentId: intent.id, updatedAt: new Date() })
               .where(eq(bookings.id, bookingId));
+            console.log(`[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intent.id})`);
             firePostPaymentEmails(bookingId).catch(err => console.error("[payments] webhook pi email error:", err));
+          } else if (!current.stripePaymentIntentId) {
+            await db.update(bookings)
+              .set({ stripePaymentIntentId: intent.id, updatedAt: new Date() })
+              .where(eq(bookings.id, bookingId));
           }
         };
         confirmBookingWithRetry(3).catch(err => console.error("[payments] webhook confirm error:", err));

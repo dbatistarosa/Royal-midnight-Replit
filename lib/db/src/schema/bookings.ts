@@ -23,6 +23,7 @@ export const bookingsTable = pgTable("bookings", {
   driverId: integer("driver_id"),
   vehicleId: integer("vehicle_id"),
   paymentType: text("payment_type").default("standard"),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

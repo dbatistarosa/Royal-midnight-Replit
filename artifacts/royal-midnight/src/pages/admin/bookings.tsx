@@ -54,6 +54,7 @@ type BookingRow = {
   flightNumber?: string | null;
   specialRequests?: string | null;
   paymentType?: string | null;
+  stripePaymentIntentId?: string | null;
   userRole?: string | null;
   userId?: number | null;
   createdAt?: string | null;
@@ -344,9 +345,13 @@ export default function AdminBookings() {
         method: "POST",
         headers: { Authorization: authHdr },
       });
-      const data = await res.json() as { confirmed?: boolean; message?: string };
+      const data = await res.json() as { confirmed?: boolean; alreadyPaid?: boolean; message?: string; paymentIntentId?: string };
       if (data.confirmed) {
-        toast({ title: "Payment confirmed!", description: data.message ?? "Booking moved to pending." });
+        if (data.alreadyPaid) {
+          toast({ title: "Already paid", description: data.message ?? "This booking has already been paid." });
+        } else {
+          toast({ title: "Payment confirmed!", description: data.message ?? "Booking moved to pending." });
+        }
         void refetch();
       } else {
         toast({ title: "No payment found", description: data.message ?? "Could not verify payment in Stripe.", variant: "destructive" });
@@ -513,6 +518,11 @@ export default function AdminBookings() {
                         <span className={`px-2 py-1 border text-xs uppercase tracking-widest ${STATUS_COLORS[b.status] ?? "text-muted-foreground"}`}>
                           {b.status.replace(/_/g, " ")}
                         </span>
+                        {b.stripePaymentIntentId && (
+                          <span className="px-2 py-0.5 border border-green-500/30 bg-green-500/10 text-green-400 text-xs uppercase tracking-widest flex items-center gap-1">
+                            <CreditCard className="w-3 h-3" /> Paid
+                          </span>
+                        )}
                         {b.userRole === "corporate" && (
                           <span className="px-2 py-0.5 border border-purple-500/30 bg-purple-500/10 text-purple-400 text-xs uppercase tracking-widest">
                             Corporate
@@ -760,6 +770,12 @@ export default function AdminBookings() {
                                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Payment Type</p>
                                 <p className="text-white capitalize">{b.paymentType?.replace("_", " ") || "Standard"}</p>
                               </div>
+                              {b.stripePaymentIntentId && (
+                                <div className="col-span-2">
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><CreditCard className="w-3 h-3 text-green-400" /> Payment Received</p>
+                                  <p className="text-green-400 text-xs font-mono break-all">{b.stripePaymentIntentId}</p>
+                                </div>
+                              )}
                               <div>
                                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Driver</p>
                                 <p className="text-white">{b.driverId ? `Driver #${b.driverId}` : "Not assigned"}</p>
