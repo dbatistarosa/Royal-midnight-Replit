@@ -157,6 +157,8 @@ export default function AdminBookings() {
   const [linkingUserId, setLinkingUserId] = useState<Record<number, string>>({});
   const [linkingLoading, setLinkingLoading] = useState<number | null>(null);
 
+  const authHdr = token ? `Bearer ${token}` : "";
+
   type PassengerUser = { id: number; email: string; name: string; role: string };
   const [passengerUsers, setPassengerUsers] = useState<PassengerUser[]>([]);
   useEffect(() => {
@@ -174,8 +176,6 @@ export default function AdminBookings() {
   const [cancelPreview, setCancelPreview] = useState<{ booking: BookingRow; policy: CancelPreview } | null>(null);
   const [cancelPreviewLoading, setCancelPreviewLoading] = useState<number | null>(null);
   const [cancelConfirming, setCancelConfirming] = useState(false);
-
-  const authHdr = token ? `Bearer ${token}` : "";
 
   const pickupAirportCode = detectAirportCode(createForm.pickupAddress);
   const dropoffAirportCode = detectAirportCode(createForm.dropoffAddress);
