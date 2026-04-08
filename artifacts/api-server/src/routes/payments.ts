@@ -316,7 +316,14 @@ router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<voi
   try {
     const stripe = getStripe();
     const amount = Math.round(parseFloat(String(booking.priceQuoted)) * 100);
+    if (!amount || amount <= 0) {
+      res.status(400).json({ error: "Booking has no valid price to invoice." });
+      return;
+    }
 
+    const bookingRef = `RM-${String(bId).padStart(4, "0")}`;
+
+    // Find or create the Stripe customer
     const existingCustomers = await stripe.customers.list({ email: booking.passengerEmail, limit: 1 });
     const customer = existingCustomers.data.length > 0
       ? existingCustomers.data[0]
@@ -326,15 +333,32 @@ router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<voi
           metadata: { bookingId: String(bId) },
         });
 
-    const bookingRef = `RM-${String(bId).padStart(4, "0")}`;
-
-    await stripe.invoiceItems.create({
+    // Void any pre-existing open invoices for this booking to avoid stale state
+    const openInvoices = await stripe.invoices.list({
       customer: customer.id,
-      amount,
-      currency: "usd",
-      description: `Royal Midnight Chauffeur — Booking ${bookingRef}\n${booking.pickupAddress} → ${booking.dropoffAddress}`,
+      status: "open",
+      limit: 10,
     });
+    for (const inv of openInvoices.data) {
+      if (inv.metadata?.bookingId === String(bId)) {
+        await stripe.invoices.voidInvoice(inv.id);
+      }
+    }
 
+    // Also remove any dangling pending invoice items for this customer so they
+    // don't contaminate the new invoice total
+    const pendingItems = await stripe.invoiceItems.list({
+      customer: customer.id,
+      pending: true,
+      limit: 100,
+    });
+    for (const item of pendingItems.data) {
+      await stripe.invoiceItems.del(item.id);
+    }
+
+    // Create the draft invoice FIRST so we can attach the line item directly to
+    // it — this bypasses Stripe's "pending items" pool entirely and guarantees
+    // the invoice total is exactly what we expect.
     const invoice = await stripe.invoices.create({
       customer: customer.id,
       collection_method: "send_invoice",
@@ -343,10 +367,32 @@ router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<voi
       description: `Royal Midnight — Reservation ${bookingRef}`,
     });
 
+    // Attach the line item directly to the draft invoice
+    await stripe.invoiceItems.create({
+      customer: customer.id,
+      invoice: invoice.id,
+      amount,
+      currency: "usd",
+      description: `Royal Midnight Chauffeur — Booking ${bookingRef} · ${booking.pickupAddress} → ${booking.dropoffAddress}`,
+    });
+
+    // Retrieve the draft to confirm the total before finalising
+    const draft = await stripe.invoices.retrieve(invoice.id);
+    if ((draft.amount_due ?? 0) !== amount) {
+      await stripe.invoices.del(invoice.id);
+      res.status(500).json({ error: `Invoice total mismatch: expected $${(amount / 100).toFixed(2)}, got $${((draft.amount_due ?? 0) / 100).toFixed(2)}. Please try again.` });
+      return;
+    }
+
     const finalised = await stripe.invoices.finalizeInvoice(invoice.id);
 
     const invoiceUrl = finalised.hosted_invoice_url ?? "";
     const invoicePdfUrl = finalised.invoice_pdf ?? null;
+
+    if (!invoiceUrl) {
+      res.status(500).json({ error: "Invoice finalised but no payment URL was generated. Please try again." });
+      return;
+    }
 
     await sendInvoiceToPassenger(
       {
