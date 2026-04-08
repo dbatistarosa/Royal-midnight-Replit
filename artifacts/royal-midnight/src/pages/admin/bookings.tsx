@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -54,6 +54,7 @@ type BookingRow = {
   specialRequests?: string | null;
   paymentType?: string | null;
   userRole?: string | null;
+  userId?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 };
@@ -152,6 +153,17 @@ export default function AdminBookings() {
   const [chargeLoading, setChargeLoading] = useState(false);
   const [sendingInvoiceId, setSendingInvoiceId] = useState<number | null>(null);
   const [syncingPaymentId, setSyncingPaymentId] = useState<number | null>(null);
+  const [linkingUserId, setLinkingUserId] = useState<Record<number, string>>({});
+  const [linkingLoading, setLinkingLoading] = useState<number | null>(null);
+
+  type PassengerUser = { id: number; email: string; name: string; role: string };
+  const [passengerUsers, setPassengerUsers] = useState<PassengerUser[]>([]);
+  useEffect(() => {
+    fetch(`${API_BASE}/users`, { headers: { Authorization: authHdr } })
+      .then(r => r.ok ? r.json() as Promise<PassengerUser[]> : Promise.resolve([]))
+      .then(data => setPassengerUsers(Array.isArray(data) ? data.filter(u => u.role === "passenger" || u.role === "corporate") : []))
+      .catch(() => {});
+  }, [authHdr]);
 
   // Cancellation state
   type CancelPreview = {
@@ -624,6 +636,57 @@ export default function AdminBookings() {
                                   <p className="capitalize text-white">{b.userRole}</p>
                                 </div>
                               )}
+                              <div className="pt-1">
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+                                  {b.userId ? "Linked Account" : "Link to Account"}
+                                </p>
+                                {b.userId ? (
+                                  <p className="text-xs text-primary">User #{b.userId} (linked)</p>
+                                ) : null}
+                                <div className="flex items-center gap-2 mt-1">
+                                  <select
+                                    className="bg-black border border-white/20 text-white text-xs rounded-none h-7 px-2 flex-1 min-w-0"
+                                    value={linkingUserId[b.id] ?? ""}
+                                    onChange={e => setLinkingUserId(prev => ({ ...prev, [b.id]: e.target.value }))}
+                                  >
+                                    <option value="">— Select passenger —</option>
+                                    {passengerUsers.map(u => (
+                                      <option key={u.id} value={u.id}>
+                                        {u.name} ({u.email})
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    disabled={!linkingUserId[b.id] || linkingLoading === b.id}
+                                    onClick={async () => {
+                                      const uid = parseInt(linkingUserId[b.id] ?? "", 10);
+                                      if (!uid) return;
+                                      setLinkingLoading(b.id);
+                                      try {
+                                        const res = await fetch(`${API_BASE}/admin/bookings/${b.id}/link-user`, {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json", Authorization: authHdr },
+                                          body: JSON.stringify({ userId: uid }),
+                                        });
+                                        const data = await res.json() as { ok?: boolean; userName?: string; error?: string };
+                                        if (res.ok && data.ok) {
+                                          toast({ title: "Account linked", description: `Booking #${b.id} linked to ${data.userName ?? "user"}.` });
+                                          refetch();
+                                        } else {
+                                          toast({ title: "Link failed", description: data.error ?? "Unknown error", variant: "destructive" });
+                                        }
+                                      } catch {
+                                        toast({ title: "Link failed", description: "Network error", variant: "destructive" });
+                                      }
+                                      setLinkingLoading(null);
+                                    }}
+                                    className="flex items-center gap-1 text-xs border border-primary/40 text-primary hover:bg-primary/10 px-2 py-1 transition-colors disabled:opacity-50 whitespace-nowrap"
+                                  >
+                                    {linkingLoading === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link className="w-3 h-3" />}
+                                    Link
+                                  </button>
+                                </div>
+                              </div>
                             </div>
                           </div>
 

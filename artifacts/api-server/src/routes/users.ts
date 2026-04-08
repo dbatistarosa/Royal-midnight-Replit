@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, or, and, isNull } from "drizzle-orm";
 import { db, usersTable, bookingsTable } from "@workspace/db";
 import {
   ListUsersQueryParams,
@@ -100,11 +100,37 @@ router.get("/users/:id/bookings", async (req, res): Promise<void> => {
     return;
   }
 
+  // Fetch the user so we can also match bookings by passengerEmail
+  const [user] = await db.select({ id: usersTable.id, email: usersTable.email })
+    .from(usersTable)
+    .where(eq(usersTable.id, params.data.id));
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  // Return bookings linked by userId OR unlinked bookings matched by passengerEmail
   const bookings = await db
     .select()
     .from(bookingsTable)
-    .where(eq(bookingsTable.userId, params.data.id))
+    .where(
+      or(
+        eq(bookingsTable.userId, user.id),
+        and(eq(bookingsTable.passengerEmail, user.email), isNull(bookingsTable.userId))
+      )
+    )
     .orderBy(desc(bookingsTable.createdAt));
+
+  // Retroactively link any email-matched bookings that have no userId yet
+  const unlinked = bookings.filter(b => !b.userId);
+  if (unlinked.length > 0) {
+    db.update(bookingsTable)
+      .set({ userId: user.id })
+      .where(
+        and(eq(bookingsTable.passengerEmail, user.email), isNull(bookingsTable.userId))
+      )
+      .catch(err => console.error("[users] retroactive link error:", err));
+  }
 
   res.json(
     GetUserBookingsResponse.parse(

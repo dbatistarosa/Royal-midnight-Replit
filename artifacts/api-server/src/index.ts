@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { db, usersTable, settingsTable } from "@workspace/db";
+import { eq, and, isNull } from "drizzle-orm";
+import { db, usersTable, settingsTable, bookingsTable } from "@workspace/db";
 import Stripe from "stripe";
 import app from "./app";
 import { logger } from "./lib/logger";
@@ -110,7 +110,30 @@ async function ensureStripeWebhook(): Promise<void> {
   }
 }
 
+// Link all unlinked bookings (userId IS NULL) to matching user accounts by passengerEmail.
+// Runs once at startup so historical admin-created bookings are retroactively associated.
+async function retroactiveEmailLink(): Promise<void> {
+  try {
+    const users = await db.select({ id: usersTable.id, email: usersTable.email }).from(usersTable);
+    let linked = 0;
+    for (const user of users) {
+      const result = await db
+        .update(bookingsTable)
+        .set({ userId: user.id })
+        .where(and(eq(bookingsTable.passengerEmail, user.email), isNull(bookingsTable.userId)))
+        .returning({ id: bookingsTable.id });
+      linked += result.length;
+    }
+    if (linked > 0) {
+      logger.info({ linked }, "Retroactive email link: linked unlinked bookings to user accounts");
+    }
+  } catch (err) {
+    logger.error({ err }, "Retroactive email link failed (non-fatal)");
+  }
+}
+
 seedDatabase()
+  .then(() => retroactiveEmailLink())
   .then(() => ensureStripeWebhook())
   .then(() => {
     app.listen(port, (err) => {

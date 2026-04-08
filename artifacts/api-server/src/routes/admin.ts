@@ -212,6 +212,28 @@ router.get("/admin/dispatch", requireAdmin, async (_req, res): Promise<void> => 
   );
 });
 
+// POST /admin/bookings/:id/link-user — manually link a booking to a user account
+router.post("/admin/bookings/:id/link-user", requireAdmin, async (req, res): Promise<void> => {
+  const bookingId = parseInt(req.params["id"] ?? "", 10);
+  const { userId } = req.body as { userId?: number };
+  if (isNaN(bookingId) || !userId) {
+    res.status(400).json({ error: "bookingId and userId are required" });
+    return;
+  }
+  const [user] = await db.select({ id: usersTable.id, email: usersTable.email, name: usersTable.name })
+    .from(usersTable).where(eq(usersTable.id, userId));
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+  const [updated] = await db
+    .update(bookingsTable)
+    .set({ userId: user.id, updatedAt: new Date() })
+    .where(eq(bookingsTable.id, bookingId))
+    .returning({ id: bookingsTable.id, userId: bookingsTable.userId });
+
+  if (!updated) { res.status(404).json({ error: "Booking not found" }); return; }
+  res.json({ ok: true, bookingId, linkedUserId: user.id, userEmail: user.email, userName: user.name });
+});
+
 // GET /admin/mailer-status — check which email provider is active
 router.get("/admin/mailer-status", requireAdmin, (_req, res) => {
   res.json(getMailerStatus());

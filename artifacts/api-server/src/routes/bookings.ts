@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, and, isNull, ne, sql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, ne, sql } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
@@ -178,15 +178,24 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   }
 
   // Passengers and corporate accounts can only see their own bookings
+  // Include both userId-linked AND email-matched (admin-created) bookings
   if (caller.role === "passenger" || caller.role === "corporate") {
     const requestedUserId = parsed.data.userId;
     if (requestedUserId != null && requestedUserId !== caller.userId) {
       res.status(403).json({ error: "Access denied" });
       return;
     }
-    if (requestedUserId == null) {
-      conditions.push(eq(bookingsTable.userId, caller.userId));
-    }
+    const [callerUser] = await db
+      .select({ email: usersTable.email })
+      .from(usersTable)
+      .where(eq(usersTable.id, caller.userId));
+    const userEmail = callerUser?.email ?? "";
+    conditions.push(
+      or(
+        eq(bookingsTable.userId, caller.userId),
+        and(eq(bookingsTable.passengerEmail, userEmail), isNull(bookingsTable.userId))
+      )!
+    );
   }
 
   if (caller.role === "admin") {
@@ -395,9 +404,19 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
   }
 
   // Passengers and corporate accounts: can only access their own bookings
-  if ((caller.role === "passenger" || caller.role === "corporate") && booking.userId !== caller.userId) {
-    res.status(403).json({ error: "Access denied" });
-    return;
+  // Allow access if booking is linked by userId OR by matching passengerEmail
+  if (caller.role === "passenger" || caller.role === "corporate") {
+    if (booking.userId !== caller.userId) {
+      // Check if email matches (covers admin-created bookings not yet linked by userId)
+      const [callerUser] = await db
+        .select({ email: usersTable.email })
+        .from(usersTable)
+        .where(eq(usersTable.id, caller.userId));
+      if (!callerUser || booking.passengerEmail !== callerUser.email) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
+    }
   }
 
   res.json(parseBooking(booking));
