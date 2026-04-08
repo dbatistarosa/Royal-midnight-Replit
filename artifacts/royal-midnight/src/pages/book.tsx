@@ -124,13 +124,23 @@ export default function Book() {
     sessionStorage.removeItem("rm_pending_booking_id");
 
     if (bookingId) {
-      // Confirm server-side and redirect to confirmation page
-      fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentIntentId: pi }),
-      }).catch(() => {});
-      setLocation(`/booking-confirmation/${bookingId}`);
+      // Confirm server-side then redirect — same pattern as admin Charge Card.
+      // Webhook is also the safety net; confirmation page polls until status updates.
+      void (async () => {
+        try {
+          const res = await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paymentIntentId: pi }),
+          });
+          if (!res.ok) {
+            console.warn("[book] 3DS confirm responded", res.status, "— webhook will finalise booking");
+          }
+        } catch {
+          console.warn("[book] 3DS confirm network error — webhook will finalise booking");
+        }
+        setLocation(`/booking-confirmation/${bookingId}`);
+      })();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -407,15 +417,23 @@ export default function Book() {
     // Clean up sessionStorage — payment completed without redirect
     sessionStorage.removeItem("rm_pending_booking_id");
 
-    // Confirm the payment server-side immediately — do not rely solely on webhook
+    // Confirm server-side using the same flow as admin Charge Card:
+    // call /payments/confirm, check res.ok, then navigate.
+    // The payment_intent.succeeded webhook also fires as a safety net.
     try {
-      await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+      const res = await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentIntentId }),
       });
-    } catch {
-      // Best-effort: webhook will handle it if this fails
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Booking confirmation failed");
+      }
+    } catch (err: any) {
+      // Log and continue — the webhook will update the booking if the direct call failed.
+      // The confirmation page polls until status changes.
+      console.warn("[book] confirm failed, falling back to webhook:", err?.message);
     }
 
     setLocation(`/booking-confirmation/${bookingId}`);
