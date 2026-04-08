@@ -1443,7 +1443,7 @@ components:
           type: ["string", "null"]
         status:
           type: string
-          enum: [awaiting_payment, pending, confirmed, in_progress, completed, cancelled]
+          enum: [awaiting_payment, pending, confirmed, on_way, on_location, in_progress, completed, cancelled]
         priceQuoted:
           type: number
         promoCode:
@@ -1511,7 +1511,7 @@ components:
       properties:
         status:
           type: ["string", "null"]
-          enum: [awaiting_payment, pending, confirmed, in_progress, completed, cancelled, null]
+          enum: [awaiting_payment, pending, confirmed, on_way, on_location, in_progress, completed, cancelled, null]
         driverId:
           type: ["integer", "null"]
         vehicleId:
