@@ -198,7 +198,7 @@ router.get("/admin/email-logs", requireAdmin, async (req, res): Promise<void> =>
 
 router.get("/admin/dispatch", requireAdmin, async (_req, res): Promise<void> => {
   const [activeTripsRaw, availableDriversRaw, pendingRaw] = await Promise.all([
-    db.select().from(bookingsTable).where(eq(bookingsTable.status, "in_progress")),
+    db.select().from(bookingsTable).where(sql`status IN ('on_way','on_location','in_progress')`),
     db.select().from(driversTable).where(sql`approval_status = 'approved'`),
     db.select().from(bookingsTable).where(eq(bookingsTable.status, "pending")).orderBy(bookingsTable.pickupAt),
   ]);

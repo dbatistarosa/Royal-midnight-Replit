@@ -61,15 +61,16 @@ type Review = {
   createdAt: string;
 };
 
-type DashboardTab = "available" | "my_rides" | "earnings" | "stats" | "history" | "profile";
+type DashboardTab = "available" | "active_rides" | "in_progress" | "finished" | "earnings" | "stats" | "profile";
 
 const TABS: { key: DashboardTab; label: string }[] = [
-  { key: "available", label: "Available" },
-  { key: "my_rides", label: "My Rides" },
-  { key: "earnings", label: "Earnings" },
-  { key: "stats", label: "Stats" },
-  { key: "history", label: "History" },
-  { key: "profile", label: "Profile" },
+  { key: "available",    label: "Available" },
+  { key: "active_rides", label: "Active Rides" },
+  { key: "in_progress",  label: "In Progress" },
+  { key: "finished",     label: "Finished" },
+  { key: "earnings",     label: "Earnings" },
+  { key: "stats",        label: "Stats" },
+  { key: "profile",      label: "Profile" },
 ];
 
 const fmt$ = (n: number) => `$${n.toFixed(2)}`;
@@ -623,9 +624,8 @@ function TabAvailable({ authHeader, onRideAccepted }: { authHeader: string; onRi
   );
 }
 
-const ACTIVE_TRIP_STATUSES = ["confirmed", "on_way", "on_location", "in_progress", "assigned"];
-
-function TabMyRides({ driverId, authHeader, refreshKey }: { driverId: number; authHeader: string; refreshKey?: number }) {
+// Active Rides: bookings assigned to this driver that haven't started yet (pending / confirmed)
+function TabActiveRides({ driverId, authHeader, refreshKey }: { driverId: number; authHeader: string; refreshKey?: number }) {
   const [rides, setRides] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -633,30 +633,52 @@ function TabMyRides({ driverId, authHeader, refreshKey }: { driverId: number; au
     setLoading(true);
     fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
-      .then(data => setRides(Array.isArray(data) ? data.filter(b => ACTIVE_TRIP_STATUSES.includes(b.status)) : []))
+      .then(data => setRides(Array.isArray(data) ? data.filter(b => ["pending", "confirmed", "assigned"].includes(b.status)) : []))
       .catch(() => setRides([]))
       .finally(() => setLoading(false));
   }, [driverId, authHeader]);
 
-  useEffect(() => {
-    loadRides();
-  }, [loadRides, refreshKey]);
+  useEffect(() => { loadRides(); }, [loadRides, refreshKey]);
 
   if (loading) return <div className="space-y-3">{[1,2].map(i => <div key={i} className="h-24 bg-card/50 animate-pulse border border-border" />)}</div>;
 
   return rides.length > 0 ? (
     <div className="space-y-3">
       {rides.map(b => (
-        <BookingCard
-          key={b.id}
-          booking={b}
-          authHeader={authHeader}
-          onRefresh={loadRides}
-        />
+        <BookingCard key={b.id} booking={b} authHeader={authHeader} onRefresh={loadRides} />
       ))}
     </div>
   ) : (
-    <div className="bg-card border border-border p-8 text-center text-muted-foreground text-sm">No active rides at this time.</div>
+    <div className="bg-card border border-border p-8 text-center text-muted-foreground text-sm">No upcoming rides at this time.</div>
+  );
+}
+
+// In Progress: bookings where the driver has started the trip sequence
+function TabInProgress({ driverId, authHeader, refreshKey }: { driverId: number; authHeader: string; refreshKey?: number }) {
+  const [rides, setRides] = useState<BookingRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadRides = useCallback(() => {
+    setLoading(true);
+    fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
+      .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
+      .then(data => setRides(Array.isArray(data) ? data.filter(b => ["on_way", "on_location", "in_progress"].includes(b.status)) : []))
+      .catch(() => setRides([]))
+      .finally(() => setLoading(false));
+  }, [driverId, authHeader]);
+
+  useEffect(() => { loadRides(); }, [loadRides, refreshKey]);
+
+  if (loading) return <div className="space-y-3">{[1,2].map(i => <div key={i} className="h-24 bg-card/50 animate-pulse border border-border" />)}</div>;
+
+  return rides.length > 0 ? (
+    <div className="space-y-3">
+      {rides.map(b => (
+        <BookingCard key={b.id} booking={b} authHeader={authHeader} onRefresh={loadRides} />
+      ))}
+    </div>
+  ) : (
+    <div className="bg-card border border-border p-8 text-center text-muted-foreground text-sm">No trips currently in progress.</div>
   );
 }
 
@@ -753,27 +775,21 @@ function TabStats({ driverId, authHeader, rating, totalRides }: { driverId: numb
   );
 }
 
-function TabHistory({ driverId, authHeader }: { driverId: number; authHeader: string }) {
+function TabFinished({ driverId, authHeader }: { driverId: number; authHeader: string }) {
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
-      .then(data => setBookings(Array.isArray(data) ? data : []))
+      .then(data => setBookings(Array.isArray(data) ? data.filter(b => b.status === "completed") : []))
       .catch(() => setBookings([]))
       .finally(() => setLoading(false));
   }, [driverId, authHeader]);
 
-  const past = bookings.filter(b => ["completed", "cancelled"].includes(b.status));
-  const STATUS_COLORS: Record<string, string> = {
-    completed: "text-green-400 bg-green-400/10 border-green-400/20",
-    cancelled: "text-gray-400 bg-gray-400/10 border-gray-400/20",
-  };
-
   if (loading) return <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
 
-  return past.length > 0 ? (
+  return bookings.length > 0 ? (
     <div className="bg-card border border-border rounded-none overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
@@ -782,24 +798,18 @@ function TabHistory({ driverId, authHeader }: { driverId: number; authHeader: st
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Date</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Passenger</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Route</th>
-              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Status</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Your Earnings</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {past.map(b => (
+            {bookings.map(b => (
               <tr key={b.id} className="hover:bg-background/50 transition-colors">
                 <td className="px-5 py-3">{format(new Date(b.pickupAt), "MMM d, HH:mm")}</td>
                 <td className="px-5 py-3">{b.passengerName}</td>
                 <td className="px-5 py-3 max-w-[180px] truncate text-muted-foreground" title={`${b.pickupAddress} to ${b.dropoffAddress}`}>
                   {b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}
                 </td>
-                <td className="px-5 py-3">
-                  <span className={`px-2 py-1 border text-xs capitalize ${STATUS_COLORS[b.status] ?? "text-muted-foreground"}`}>{b.status}</span>
-                </td>
-                <td className="px-5 py-3 text-right font-medium text-primary">
-                  {b.status === "completed" ? fmt$(b.driverEarnings ?? 0) : <span className="text-muted-foreground">—</span>}
-                </td>
+                <td className="px-5 py-3 text-right font-medium text-primary">{fmt$(b.driverEarnings ?? 0)}</td>
               </tr>
             ))}
           </tbody>
@@ -807,7 +817,7 @@ function TabHistory({ driverId, authHeader }: { driverId: number; authHeader: st
       </div>
     </div>
   ) : (
-    <div className="bg-card border border-border p-12 text-center text-muted-foreground">No completed trips yet.</div>
+    <div className="bg-card border border-border p-12 text-center text-muted-foreground">No finished trips yet.</div>
   );
 }
 
@@ -958,7 +968,7 @@ export default function DriverDashboard() {
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
       .then(data => {
         const upcoming = Array.isArray(data)
-          ? data.filter(b => ["confirmed", "assigned", "in_progress"].includes(b.status)).length
+          ? data.filter(b => ["pending", "confirmed", "assigned", "on_way", "on_location", "in_progress"].includes(b.status)).length
           : 0;
         setUpcomingCount(upcoming);
       })
@@ -1078,14 +1088,15 @@ export default function DriverDashboard() {
               onRideAccepted={() => {
                 setMyRidesRefreshKey(k => k + 1);
                 setUpcomingCount(c => (c ?? 0) + 1);
-                setActiveTab("my_rides");
+                setActiveTab("active_rides");
               }}
             />
           )}
-          {activeTab === "my_rides" && <TabMyRides driverId={driverRecord.id} authHeader={authHeader} refreshKey={myRidesRefreshKey} />}
+          {activeTab === "active_rides" && <TabActiveRides driverId={driverRecord.id} authHeader={authHeader} refreshKey={myRidesRefreshKey} />}
+          {activeTab === "in_progress" && <TabInProgress driverId={driverRecord.id} authHeader={authHeader} refreshKey={myRidesRefreshKey} />}
+          {activeTab === "finished" && <TabFinished driverId={driverRecord.id} authHeader={authHeader} />}
           {activeTab === "earnings" && <TabEarnings driverId={driverRecord.id} authHeader={authHeader} />}
           {activeTab === "stats" && <TabStats driverId={driverRecord.id} authHeader={authHeader} rating={driverRecord.rating ?? null} totalRides={driverRecord.totalRides ?? 0} />}
-          {activeTab === "history" && <TabHistory driverId={driverRecord.id} authHeader={authHeader} />}
           {activeTab === "profile" && <TabProfile driverId={driverRecord.id} authHeader={authHeader} />}
         </>
       )}

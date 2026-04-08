@@ -53,14 +53,14 @@ const STATUS_MARKER_COLOR: Record<string, string> = {
   available: "#22c55e",
   on_break: "#f59e0b",
   unavailable: "#6b7280",
-  in_trip: "#3b82f6",
+  on_duty: "#3b82f6",
 };
 
 const STATUS_LABEL: Record<string, string> = {
   available: "Available",
   on_break: "On Break",
   unavailable: "Unavailable",
-  in_trip: "In Trip",
+  on_duty: "On Duty",
 };
 
 const SOUTH_FLORIDA_CENTER = { lat: 25.9, lng: -80.3 };
@@ -163,7 +163,7 @@ export default function AdminDispatch() {
       currentIds.add(driver.id);
 
       const inTrip = board.activeTrips.some(t => t.driverId === driver.id);
-      const effectiveStatus = inTrip ? "in_trip" : driver.status;
+      const effectiveStatus = inTrip ? "on_duty" : driver.status;
       const color = STATUS_MARKER_COLOR[effectiveStatus] ?? STATUS_MARKER_COLOR["unavailable"]!;
       const iconUrl = createSvgMarker(color);
 
@@ -335,7 +335,7 @@ export default function AdminDispatch() {
               )}
               {board?.availableDrivers.map(driver => {
                 const inTrip = board.activeTrips.some(t => t.driverId === driver.id);
-                const effectiveStatus = inTrip ? "in_trip" : driver.status;
+                const effectiveStatus = inTrip ? "on_duty" : driver.status;
                 const color = STATUS_MARKER_COLOR[effectiveStatus] ?? "#6b7280";
                 const hasLocation = !!(driver.latitude && driver.longitude);
 
