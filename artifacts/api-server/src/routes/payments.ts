@@ -197,28 +197,47 @@ router.post("/admin/payments/check/:bookingId", requireAdmin, async (req, res): 
   const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
   if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
 
+  if (booking.status !== "awaiting_payment") {
+    res.json({ confirmed: false, message: `Booking is already in '${booking.status}' status.` });
+    return;
+  }
+
   try {
     const stripe = getStripe();
+
+    // 1. Check PaymentIntents with bookingId metadata (card payment flow)
     const intents = await stripe.paymentIntents.search({
       query: `metadata["bookingId"]:"${bId}"`,
       limit: 5,
     });
-
-    const succeeded = intents.data.find(pi => pi.status === "succeeded");
-    if (succeeded) {
-      if (booking.status === "awaiting_payment") {
-        await db.update(bookings)
-          .set({ status: "pending", updatedAt: new Date() })
-          .where(eq(bookings.id, bId));
-        firePostPaymentEmails(bId).catch(() => {});
-        res.json({ confirmed: true, paymentIntentId: succeeded.id, message: "Payment confirmed — booking moved to pending." });
-      } else {
-        res.json({ confirmed: false, message: `Booking is already in '${booking.status}' status.` });
-      }
-    } else {
-      const statuses = intents.data.map(pi => pi.status).join(", ") || "none found";
-      res.json({ confirmed: false, message: `No succeeded payment intent found. Found: ${statuses}` });
+    const succeededIntent = intents.data.find(pi => pi.status === "succeeded");
+    if (succeededIntent) {
+      await db.update(bookings)
+        .set({ status: "pending", updatedAt: new Date() })
+        .where(eq(bookings.id, bId));
+      firePostPaymentEmails(bId).catch(() => {});
+      res.json({ confirmed: true, source: "payment_intent", paymentIntentId: succeededIntent.id, message: "Payment confirmed — booking moved to pending." });
+      return;
     }
+
+    // 2. Check Stripe invoices with bookingId metadata (send-invoice flow)
+    const invoiceSearch = await stripe.invoices.search({
+      query: `metadata["bookingId"]:"${bId}"`,
+      limit: 5,
+    });
+    const paidInvoice = invoiceSearch.data.find(inv => inv.status === "paid");
+    if (paidInvoice) {
+      await db.update(bookings)
+        .set({ status: "pending", updatedAt: new Date() })
+        .where(eq(bookings.id, bId));
+      firePostPaymentEmails(bId).catch(() => {});
+      res.json({ confirmed: true, source: "invoice", invoiceId: paidInvoice.id, message: "Invoice payment confirmed — booking moved to pending." });
+      return;
+    }
+
+    const intentStatuses = intents.data.map(pi => pi.status).join(", ") || "none";
+    const invoiceStatuses = invoiceSearch.data.map(inv => inv.status).join(", ") || "none";
+    res.json({ confirmed: false, message: `No successful payment found. PaymentIntents: ${intentStatuses}. Invoices: ${invoiceStatuses}.` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -306,6 +325,7 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
         "payment_intent.payment_failed",
         "charge.dispute.created",
         "charge.refunded",
+        "invoice.paid",
       ],
       description: "Royal Midnight payment confirmation webhook",
     });
@@ -471,6 +491,24 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
 
     // Signature verification is mandatory — no fallback to unsigned processing
     event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+
+    // Invoice paid — fired when a Stripe invoice (send_invoice flow) is paid.
+    // The booking ID lives in the invoice metadata since the PaymentIntent
+    // created by invoices does NOT inherit our custom metadata.
+    if (event.type === "invoice.paid") {
+      const invoice = event.data.object as Stripe.Invoice;
+      const bookingId = parseInt(invoice.metadata?.bookingId || "0");
+      if (bookingId) {
+        const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
+        if (current && current.status === "awaiting_payment") {
+          await db.update(bookings)
+            .set({ status: "pending", updatedAt: new Date() })
+            .where(eq(bookings.id, bookingId));
+          console.log(`[payments] Invoice paid → Booking #${bookingId} → pending`);
+          firePostPaymentEmails(bookingId).catch(err => console.error("[payments] invoice.paid email error:", err));
+        }
+      }
+    }
 
     if (event.type === "payment_intent.succeeded") {
       const intent = event.data.object as Stripe.PaymentIntent;

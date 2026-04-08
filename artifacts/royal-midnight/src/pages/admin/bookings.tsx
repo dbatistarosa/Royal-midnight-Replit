@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -151,6 +151,7 @@ export default function AdminBookings() {
   const [chargePublishableKey, setChargePublishableKey] = useState<string | null>(null);
   const [chargeLoading, setChargeLoading] = useState(false);
   const [sendingInvoiceId, setSendingInvoiceId] = useState<number | null>(null);
+  const [syncingPaymentId, setSyncingPaymentId] = useState<number | null>(null);
 
   // Cancellation state
   type CancelPreview = {
@@ -320,6 +321,27 @@ export default function AdminBookings() {
       refetch();
     } catch (err: unknown) {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Payment confirmed but status update failed.", variant: "destructive" });
+    }
+  };
+
+  const handleSyncPayment = async (b: BookingRow) => {
+    setSyncingPaymentId(b.id);
+    try {
+      const res = await fetch(`${API_BASE}/admin/payments/check/${b.id}`, {
+        method: "POST",
+        headers: { Authorization: authHdr },
+      });
+      const data = await res.json() as { confirmed?: boolean; message?: string };
+      if (data.confirmed) {
+        toast({ title: "Payment confirmed!", description: data.message ?? "Booking moved to pending." });
+        void loadBookings();
+      } else {
+        toast({ title: "No payment found", description: data.message ?? "Could not verify payment in Stripe.", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Could not reach the server.", variant: "destructive" });
+    } finally {
+      setSyncingPaymentId(null);
     }
   };
 
@@ -504,6 +526,15 @@ export default function AdminBookings() {
                           >
                             {sendingInvoiceId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                             Send Invoice
+                          </button>
+                          <button
+                            onClick={() => void handleSyncPayment(b)}
+                            disabled={syncingPaymentId === b.id}
+                            title="Check Stripe for a completed payment or paid invoice and update status"
+                            className="flex items-center gap-1 text-xs border border-green-500/30 text-green-500 hover:bg-green-500/10 px-2.5 py-1.5 transition-colors disabled:opacity-50"
+                          >
+                            {syncingPaymentId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                            Sync Payment
                           </button>
                         </div>
                       ) : assigningId === b.id ? (

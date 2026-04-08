@@ -334,6 +334,34 @@ export async function sendDriverArrived(b: BookingEmailData) {
   await send(b.passengerEmail, `Your Driver Has Arrived — Royal Midnight ${bookingRef}`, html, "driver_arrived_passenger");
 }
 
+export async function sendAccountInvitation({
+  passengerName,
+  passengerEmail,
+  bookingId,
+}: {
+  passengerName: string;
+  passengerEmail: string;
+  bookingId: number;
+}) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const bookingRef = `RM-${String(bookingId).padStart(4, "0")}`;
+  const signupUrl = `${appUrl}/sign-up?email=${encodeURIComponent(passengerEmail)}`;
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Your Booking Is Ready</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">
+  Hi ${passengerName.split(" ")[0]}, a Royal Midnight reservation (${bookingRef}) has been created for you.
+  Create your account to view your bookings, track your driver, and manage future reservations.
+</p>
+<p style="margin-top:24px">
+  <a href="${signupUrl}" style="background:#c9a84c;color:#050505;padding:12px 28px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">CREATE MY ACCOUNT</a>
+</p>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  Your email address (${passengerEmail}) is already linked to your booking — just create a password to get started.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(passengerEmail, `Your Royal Midnight Reservation is Ready — Create Your Account`, html, "account_invitation");
+}
+
 export async function sendStatusChangedAdmin(bookingId: number, oldStatus: string, newStatus: string, passengerName: string) {
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 20px">Booking #${bookingId} Status Changed</h2>

@@ -69,19 +69,31 @@ async function ensureStripeWebhook(): Promise<void> {
     const existing = await stripe.webhookEndpoints.list({ limit: 20 });
     const found = existing.data.find(w => w.url === expectedUrl && w.status === "enabled");
 
+    const REQUIRED_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
+      "payment_intent.succeeded",
+      "payment_intent.payment_failed",
+      "charge.dispute.created",
+      "charge.refunded",
+      "invoice.paid",
+    ];
+
     if (found) {
-      logger.info({ webhookId: found.id, url: expectedUrl }, "Stripe webhook already registered");
+      const currentEvents = found.enabled_events ?? [];
+      const missingEvents = REQUIRED_EVENTS.filter(e => !currentEvents.includes(e));
+      if (missingEvents.length > 0) {
+        await stripe.webhookEndpoints.update(found.id, {
+          enabled_events: REQUIRED_EVENTS,
+        });
+        logger.info({ webhookId: found.id, added: missingEvents }, "Stripe webhook updated with new events");
+      } else {
+        logger.info({ webhookId: found.id, url: expectedUrl }, "Stripe webhook already registered");
+      }
       return;
     }
 
     const webhook = await stripe.webhookEndpoints.create({
       url: expectedUrl,
-      enabled_events: [
-        "payment_intent.succeeded",
-        "payment_intent.payment_failed",
-        "charge.dispute.created",
-        "charge.refunded",
-      ],
+      enabled_events: REQUIRED_EVENTS,
       description: "Royal Midnight payment confirmation webhook",
     });
 

@@ -14,6 +14,7 @@ import {
   sendStatusChangedAdmin,
   sendDriverOnWay,
   sendDriverArrived,
+  sendAccountInvitation,
 } from "../lib/mailer.js";
 import {
   ListBookingsQueryParams,
@@ -257,6 +258,39 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     .returning();
 
   res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
+
+  // ── Account linking (non-blocking, admin-created bookings) ───────────────────
+  // When an admin creates a booking manually, link it to an existing user account
+  // (by email) or send the passenger an invitation to create one.
+  if (caller?.role === "admin" && !parsed.data.userId) {
+    (async () => {
+      try {
+        const [existingUser] = await db
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(eq(usersTable.email, booking.passengerEmail));
+
+        if (existingUser) {
+          // Attach booking to their existing account
+          await db
+            .update(bookingsTable)
+            .set({ userId: existingUser.id })
+            .where(eq(bookingsTable.id, booking.id));
+          console.log(`[bookings] Linked booking #${booking.id} to existing user #${existingUser.id} (${booking.passengerEmail})`);
+        } else {
+          // New passenger — send invitation to create an account
+          await sendAccountInvitation({
+            passengerName: booking.passengerName,
+            passengerEmail: booking.passengerEmail,
+            bookingId: booking.id,
+          });
+          console.log(`[bookings] Sent account invitation to new passenger: ${booking.passengerEmail}`);
+        }
+      } catch (err) {
+        console.error("[bookings] account-linking error:", err);
+      }
+    })();
+  }
 
   // If a promo code was used, increment its usedCount (non-blocking)
   if (booking.promoCode) {
