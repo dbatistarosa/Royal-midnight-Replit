@@ -134,6 +134,13 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
   try {
     const stripe = getStripe();
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    // Enforce PI-to-booking binding: metadata.bookingId must match the requested bookingId
+    if (intent.metadata.bookingId !== String(bId)) {
+      res.status(403).json({ error: "PaymentIntent does not belong to this booking" });
+      return;
+    }
+
     if (intent.status === "succeeded") {
       const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bId));
       if (current && current.status === "awaiting_payment") {
@@ -255,12 +262,20 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
       description: "Royal Midnight payment confirmation webhook",
     });
 
+    // Persist signing secret to DB so webhook handler works immediately (even before env var is set)
+    if (webhook.secret) {
+      await db
+        .insert(settingsTable)
+        .values({ key: "stripe_webhook_secret", value: webhook.secret })
+        .onConflictDoUpdate({ target: settingsTable.key, set: { value: webhook.secret } });
+    }
+
     res.json({
       alreadyExists: false,
       webhookId: webhook.id,
       url: webhook.url,
       signingSecret: webhook.secret,
-      message: "Webhook registered successfully. Copy the signing secret below and set it as STRIPE_WEBHOOK_SECRET environment variable.",
+      message: "Webhook registered successfully. The signing secret has been saved and is active. Optionally set it as STRIPE_WEBHOOK_SECRET in your environment for extra security.",
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
