@@ -550,8 +550,13 @@ router.post("/bookings/:id/trip/on-way", requireAuth, async (req, res): Promise<
   const [updated] = await db
     .update(bookingsTable)
     .set({ status: "on_way", updatedAt: new Date() })
-    .where(eq(bookingsTable.id, id))
+    .where(and(eq(bookingsTable.id, id), eq(bookingsTable.status, "confirmed")))
     .returning();
+
+  if (!updated) {
+    res.status(409).json({ error: "Booking status has already changed — please refresh and try again." });
+    return;
+  }
 
   res.json(parseBooking(updated));
 
@@ -582,8 +587,13 @@ router.post("/bookings/:id/trip/on-location", requireAuth, async (req, res): Pro
   const [updated] = await db
     .update(bookingsTable)
     .set({ status: "on_location", updatedAt: new Date() })
-    .where(eq(bookingsTable.id, id))
+    .where(and(eq(bookingsTable.id, id), eq(bookingsTable.status, "on_way")))
     .returning();
+
+  if (!updated) {
+    res.status(409).json({ error: "Booking status has already changed — please refresh and try again." });
+    return;
+  }
 
   res.json(parseBooking(updated));
 
@@ -614,8 +624,13 @@ router.post("/bookings/:id/trip/start", requireAuth, async (req, res): Promise<v
   const [updated] = await db
     .update(bookingsTable)
     .set({ status: "in_progress", updatedAt: new Date() })
-    .where(eq(bookingsTable.id, id))
+    .where(and(eq(bookingsTable.id, id), eq(bookingsTable.status, "on_location")))
     .returning();
+
+  if (!updated) {
+    res.status(409).json({ error: "Booking status has already changed — please refresh and try again." });
+    return;
+  }
 
   res.json(parseBooking(updated));
 });
@@ -638,8 +653,13 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
   const [updated] = await db
     .update(bookingsTable)
     .set({ status: "completed", updatedAt: new Date() })
-    .where(eq(bookingsTable.id, id))
+    .where(and(eq(bookingsTable.id, id), eq(bookingsTable.status, "in_progress")))
     .returning();
+
+  if (!updated) {
+    res.status(409).json({ error: "Booking status has already changed — please refresh and try again." });
+    return;
+  }
 
   res.json(parseBooking(updated));
 });

@@ -345,6 +345,13 @@ function TripActionButton({
         toast({ title: "Error", description: err.error ?? "Could not update trip status.", variant: "destructive" });
         return;
       }
+      const STATUS_SUCCESS: Record<string, string> = {
+        "on-way":      "Status updated — passenger notified you're on the way.",
+        "on-location": "Status updated — passenger notified you've arrived.",
+        "start":       "Trip started. Safe driving!",
+        "complete":    "Trip completed. Great job!",
+      };
+      toast({ title: "Trip updated", description: STATUS_SUCCESS[path] ?? "Trip status updated." });
       onRefresh();
     } catch {
       toast({ title: "Network error", description: "Could not reach the server. Please try again.", variant: "destructive" });
