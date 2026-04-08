@@ -307,12 +307,19 @@ router.get("/bookings/:id/track", async (req, res): Promise<void> => {
     return;
   }
 
-  // Public view: status, identity, routing, and fare for receipt display
+  // Public view: status, identity, routing, and fare for receipt display.
+  // passengerEmail is masked to first char + domain (e.g. a***@example.com) to
+  // avoid exposing full PII on an unauthenticated endpoint while still
+  // allowing the confirmation page to show where the receipt was sent.
+  const maskedEmail = booking.passengerEmail
+    ? booking.passengerEmail.replace(/^(.).+(@.+)$/, "$1***$2")
+    : null;
+
   res.json({
     id: booking.id,
     status: booking.status,
     passengerName: booking.passengerName,
-    passengerEmail: booking.passengerEmail,
+    passengerEmail: maskedEmail,
     pickupAddress: booking.pickupAddress,
     dropoffAddress: booking.dropoffAddress,
     pickupAt: booking.pickupAt.toISOString(),
