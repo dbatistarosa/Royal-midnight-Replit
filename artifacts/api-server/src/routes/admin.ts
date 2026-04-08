@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { sql, desc, eq } from "drizzle-orm";
 import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
+import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
+import { Resend } from "resend";
 import {
   GetAdminStatsResponse,
   GetRecentBookingsQueryParams,
@@ -208,6 +210,38 @@ router.get("/admin/dispatch", requireAdmin, async (_req, res): Promise<void> => 
       pendingBookings: pendingRaw.map(parseBooking),
     })
   );
+});
+
+// GET /admin/mailer-status — check which email provider is active
+router.get("/admin/mailer-status", requireAdmin, (_req, res) => {
+  res.json(getMailerStatus());
+});
+
+// POST /admin/test-email — send a test email to verify Resend is working
+router.post("/admin/test-email", requireAdmin, async (req, res): Promise<void> => {
+  const to = (req.body as { to?: string }).to ?? ADMIN_EMAIL;
+  const status = getMailerStatus();
+  if (!status.configured) {
+    res.status(503).json({ error: "No email provider configured. Set RESEND_API_KEY." });
+    return;
+  }
+  try {
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const fromAddr = process.env.SMTP_FROM ?? "Royal Midnight <noreply@royalmidnight.com>";
+    const result = await resend.emails.send({
+      from: fromAddr,
+      to: [to],
+      subject: "Royal Midnight — Email Test",
+      html: `<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#e8e0d0;padding:32px">
+        <h2 style="color:#c9a84c">Email delivery is working!</h2>
+        <p>Your Resend integration is correctly configured for <strong>Royal Midnight</strong>.</p>
+        <p style="color:#888;font-size:12px">Sent from: ${fromAddr}</p>
+      </body></html>`,
+    });
+    res.json({ ok: true, provider: "resend", id: result.data?.id });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 export default router;
