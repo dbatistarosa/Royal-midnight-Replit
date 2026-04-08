@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { sql, desc, eq } from "drizzle-orm";
 import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable } from "@workspace/db";
+import { requireAdmin } from "../middleware/auth.js";
 import {
   GetAdminStatsResponse,
   GetRecentBookingsQueryParams,
@@ -154,7 +155,7 @@ router.get("/admin/revenue", async (_req, res): Promise<void> => {
   }));
 });
 
-router.get("/admin/email-logs", async (req, res): Promise<void> => {
+router.get("/admin/email-logs", requireAdmin, async (req, res): Promise<void> => {
   const limit = Math.min(parseInt((req.query["limit"] as string) ?? "50", 10), 200);
   const logs = await db
     .select()

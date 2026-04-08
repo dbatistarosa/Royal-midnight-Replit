@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { eq } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
+import Stripe from "stripe";
 import app from "./app";
 import { logger } from "./lib/logger";
 
@@ -60,13 +61,49 @@ async function seedDatabase(): Promise<void> {
   }
 }
 
-seedDatabase().then(() => {
-  app.listen(port, (err) => {
-    if (err) {
-      logger.error({ err }, "Error listening on port");
-      process.exit(1);
+async function ensureStripeWebhook(): Promise<void> {
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  const appUrl = process.env.APP_URL;
+  if (!stripeKey || !appUrl) {
+    if (!stripeKey) logger.warn("STRIPE_SECRET_KEY not set — skipping webhook check");
+    if (!appUrl) logger.warn("APP_URL not set — skipping webhook check");
+    return;
+  }
+
+  const expectedUrl = `${appUrl}/api/webhook/stripe`;
+
+  try {
+    const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" as any });
+    const existing = await stripe.webhookEndpoints.list({ limit: 20 });
+    const found = existing.data.find(w => w.url === expectedUrl && w.status === "enabled");
+
+    if (found) {
+      logger.info({ webhookId: found.id, url: expectedUrl }, "Stripe webhook already registered");
+      return;
     }
 
-    logger.info({ port }, "Server listening");
+    const webhook = await stripe.webhookEndpoints.create({
+      url: expectedUrl,
+      enabled_events: ["payment_intent.succeeded", "invoice.payment_succeeded"],
+      description: "Royal Midnight payment confirmation webhook",
+    });
+
+    logger.info({ webhookId: webhook.id, url: expectedUrl }, "Stripe webhook auto-registered — set STRIPE_WEBHOOK_SECRET in env vars");
+    logger.info(`Signing secret (set as STRIPE_WEBHOOK_SECRET): ${webhook.secret}`);
+  } catch (err) {
+    logger.error({ err }, "Stripe webhook ensure failed (non-fatal)");
+  }
+}
+
+seedDatabase()
+  .then(() => ensureStripeWebhook())
+  .then(() => {
+    app.listen(port, (err) => {
+      if (err) {
+        logger.error({ err }, "Error listening on port");
+        process.exit(1);
+      }
+
+      logger.info({ port }, "Server listening");
+    });
   });
-});

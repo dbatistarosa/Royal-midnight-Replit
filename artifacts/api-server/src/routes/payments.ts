@@ -9,6 +9,7 @@ import {
   sendNewBookingAvailableToDrivers,
   getMailerStatus,
 } from "../lib/mailer.js";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
@@ -140,7 +141,7 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
 
 // ─── Admin: manual payment confirmation for stuck awaiting_payment bookings ──
 
-router.post("/admin/payments/check/:bookingId", async (req, res): Promise<void> => {
+router.post("/admin/payments/check/:bookingId", requireAdmin, async (req, res): Promise<void> => {
   const bId = parseInt(req.params["bookingId"] ?? "", 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
@@ -176,7 +177,7 @@ router.post("/admin/payments/check/:bookingId", async (req, res): Promise<void> 
 
 // ─── Admin: Stripe webhook management ───────────────────────────────────────
 
-router.get("/admin/stripe/webhook-status", async (_req, res): Promise<void> => {
+router.get("/admin/stripe/webhook-status", requireAdmin, async (_req, res): Promise<void> => {
   const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
   const webhookSecretSet = !!process.env.STRIPE_WEBHOOK_SECRET;
   const mailerStatus = getMailerStatus();
@@ -216,7 +217,7 @@ router.get("/admin/stripe/webhook-status", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/admin/stripe/register-webhook", async (_req, res): Promise<void> => {
+router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): Promise<void> => {
   if (!process.env.STRIPE_SECRET_KEY) {
     res.status(503).json({ error: "STRIPE_SECRET_KEY is not configured" });
     return;

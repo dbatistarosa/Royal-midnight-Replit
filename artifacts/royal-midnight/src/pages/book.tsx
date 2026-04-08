@@ -113,6 +113,29 @@ export default function Book() {
 
   const searchParams = new URLSearchParams(window.location.search);
 
+  // On mount: handle 3DS redirect return (payment_intent + redirect_status in URL)
+  useEffect(() => {
+    const pi = searchParams.get("payment_intent");
+    const status = searchParams.get("redirect_status");
+    if (!pi || status !== "succeeded") return;
+
+    // Recover bookingId from sessionStorage
+    const savedId = sessionStorage.getItem("rm_pending_booking_id");
+    const bookingId = savedId ? parseInt(savedId, 10) : 0;
+    sessionStorage.removeItem("rm_pending_booking_id");
+
+    if (bookingId) {
+      // Confirm server-side and redirect to confirmation page
+      fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentIntentId: pi }),
+      }).catch(() => {});
+      setLocation(`/booking-confirmation/${bookingId}`);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const form = useForm<BookingFormValues>({
     resolver: zodResolver(bookingSchema),
     defaultValues: {
@@ -330,6 +353,8 @@ export default function Book() {
       const booking = await bookingRes.json() as { id: number };
       const bookingId = booking.id;
       setPendingBookingId(bookingId);
+      // Persist for 3DS redirect recovery (page reload wipes React state)
+      sessionStorage.setItem("rm_pending_booking_id", String(bookingId));
 
       // Step 3: Get Stripe publishable key
       const configRes = await fetch(`${API_BASE}/payments/config`);
@@ -379,6 +404,9 @@ export default function Book() {
   const handlePaymentSuccess = async (paymentIntentId: string) => {
     const bookingId = pendingBookingId;
     if (!bookingId) return;
+
+    // Clean up sessionStorage — payment completed without redirect
+    sessionStorage.removeItem("rm_pending_booking_id");
 
     // Confirm the payment server-side immediately — do not rely solely on webhook
     try {
