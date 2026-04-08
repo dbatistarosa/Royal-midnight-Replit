@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, RefreshCw } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, RefreshCw, Wallet } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
@@ -16,6 +16,7 @@ const adminNavItems = [
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
+  { label: "Payouts", href: "/admin/payouts", icon: Wallet },
   { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 

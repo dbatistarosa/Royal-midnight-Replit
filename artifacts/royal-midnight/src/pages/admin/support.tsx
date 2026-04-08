@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, ChevronDown, ChevronUp, Loader2, Send, X } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, ChevronDown, ChevronUp, Loader2, Send, X, Wallet } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
@@ -17,6 +17,7 @@ const adminNavItems = [
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
+  { label: "Payouts", href: "/admin/payouts", icon: Wallet },
   { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 

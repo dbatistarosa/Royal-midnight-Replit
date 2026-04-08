@@ -132,6 +132,80 @@ async function retroactiveEmailLink(): Promise<void> {
   }
 }
 
+// Weekly payout scheduler — fires every Monday at ~8am server time
+async function runWeeklyPayoutIfNeeded(): Promise<void> {
+  try {
+    const now = new Date();
+    if (now.getDay() !== 1) return; // Only Mondays
+    if (now.getHours() < 8 || now.getHours() > 10) return; // 8–10am window
+
+    // Check if we already sent the weekly report today
+    const { emailLogsTable } = await import("@workspace/db");
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const { gte, and: andOp, eq: eqOp } = await import("drizzle-orm");
+    const recent = await db.select({ id: emailLogsTable.id })
+      .from(emailLogsTable)
+      .where(andOp(eqOp(emailLogsTable.type, "weekly_payout_admin_report"), gte(emailLogsTable.sentAt, todayStart)))
+      .limit(1);
+
+    if (recent.length > 0) {
+      logger.info("Weekly payout already sent today — skipping");
+      return;
+    }
+
+    logger.info("Sending scheduled weekly payout emails...");
+    const { driversTable, bookingsTable: bookTbl, settingsTable: settTbl } = await import("@workspace/db");
+    const { sql: sqlFn } = await import("drizzle-orm");
+
+    const [commRow] = await db.select({ value: settTbl.value }).from(settTbl).where(eqOp(settTbl.key, "driver_commission_pct"));
+    const rawPct = parseFloat(commRow?.value ?? "0.80");
+    const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - 7); // Previous week
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(now); weekEnd.setHours(0, 0, 0, 0);
+    const weekLabel = weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " – " + new Date(weekEnd.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+    const drivers = await db.select().from(driversTable).where(sqlFn`approval_status = 'approved'`).orderBy(driversTable.name);
+    const bookings = await db.select({ driverId: bookTbl.driverId, priceQuoted: bookTbl.priceQuoted })
+      .from(bookTbl)
+      .where(sqlFn`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
+
+    const earningsByDriver = new Map<number, { rides: number; gross: number }>();
+    for (const b of bookings) {
+      if (!b.driverId) continue;
+      const e = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0 };
+      earningsByDriver.set(b.driverId, { rides: e.rides + 1, gross: e.gross + parseFloat(b.priceQuoted ?? "0") });
+    }
+
+    const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("./lib/mailer.js");
+    const payouts = drivers.map(d => {
+      const e = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0 };
+      const driverNet = Math.round(e.gross * commissionPct * 100) / 100;
+      return {
+        driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
+        rides: e.rides, grossEarnings: Math.round(e.gross * 100) / 100,
+        commissionPct, driverNet, weekLabel,
+        bankName: d.payoutBankName ?? null, routingNumber: d.payoutRoutingNumber ?? null,
+        accountNumber: d.payoutAccountNumber ?? null, legalName: d.payoutLegalName ?? null,
+      };
+    });
+
+    for (const p of payouts) {
+      try { await sendWeeklyDriverPayout(p); } catch {}
+    }
+    await sendWeeklyPayoutAdminReport({
+      weekLabel, payouts, commissionPct,
+      totalGross: Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) / 100,
+      totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
+    });
+    logger.info({ driverCount: drivers.length, weekLabel }, "Weekly payout emails sent");
+  } catch (err) {
+    logger.error({ err }, "Weekly payout scheduler error (non-fatal)");
+  }
+}
+
 seedDatabase()
   .then(() => retroactiveEmailLink())
   .then(() => ensureStripeWebhook())
@@ -143,5 +217,9 @@ seedDatabase()
       }
 
       logger.info({ port }, "Server listening");
+
+      // Run payout check immediately on startup, then every hour
+      void runWeeklyPayoutIfNeeded();
+      setInterval(() => void runWeeklyPayoutIfNeeded(), 60 * 60 * 1000);
     });
   });

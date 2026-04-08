@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -31,6 +31,7 @@ const adminNavItems = [
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
+  { label: "Payouts", href: "/admin/payouts", icon: Wallet },
   { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 
@@ -346,7 +347,7 @@ export default function AdminBookings() {
       const data = await res.json() as { confirmed?: boolean; message?: string };
       if (data.confirmed) {
         toast({ title: "Payment confirmed!", description: data.message ?? "Booking moved to pending." });
-        void loadBookings();
+        void refetch();
       } else {
         toast({ title: "No payment found", description: data.message ?? "Could not verify payment in Stripe.", variant: "destructive" });
       }

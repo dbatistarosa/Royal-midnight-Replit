@@ -373,3 +373,117 @@ export async function sendStatusChangedAdmin(bookingId: number, oldStatus: strin
 </table>`);
   await send(ADMIN_EMAIL, `Booking #${bookingId} → ${newStatus} (${passengerName})`, html, "status_changed_admin");
 }
+
+export async function sendWeeklyDriverPayout(params: {
+  driverName: string;
+  driverEmail: string;
+  weekLabel: string;
+  rides: number;
+  grossEarnings: number;
+  commissionPct: number;
+  driverNet: number;
+  bankName: string | null;
+  routingNumber: string | null;
+  accountNumber: string | null;
+  legalName: string | null;
+}) {
+  const {
+    driverName, driverEmail, weekLabel, rides,
+    grossEarnings, commissionPct, driverNet,
+    bankName, routingNumber, accountNumber,
+  } = params;
+
+  const commPctDisplay = `${Math.round(commissionPct * 100)}%`;
+  const maskAccount = accountNumber ? `****${accountNumber.slice(-4)}` : "Not on file";
+
+  const html = baseHtml(`
+<h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Weekly Earnings Statement</h2>
+<p style="color:#9ca3af;margin:0 0 24px;font-size:14px">${weekLabel}</p>
+<p style="color:#e8e0d0;">Dear ${driverName},</p>
+<p style="color:#9ca3af;line-height:1.6;">Here is your earnings summary for the week of <strong style="color:#e8e0d0">${weekLabel}</strong>.</p>
+<table style="width:100%;border-collapse:collapse;margin:20px 0;">
+  ${row("Total Rides", String(rides))}
+  ${row("Gross Revenue", `$${grossEarnings.toFixed(2)}`)}
+  ${row("Your Commission Rate", commPctDisplay)}
+  ${row("Your Net Earnings", `<strong style='color:#c9a84c;font-size:18px'>$${driverNet.toFixed(2)}</strong>`)}
+</table>
+${bankName ? `
+<p style="color:#9ca3af;font-size:13px;margin:20px 0 8px;">Payout will be sent to:</p>
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+  ${row("Bank", bankName)}
+  ${row("Account", maskAccount)}
+</table>
+` : `
+<p style="color:#f59e0b;font-size:13px;border:1px solid #92400e;padding:12px;margin:20px 0;">
+  No bank details on file. Please contact Royal Midnight to add your banking information.
+</p>
+`}
+<p style="color:#6b7280;font-size:12px;margin-top:24px;">If you have any questions about this statement, please contact <a href="mailto:${ADMIN_EMAIL}" style="color:#c9a84c;">${ADMIN_EMAIL}</a>.</p>`);
+
+  await send(driverEmail, `Royal Midnight — Weekly Earnings: $${driverNet.toFixed(2)} (${weekLabel})`, html, "weekly_driver_payout");
+}
+
+export async function sendWeeklyPayoutAdminReport(params: {
+  weekLabel: string;
+  commissionPct: number;
+  totalGross: number;
+  totalDriverNet: number;
+  payouts: Array<{
+    driverName: string;
+    driverEmail: string;
+    rides: number;
+    grossEarnings: number;
+    driverNet: number;
+    bankName: string | null;
+    routingNumber: string | null;
+    accountNumber: string | null;
+    legalName: string | null;
+  }>;
+}) {
+  const { weekLabel, commissionPct, totalGross, totalDriverNet, payouts } = params;
+  const commPctDisplay = `${Math.round(commissionPct * 100)}%`;
+  const companyNet = Math.round((totalGross - totalDriverNet) * 100) / 100;
+
+  const driverRows = payouts.map(p => `
+<tr style="border-bottom:1px solid #27272a;">
+  <td style="padding:10px 8px;color:#e8e0d0;">${p.driverName}</td>
+  <td style="padding:10px 8px;color:#9ca3af;font-size:13px;">${p.driverEmail}</td>
+  <td style="padding:10px 8px;text-align:center;color:#e8e0d0;">${p.rides}</td>
+  <td style="padding:10px 8px;text-align:right;color:#e8e0d0;">$${p.grossEarnings.toFixed(2)}</td>
+  <td style="padding:10px 8px;text-align:right;color:#c9a84c;font-weight:600;">$${p.driverNet.toFixed(2)}</td>
+  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;">${p.bankName ?? '<span style="color:#ef4444">Missing</span>'}</td>
+  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.routingNumber ?? '—'}</td>
+  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.accountNumber ? `****${p.accountNumber.slice(-4)}` : '—'}</td>
+</tr>`).join("");
+
+  const html = baseHtml(`
+<h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Weekly Payout Report</h2>
+<p style="color:#9ca3af;margin:0 0 24px;font-size:14px">${weekLabel} — For Admin Review</p>
+<table style="width:100%;border-collapse:collapse;margin:0 0 24px;">
+  ${row("Week", weekLabel)}
+  ${row("Total Gross Revenue", `$${totalGross.toFixed(2)}`)}
+  ${row("Total Driver Payouts (${commPctDisplay})", `$${totalDriverNet.toFixed(2)}`)}
+  ${row("Company Net", `<strong style='color:#22c55e'>$${companyNet.toFixed(2)}</strong>`)}
+</table>
+<h3 style="color:#c9a84c;margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:0.1em;">Driver Breakdown</h3>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;font-size:13px;">
+  <thead>
+    <tr style="border-bottom:1px solid #3f3f46;background:#18181b;">
+      <th style="padding:8px;text-align:left;color:#9ca3af;text-transform:uppercase;font-size:11px;letter-spacing:0.05em;">Driver</th>
+      <th style="padding:8px;text-align:left;color:#9ca3af;text-transform:uppercase;font-size:11px;">Email</th>
+      <th style="padding:8px;text-align:center;color:#9ca3af;text-transform:uppercase;font-size:11px;">Rides</th>
+      <th style="padding:8px;text-align:right;color:#9ca3af;text-transform:uppercase;font-size:11px;">Gross</th>
+      <th style="padding:8px;text-align:right;color:#9ca3af;text-transform:uppercase;font-size:11px;">Net to Driver</th>
+      <th style="padding:8px;text-align:left;color:#9ca3af;text-transform:uppercase;font-size:11px;">Bank</th>
+      <th style="padding:8px;text-align:left;color:#9ca3af;text-transform:uppercase;font-size:11px;">Routing</th>
+      <th style="padding:8px;text-align:left;color:#9ca3af;text-transform:uppercase;font-size:11px;">Account</th>
+    </tr>
+  </thead>
+  <tbody>${driverRows}</tbody>
+</table>
+</div>
+<p style="color:#6b7280;font-size:12px;margin-top:24px;">This is an automated report from Royal Midnight. Please verify all bank details before processing transfers.</p>`);
+
+  await send(ADMIN_EMAIL, `Royal Midnight — Weekly Payout Report (${weekLabel})`, html, "weekly_payout_admin_report");
+}

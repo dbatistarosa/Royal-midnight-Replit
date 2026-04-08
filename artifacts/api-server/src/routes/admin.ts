@@ -234,6 +234,192 @@ router.post("/admin/bookings/:id/link-user", requireAdmin, async (req, res): Pro
   res.json({ ok: true, bookingId, linkedUserId: user.id, userEmail: user.email, userName: user.name });
 });
 
+// GET /admin/payouts/weekly — weekly earnings per driver
+router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void> => {
+  // Parse week start (Monday) — default to current week's Monday
+  let weekStart: Date;
+  if (req.query["week"] && typeof req.query["week"] === "string") {
+    weekStart = new Date(req.query["week"]);
+  } else {
+    const now = new Date();
+    const day = now.getDay(); // 0=Sun
+    const diff = day === 0 ? -6 : 1 - day;
+    weekStart = new Date(now);
+    weekStart.setDate(now.getDate() + diff);
+  }
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
+
+  // Get commission rate
+  const [commRow] = await db
+    .select({ value: settingsTable.value })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, "driver_commission_pct"));
+  const rawPct = parseFloat(commRow?.value ?? "0.80");
+  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+
+  // Get all approved drivers
+  const drivers = await db
+    .select()
+    .from(driversTable)
+    .where(sql`approval_status = 'approved'`)
+    .orderBy(driversTable.name);
+
+  // Get completed bookings in this week
+  const bookings = await db
+    .select({
+      driverId: bookingsTable.driverId,
+      priceQuoted: bookingsTable.priceQuoted,
+    })
+    .from(bookingsTable)
+    .where(
+      sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`
+    );
+
+  // Aggregate per driver
+  const earningsByDriver = new Map<number, { rides: number; gross: number }>();
+  for (const b of bookings) {
+    if (!b.driverId) continue;
+    const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0 };
+    earningsByDriver.set(b.driverId, {
+      rides: existing.rides + 1,
+      gross: existing.gross + parseFloat(b.priceQuoted ?? "0"),
+    });
+  }
+
+  const payouts = drivers.map(d => {
+    const earnings = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0 };
+    const driverNet = Math.round(earnings.gross * commissionPct * 100) / 100;
+    return {
+      driverId: d.id,
+      driverName: d.name,
+      driverEmail: d.email,
+      driverPhone: d.phone,
+      rides: earnings.rides,
+      grossEarnings: Math.round(earnings.gross * 100) / 100,
+      commissionPct,
+      driverNet,
+      bankName: d.payoutBankName ?? null,
+      routingNumber: d.payoutRoutingNumber ?? null,
+      accountNumber: d.payoutAccountNumber ?? null,
+      legalName: d.payoutLegalName ?? null,
+      payoutEmail: d.payoutEmail ?? d.email,
+      hasBankDetails: !!(d.payoutBankName && d.payoutRoutingNumber && d.payoutAccountNumber),
+    };
+  });
+
+  res.json({
+    weekStart: weekStart.toISOString(),
+    weekEnd: weekEnd.toISOString(),
+    commissionPct,
+    payouts,
+    totalGross: Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) / 100,
+    totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
+  });
+});
+
+// POST /admin/payouts/send-weekly — send weekly payout emails to all drivers + admin
+router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promise<void> => {
+  const { weekStart: weekStartStr } = req.body as { weekStart?: string };
+
+  let weekStart: Date;
+  if (weekStartStr) {
+    weekStart = new Date(weekStartStr);
+  } else {
+    const now = new Date();
+    const day = now.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    weekStart = new Date(now);
+    weekStart.setDate(now.getDate() + diff);
+  }
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
+
+  const [commRow] = await db
+    .select({ value: settingsTable.value })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, "driver_commission_pct"));
+  const rawPct = parseFloat(commRow?.value ?? "0.80");
+  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+
+  const drivers = await db
+    .select()
+    .from(driversTable)
+    .where(sql`approval_status = 'approved'`)
+    .orderBy(driversTable.name);
+
+  const bookings = await db
+    .select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted })
+    .from(bookingsTable)
+    .where(sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
+
+  const earningsByDriver = new Map<number, { rides: number; gross: number }>();
+  for (const b of bookings) {
+    if (!b.driverId) continue;
+    const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0 };
+    earningsByDriver.set(b.driverId, { rides: existing.rides + 1, gross: existing.gross + parseFloat(b.priceQuoted ?? "0") });
+  }
+
+  const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("../lib/mailer.js");
+  const weekLabel = weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " – " + new Date(weekEnd.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+  const payouts = drivers.map(d => {
+    const earnings = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0 };
+    const driverNet = Math.round(earnings.gross * commissionPct * 100) / 100;
+    return {
+      driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
+      rides: earnings.rides, grossEarnings: Math.round(earnings.gross * 100) / 100,
+      commissionPct, driverNet,
+      bankName: d.payoutBankName ?? null, routingNumber: d.payoutRoutingNumber ?? null,
+      accountNumber: d.payoutAccountNumber ?? null, legalName: d.payoutLegalName ?? null,
+    };
+  });
+
+  let emailsSent = 0;
+  for (const p of payouts) {
+    try {
+      await sendWeeklyDriverPayout({ ...p, weekLabel });
+      emailsSent++;
+    } catch {}
+  }
+
+  try {
+    await sendWeeklyPayoutAdminReport({
+      weekLabel,
+      payouts,
+      totalGross: Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) / 100,
+      totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
+      commissionPct,
+    });
+  } catch {}
+
+  res.json({ ok: true, emailsSent, driverCount: drivers.length, weekLabel });
+});
+
+// PATCH /admin/drivers/:id/bank — update driver bank details
+router.patch("/admin/drivers/:id/bank", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid driver ID" }); return; }
+  const { bankName, routingNumber, accountNumber, legalName, payoutEmail } = req.body as {
+    bankName?: string; routingNumber?: string; accountNumber?: string; legalName?: string; payoutEmail?: string;
+  };
+  const [updated] = await db
+    .update(driversTable)
+    .set({
+      payoutBankName: bankName ?? null,
+      payoutRoutingNumber: routingNumber ?? null,
+      payoutAccountNumber: accountNumber ?? null,
+      payoutLegalName: legalName ?? null,
+      payoutEmail: payoutEmail ?? null,
+    })
+    .where(eq(driversTable.id, id))
+    .returning({ id: driversTable.id });
+  if (!updated) { res.status(404).json({ error: "Driver not found" }); return; }
+  res.json({ ok: true, driverId: id });
+});
+
 // GET /admin/mailer-status — check which email provider is active
 router.get("/admin/mailer-status", requireAdmin, (_req, res) => {
   res.json(getMailerStatus());

@@ -65,6 +65,7 @@ import AdminPromos from "@/pages/admin/promos";
 import AdminSupport from "@/pages/admin/support";
 import AdminReports from "@/pages/admin/reports";
 import AdminSettings from "@/pages/admin/settings";
+import AdminPayouts from "@/pages/admin/payouts";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -293,6 +294,9 @@ function Router() {
       </Route>
       <Route path="/admin/settings">
         <AdminRoute component={AdminSettings} />
+      </Route>
+      <Route path="/admin/payouts">
+        <AdminRoute component={AdminPayouts} />
       </Route>
       <Route path="/admin">
         <AdminRoute component={AdminDashboard} />
