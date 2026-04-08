@@ -166,17 +166,25 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
       return;
     }
 
-    if (intent.status === "succeeded") {
+    if (intent.status === "succeeded" || intent.status === "processing") {
       const [current] = await db.select({ status: bookings.status, stripePaymentIntentId: bookings.stripePaymentIntentId }).from(bookings).where(eq(bookings.id, bId));
       if (!current) {
         res.status(404).json({ error: "Booking not found" });
         return;
       }
-      if (current.status === "awaiting_payment") {
+      if (intent.status === "succeeded" && current.status === "awaiting_payment") {
+        // Direct success — promote to pending immediately and send emails.
         await db.update(bookings)
           .set({ status: "pending", stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
           .where(eq(bookings.id, bId));
         firePostPaymentEmails(bId).catch(err => console.error("[payments] post-confirm email error:", err));
+      } else if (intent.status === "processing" && current.status === "awaiting_payment") {
+        // Async payment method (e.g. ACH/bank transfer) — store the PI ID now.
+        // The booking stays awaiting_payment; the payment_intent.succeeded webhook
+        // will promote it to pending once the charge actually settles.
+        await db.update(bookings)
+          .set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
+          .where(eq(bookings.id, bId));
       } else if (!current.stripePaymentIntentId) {
         // Store PI ID even if booking was already moved to pending (e.g. by webhook)
         await db.update(bookings)
@@ -184,8 +192,12 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
           .where(eq(bookings.id, bId));
       }
       // Return success even if already confirmed (webhook may have beaten us)
-      res.json({ success: true, status: current.status === "awaiting_payment" ? "pending" : current.status, paymentIntentId });
+      const resolvedStatus = intent.status === "succeeded" && current.status === "awaiting_payment"
+        ? "pending"
+        : current.status;
+      res.json({ success: true, status: resolvedStatus, paymentIntentId, paymentStatus: intent.status });
     } else {
+      // Definitive failure statuses (canceled, requires_payment_method, etc.)
       res.status(400).json({ error: "Payment not completed", status: intent.status });
     }
   } catch (err: any) {

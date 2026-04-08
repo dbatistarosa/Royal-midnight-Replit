@@ -64,7 +64,10 @@ function CheckoutForm({ amount, returnUrl, onSuccess, onError }: CheckoutFormPro
 
     if (error) {
       onError(error.message || "Payment failed. Please try again.");
-    } else if (paymentIntent?.status === "succeeded") {
+    } else if (paymentIntent?.status === "succeeded" || paymentIntent?.status === "processing") {
+      // "processing" means the payment is underway (e.g. bank transfer / ACH).
+      // Call onSuccess so the booking confirmation page is shown immediately;
+      // the webhook will promote the booking to "pending" once the charge settles.
       onSuccess(paymentIntent.id);
     } else {
       onError("Unexpected payment status. Please contact support.");

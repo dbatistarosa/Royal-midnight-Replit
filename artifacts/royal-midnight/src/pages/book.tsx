@@ -335,7 +335,15 @@ export default function Book() {
     if (!selectedQuote || !selectedVehicle) return;
     const values = form.getValues();
 
-    if (!user && (!values.password || values.password.length < 6)) {
+    // If there is already a booking from a prior failed payment attempt, skip
+    // booking creation entirely and re-use the existing booking.  This prevents
+    // ghost "awaiting_payment" duplicates every time the passenger retries.
+    const existingBookingId = pendingBookingIdRef.current ?? pendingBookingId ?? (() => {
+      const s = sessionStorage.getItem("rm_pending_booking_id");
+      return s ? parseInt(s, 10) : null;
+    })();
+
+    if (!existingBookingId && !user && (!values.password || values.password.length < 6)) {
       toast({ title: "Password required", description: "Please create a password (min 6 characters) to track your booking.", variant: "destructive" });
       return;
     }
@@ -343,44 +351,54 @@ export default function Book() {
     setIsConfirming(true);
     setPaymentError("");
     try {
-      // Step 1: Ensure the user has an account
-      const userId = await ensureAccount(values.passengerName, values.passengerEmail, values.passengerPhone, values.password || "");
-      if (userId === null) { setIsConfirming(false); return; }
+      let bookingId: number;
 
-      // Step 2: Create the booking in pending state FIRST so it's always in the database
-      const isoDate = new Date(`${format(values.pickupDate, "yyyy-MM-dd")}T${values.pickupTime}:00`).toISOString();
-      const bookingRes = await fetch(`${API_BASE}/bookings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          passengerName: values.passengerName,
-          passengerEmail: values.passengerEmail,
-          passengerPhone: values.passengerPhone,
-          pickupAddress: values.pickupAddress,
-          dropoffAddress: values.dropoffAddress,
-          vehicleClass: selectedVehicle,
-          passengers: Number(values.passengers),
-          luggageCount: Number(values.luggage),
-          pickupAt: isoDate,
-          flightNumber: values.flightNumber || null,
-          specialRequests: values.specialRequests || null,
-          priceQuoted: effectiveTotal,
-          promoCode: promoResult?.valid && promoCode ? promoCode.toUpperCase() : null,
-          discountAmount: promoResult?.valid && promoResult.discountAmount != null ? promoResult.discountAmount : null,
-          userId: userId,
-          paymentType: "standard",
-        }),
-      });
-      if (!bookingRes.ok) {
-        const err = await bookingRes.json() as { error?: string };
-        throw new Error(err.error || "Could not create reservation. Please try again.");
+      if (existingBookingId) {
+        // Retry path — booking already exists, just create a fresh Payment Intent.
+        bookingId = existingBookingId;
+        // Keep state/ref in sync so handlePaymentSuccess can read without sessionStorage fallback
+        if (!pendingBookingIdRef.current) pendingBookingIdRef.current = existingBookingId;
+        if (!pendingBookingId) setPendingBookingId(existingBookingId);
+      } else {
+        // Step 1: Ensure the user has an account
+        const userId = await ensureAccount(values.passengerName, values.passengerEmail, values.passengerPhone, values.password || "");
+        if (userId === null) { setIsConfirming(false); return; }
+
+        // Step 2: Create the booking in awaiting_payment state FIRST so it's always in the database
+        const isoDate = new Date(`${format(values.pickupDate, "yyyy-MM-dd")}T${values.pickupTime}:00`).toISOString();
+        const bookingRes = await fetch(`${API_BASE}/bookings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            passengerName: values.passengerName,
+            passengerEmail: values.passengerEmail,
+            passengerPhone: values.passengerPhone,
+            pickupAddress: values.pickupAddress,
+            dropoffAddress: values.dropoffAddress,
+            vehicleClass: selectedVehicle,
+            passengers: Number(values.passengers),
+            luggageCount: Number(values.luggage),
+            pickupAt: isoDate,
+            flightNumber: values.flightNumber || null,
+            specialRequests: values.specialRequests || null,
+            priceQuoted: effectiveTotal,
+            promoCode: promoResult?.valid && promoCode ? promoCode.toUpperCase() : null,
+            discountAmount: promoResult?.valid && promoResult.discountAmount != null ? promoResult.discountAmount : null,
+            userId: userId,
+            paymentType: "standard",
+          }),
+        });
+        if (!bookingRes.ok) {
+          const err = await bookingRes.json() as { error?: string };
+          throw new Error(err.error || "Could not create reservation. Please try again.");
+        }
+        const booking = await bookingRes.json() as { id: number };
+        bookingId = booking.id;
+        setPendingBookingId(bookingId);
+        pendingBookingIdRef.current = bookingId;
+        // Persist for 3DS redirect recovery (page reload wipes React state)
+        sessionStorage.setItem("rm_pending_booking_id", String(bookingId));
       }
-      const booking = await bookingRes.json() as { id: number };
-      const bookingId = booking.id;
-      setPendingBookingId(bookingId);
-      pendingBookingIdRef.current = bookingId;
-      // Persist for 3DS redirect recovery (page reload wipes React state)
-      sessionStorage.setItem("rm_pending_booking_id", String(bookingId));
 
       // Step 3: Get Stripe publishable key
       const configRes = await fetch(`${API_BASE}/payments/config`);
