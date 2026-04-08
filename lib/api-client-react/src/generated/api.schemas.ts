@@ -13,6 +13,11 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface ErrorEnvelope {
+  error?: string;
+  message?: string;
+}
+
 export interface MessageResponse {
   message: string;
 }

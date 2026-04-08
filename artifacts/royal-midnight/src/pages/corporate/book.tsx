@@ -56,7 +56,7 @@ function CorporateBookInner() {
   const [isQuoting, setIsQuoting] = useState(false);
   const [confirmed, setConfirmed] = useState<{ id: number; price: number } | null>(null);
 
-  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   const fetchQuote = async () => {
     if (!form.pickupAddress || !form.dropoffAddress || !form.vehicleClass) return;

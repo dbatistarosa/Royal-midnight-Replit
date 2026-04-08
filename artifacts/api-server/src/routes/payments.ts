@@ -19,7 +19,7 @@ const WEBHOOK_URL = `${APP_URL}/api/webhook/stripe`;
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("STRIPE_SECRET_KEY is not configured");
-  return new Stripe(key, { apiVersion: "2024-06-20" as Stripe.LatestApiVersion });
+  return new Stripe(key, { apiVersion: "2024-06-20" as const });
 }
 
 async function getWebhookSecret(): Promise<string | null> {
@@ -271,7 +271,12 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
 
     const webhook = await stripe.webhookEndpoints.create({
       url: WEBHOOK_URL,
-      enabled_events: ["payment_intent.succeeded", "invoice.payment_succeeded"],
+      enabled_events: [
+        "payment_intent.succeeded",
+        "payment_intent.payment_failed",
+        "charge.dispute.created",
+        "charge.refunded",
+      ],
       description: "Royal Midnight payment confirmation webhook",
     });
 
@@ -387,18 +392,24 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       }
     }
 
-    if (event.type === "invoice.payment_succeeded") {
-      const invoice = event.data.object as Stripe.Invoice;
-      const bookingId = parseInt((invoice.metadata as Record<string, string>)?.bookingId || "0");
+    if (event.type === "payment_intent.payment_failed") {
+      const intent = event.data.object as Stripe.PaymentIntent;
+      const bookingId = parseInt(intent.metadata.bookingId || "0");
       if (bookingId) {
+        // Mark booking as cancelled so passengers know to retry or contact support
         const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
         if (current && current.status === "awaiting_payment") {
           await db.update(bookings)
-            .set({ status: "pending", updatedAt: new Date() })
+            .set({ status: "cancelled", updatedAt: new Date() })
             .where(eq(bookings.id, bookingId));
-          firePostPaymentEmails(bookingId).catch(err => console.error("[payments] webhook invoice email error:", err));
+          console.warn(`[payments] Booking #${bookingId} cancelled due to payment failure:`, intent.last_payment_error?.message);
         }
       }
+    }
+
+    if (event.type === "charge.dispute.created") {
+      const dispute = event.data.object as Stripe.Dispute;
+      console.warn("[payments] Chargeback dispute opened:", dispute.id, "amount:", dispute.amount, "reason:", dispute.reason);
     }
 
     res.json({ received: true });

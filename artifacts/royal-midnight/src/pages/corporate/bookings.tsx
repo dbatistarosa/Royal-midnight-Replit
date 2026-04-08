@@ -40,7 +40,7 @@ function CorporateBookingsInner() {
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "upcoming" | "completed">("all");
 
-  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   useEffect(() => {
     if (!token) return;

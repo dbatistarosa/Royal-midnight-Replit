@@ -119,7 +119,7 @@ export default function AdminDispatch() {
       setMapsError("Google Maps API key not configured.");
       return;
     }
-    setOptions({ key: apiKey, version: "weekly" });
+    setOptions({ key: apiKey });
     importLibrary("maps")
       .then(() => setMapsReady(true))
       .catch(() => setMapsError("Failed to load Google Maps."));

@@ -280,7 +280,7 @@ export default function AdminBookings() {
         fetch(`${API_BASE}/payments/create-intent`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: authHdr },
-          body: JSON.stringify({ bookingId: b.id, amount: parseFloat(b.priceQuoted) }),
+          body: JSON.stringify({ bookingId: b.id, amount: b.priceQuoted }),
         }),
       ]);
       const { publishableKey } = await configRes.json() as { publishableKey: string };
@@ -335,7 +335,7 @@ export default function AdminBookings() {
   };
 
   const handleSendInvoice = async (b: BookingRow) => {
-    if (!confirm(`Send a Stripe invoice to ${b.passengerEmail} for $${parseFloat(b.priceQuoted).toFixed(2)}?`)) return;
+    if (!confirm(`Send a Stripe invoice to ${b.passengerEmail} for $${b.priceQuoted.toFixed(2)}?`)) return;
     setSendingInvoiceId(b.id);
     try {
       const res = await fetch(`${API_BASE}/payments/create-invoice/${b.id}`, {
@@ -827,13 +827,13 @@ export default function AdminBookings() {
             <div className="px-6 py-6">
               <div className="flex items-center gap-2 text-xs text-amber-400 border border-amber-400/20 bg-amber-400/5 px-3 py-2 mb-6">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                <span>Charging <strong>${parseFloat(chargeBooking.priceQuoted).toFixed(2)}</strong> to the passenger's card. Booking will move to <em>Pending</em> on success.</span>
+                <span>Charging <strong>${chargeBooking.priceQuoted.toFixed(2)}</strong> to the passenger's card. Booking will move to <em>Pending</em> on success.</span>
               </div>
               {chargeClientSecret && chargePublishableKey ? (
                 <StripePaymentForm
                   clientSecret={chargeClientSecret}
                   publishableKey={chargePublishableKey}
-                  amount={parseFloat(chargeBooking.priceQuoted)}
+                  amount={chargeBooking.priceQuoted}
                   onSuccess={(id) => void handlePaymentSuccess(id)}
                   onError={(msg) => toast({ title: "Payment failed", description: msg, variant: "destructive" })}
                 />

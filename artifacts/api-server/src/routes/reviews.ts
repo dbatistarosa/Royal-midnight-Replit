@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and } from "drizzle-orm";
 import { db, reviewsTable } from "@workspace/db";
+import { requireAuth } from "../middleware/auth.js";
 import {
   ListReviewsQueryParams,
   ListReviewsResponse,
@@ -32,7 +33,7 @@ router.get("/reviews", async (req, res): Promise<void> => {
   );
 });
 
-router.post("/reviews", async (req, res): Promise<void> => {
+router.post("/reviews", requireAuth, async (req, res): Promise<void> => {
   const parsed = CreateReviewBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

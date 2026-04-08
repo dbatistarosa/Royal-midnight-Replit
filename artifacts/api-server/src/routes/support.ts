@@ -21,16 +21,24 @@ function parseTicket(t: typeof supportTicketsTable.$inferSelect) {
   };
 }
 
-router.get("/support", async (req, res): Promise<void> => {
+router.get("/support", requireAuth, async (req, res): Promise<void> => {
   const parsed = ListTicketsQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
+  const caller = req.currentUser!;
   const conditions = [];
   if (parsed.data.status) conditions.push(eq(supportTicketsTable.status, parsed.data.status));
-  if (parsed.data.userId != null) conditions.push(eq(supportTicketsTable.userId, parsed.data.userId));
+
+  if (caller.role === "admin") {
+    // Admins can filter by userId or see all
+    if (parsed.data.userId != null) conditions.push(eq(supportTicketsTable.userId, parsed.data.userId));
+  } else {
+    // Non-admins only see their own tickets
+    conditions.push(eq(supportTicketsTable.userId, caller.userId));
+  }
 
   const tickets = await db
     .select()

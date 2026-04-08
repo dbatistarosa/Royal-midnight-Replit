@@ -42,7 +42,7 @@ export default function Contact() {
       {
         data: {
           ...values,
-          priority: "normal",
+          priority: "medium" as const,
         },
       },
       {

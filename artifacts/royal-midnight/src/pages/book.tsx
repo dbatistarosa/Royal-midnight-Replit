@@ -6,8 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock, Plane } from "lucide-react";
 
-import { useGetQuote } from "@workspace/api-client-react";
-import { QuoteRequestVehicleClass } from "@workspace/api-client-react/src/generated/api.schemas";
+import { useGetQuote, QuoteRequestVehicleClass } from "@workspace/api-client-react";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";

@@ -1,9 +1,9 @@
-import crypto from "crypto";
 import { eq } from "drizzle-orm";
 import { db, usersTable, settingsTable } from "@workspace/db";
 import Stripe from "stripe";
 import app from "./app";
 import { logger } from "./lib/logger";
+import { hashPassword, isValidHash } from "./lib/hash.js";
 
 const rawPort = process.env["PORT"];
 
@@ -17,14 +17,6 @@ const port = Number(rawPort);
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
-
-function hashPassword(password: string): string {
-  return crypto.createHash("sha256").update(password + "royal_midnight_salt").digest("hex");
-}
-
-function isValidHash(value: string): boolean {
-  return /^[0-9a-f]{64}$/.test(value);
 }
 
 async function seedDatabase(): Promise<void> {
@@ -73,7 +65,7 @@ async function ensureStripeWebhook(): Promise<void> {
   const expectedUrl = `${appUrl}/api/webhook/stripe`;
 
   try {
-    const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" as Stripe.LatestApiVersion });
+    const stripe = new Stripe(stripeKey, { apiVersion: "2024-06-20" as const });
     const existing = await stripe.webhookEndpoints.list({ limit: 20 });
     const found = existing.data.find(w => w.url === expectedUrl && w.status === "enabled");
 
@@ -84,7 +76,12 @@ async function ensureStripeWebhook(): Promise<void> {
 
     const webhook = await stripe.webhookEndpoints.create({
       url: expectedUrl,
-      enabled_events: ["payment_intent.succeeded", "invoice.payment_succeeded"],
+      enabled_events: [
+        "payment_intent.succeeded",
+        "payment_intent.payment_failed",
+        "charge.dispute.created",
+        "charge.refunded",
+      ],
       description: "Royal Midnight payment confirmation webhook",
     });
 

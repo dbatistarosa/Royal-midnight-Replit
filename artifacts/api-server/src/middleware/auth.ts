@@ -25,7 +25,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   const token = authHeader.slice(7).trim();
   const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.token, token));
 
-  if (!session) {
+  if (!session || (session.expiresAt && session.expiresAt < new Date())) {
     res.status(401).json({ error: "Invalid or expired session" });
     return;
   }
@@ -49,7 +49,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   const token = authHeader.slice(7).trim();
   const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.token, token));
 
-  if (!session) {
+  if (!session || (session.expiresAt && session.expiresAt < new Date())) {
     res.status(401).json({ error: "Invalid or expired session" });
     return;
   }
@@ -64,7 +64,7 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
   if (authHeader && authHeader.startsWith("Bearer ")) {
     const token = authHeader.slice(7).trim();
     const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.token, token));
-    if (session) {
+    if (session && !(session.expiresAt && session.expiresAt < new Date())) {
       req.currentUser = { userId: session.userId, role: session.role };
     }
   }

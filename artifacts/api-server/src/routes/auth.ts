@@ -5,12 +5,11 @@ import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/
 import crypto from "crypto";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/auth.js";
+import { hashPassword } from "../lib/hash.js";
 
 const router: IRouter = Router();
 
-function hashPassword(password: string): string {
-  return crypto.createHash("sha256").update(password + "royal_midnight_salt").digest("hex");
-}
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 function generateToken(userId: number): string {
   return crypto.createHash("sha256").update(`${userId}_${Date.now()}_rm_secret`).digest("hex");
@@ -46,7 +45,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     .returning();
 
   const token = generateToken(user.id);
-  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
+  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
 
   res.status(201).json({
     token,
@@ -83,7 +82,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   }
 
   const token = generateToken(user.id);
-  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
+  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
 
   let driverId: number | null = null;
   if (user.role === "driver") {
@@ -147,7 +146,7 @@ router.post("/auth/verify-otp", async (req, res): Promise<void> => {
   }
 
   const token = generateToken(user.id);
-  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
+  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
 
   res.json({
     token,
@@ -222,7 +221,7 @@ router.post("/auth/driver-register", async (req, res): Promise<void> => {
       .returning();
 
     const token = generateToken(user.id);
-    await tx.insert(sessionsTable).values({ userId: user.id, token, role: user.role });
+    await tx.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
 
     return { user, driver, token };
   });

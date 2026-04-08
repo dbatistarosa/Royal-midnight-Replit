@@ -32,7 +32,7 @@ function parseDriver(d: typeof driversTable.$inferSelect) {
   };
 }
 
-router.get("/admin/stats", async (_req, res): Promise<void> => {
+router.get("/admin/stats", requireAdmin, async (_req, res): Promise<void> => {
   const [bookingStats] = await db
     .select({
       total: sql<number>`count(*)::int`,
@@ -88,7 +88,7 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   );
 });
 
-router.get("/admin/recent-bookings", async (req, res): Promise<void> => {
+router.get("/admin/recent-bookings", requireAdmin, async (req, res): Promise<void> => {
   const parsed = GetRecentBookingsQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -104,7 +104,7 @@ router.get("/admin/recent-bookings", async (req, res): Promise<void> => {
   res.json(GetRecentBookingsResponse.parse(bookings.map(parseBooking)));
 });
 
-router.get("/admin/revenue", async (_req, res): Promise<void> => {
+router.get("/admin/revenue", requireAdmin, async (_req, res): Promise<void> => {
   // Fetch commission rate from settings
   const [commRow] = await db
     .select({ value: settingsTable.value })
@@ -194,7 +194,7 @@ router.get("/admin/email-logs", requireAdmin, async (req, res): Promise<void> =>
   res.json(logs.map(l => ({ ...l, sentAt: l.sentAt.toISOString() })));
 });
 
-router.get("/admin/dispatch", async (_req, res): Promise<void> => {
+router.get("/admin/dispatch", requireAdmin, async (_req, res): Promise<void> => {
   const [activeTripsRaw, availableDriversRaw, pendingRaw] = await Promise.all([
     db.select().from(bookingsTable).where(eq(bookingsTable.status, "in_progress")),
     db.select().from(driversTable).where(sql`approval_status = 'approved'`),

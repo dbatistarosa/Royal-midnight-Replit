@@ -32,7 +32,7 @@ function CorporateDashboardInner() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   useEffect(() => {
     if (!token) return;
