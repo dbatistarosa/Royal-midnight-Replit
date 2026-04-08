@@ -249,7 +249,7 @@ function LocationShareToggle({ driverId, authHeader }: { driverId: number; authH
         title={sharing ? "Disable location sharing" : "Enable location sharing"}
       >
         <MapPin className={`w-4 h-4 ${sharing ? "text-blue-400" : ""}`} />
-        {sharing ? "Sharing Location" : "Share Location"}
+        {sharing ? "Sharing Location · 5s" : "Share Location"}
       </button>
       {geoError && <span className="text-xs text-red-400 max-w-[200px] text-right">{geoError}</span>}
     </div>
