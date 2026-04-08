@@ -124,6 +124,28 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
   }
 });
 
+// Lookup which booking a PaymentIntent belongs to (via PI metadata) — used by
+// the frontend 3DS recovery path when sessionStorage is unavailable.
+router.get("/payments/find-booking", async (req, res): Promise<void> => {
+  const { paymentIntentId } = req.query as { paymentIntentId?: string };
+  if (!paymentIntentId) {
+    res.status(400).json({ error: "paymentIntentId is required" });
+    return;
+  }
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const bId = parseInt(intent.metadata.bookingId || "0", 10);
+    if (!bId) {
+      res.status(404).json({ error: "No booking linked to this PaymentIntent" });
+      return;
+    }
+    res.json({ bookingId: bId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
   const { bookingId } = req.params;
   const { paymentIntentId } = req.body as { paymentIntentId: string };
@@ -136,21 +158,28 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
     const stripe = getStripe();
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
-    // Enforce PI-to-booking binding: metadata.bookingId must match the requested bookingId
-    if (intent.metadata.bookingId !== String(bId)) {
+    // Enforce PI-to-booking binding — metadata must match OR metadata is missing
+    // (the latter can happen if the PI was created before the booking was stored).
+    const metaId = intent.metadata.bookingId;
+    if (metaId && metaId !== String(bId)) {
       res.status(403).json({ error: "PaymentIntent does not belong to this booking" });
       return;
     }
 
     if (intent.status === "succeeded") {
       const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bId));
-      if (current && current.status === "awaiting_payment") {
+      if (!current) {
+        res.status(404).json({ error: "Booking not found" });
+        return;
+      }
+      if (current.status === "awaiting_payment") {
         await db.update(bookings)
           .set({ status: "pending", updatedAt: new Date() })
           .where(eq(bookings.id, bId));
         firePostPaymentEmails(bId).catch(err => console.error("[payments] post-confirm email error:", err));
       }
-      res.json({ success: true, status: "pending" });
+      // Return success even if already confirmed (webhook may have beaten us)
+      res.json({ success: true, status: current.status === "awaiting_payment" ? "pending" : current.status });
     } else {
       res.status(400).json({ error: "Payment not completed", status: intent.status });
     }

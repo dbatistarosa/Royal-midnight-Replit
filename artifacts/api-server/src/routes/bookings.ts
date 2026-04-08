@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, and, isNull, ne } from "drizzle-orm";
-import { db, bookingsTable, driversTable, settingsTable, usersTable } from "@workspace/db";
+import { eq, desc, and, isNull, ne, sql } from "drizzle-orm";
+import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
   sendBookingConfirmationPassenger,
@@ -255,6 +255,15 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     .returning();
 
   res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
+
+  // If a promo code was used, increment its usedCount (non-blocking)
+  if (booking.promoCode) {
+    db.update(promoCodesTable)
+      .set({ usedCount: sql`${promoCodesTable.usedCount} + 1` })
+      .where(eq(promoCodesTable.code, booking.promoCode))
+      .catch(err => console.error("[bookings] promoCode usedCount increment failed:", err));
+  }
+
   // Corporate bookings: fire emails immediately since no payment step
   if (isCorporate) {
     (async () => {

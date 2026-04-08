@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRoute, Link } from "wouter";
 import { API_BASE } from "@/lib/constants";
 import { format } from "date-fns";
-import { CheckCircle2, Clock, Loader2, Calendar, MapPin, User } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, Calendar, MapPin, User, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type PublicBooking = {
@@ -13,6 +13,8 @@ type PublicBooking = {
   pickupAddress: string;
   dropoffAddress: string;
   pickupAt: string;
+  priceQuoted?: number;
+  vehicleClass?: string;
 };
 
 async function fetchBooking(id: number): Promise<PublicBooking> {
@@ -27,11 +29,13 @@ export default function BookingConfirmation() {
 
   const [booking, setBooking] = useState<PublicBooking | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const load = async () => {
+  const load = async (manual = false) => {
     if (!id) return;
+    if (manual) setIsRefreshing(true);
     try {
       const data = await fetchBooking(id);
       setBooking(data);
@@ -44,6 +48,7 @@ export default function BookingConfirmation() {
       setError(true);
     } finally {
       setIsLoading(false);
+      if (manual) setIsRefreshing(false);
     }
   };
 
@@ -81,10 +86,15 @@ export default function BookingConfirmation() {
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center text-center px-6">
         <h1 className="text-3xl font-serif text-white mb-4">Booking Not Found</h1>
-        <p className="text-gray-400 mb-8">We couldn't locate this reservation.</p>
-        <Link href="/">
-          <Button className="bg-primary text-black rounded-none uppercase tracking-widest text-xs">Return Home</Button>
-        </Link>
+        <p className="text-gray-400 mb-8">We couldn't locate this reservation. It may still be processing.</p>
+        <div className="flex flex-col sm:flex-row gap-4">
+          <Link href="/passenger/rides">
+            <Button className="bg-primary text-black rounded-none uppercase tracking-widest text-xs">View My Bookings</Button>
+          </Link>
+          <Link href="/">
+            <Button variant="outline" className="border-white/20 text-white hover:bg-white hover:text-black rounded-none uppercase tracking-widest text-xs">Return Home</Button>
+          </Link>
+        </div>
       </div>
     );
   }
@@ -103,10 +113,10 @@ export default function BookingConfirmation() {
                 <Clock className="w-10 h-10 text-primary animate-pulse" />
               </div>
               <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Payment Processing</h1>
-              <p className="text-gray-400 text-base mb-6">Your payment is being confirmed. This page will update automatically.</p>
+              <p className="text-gray-400 text-base mb-4">Your payment is being confirmed. This page will update automatically.</p>
               <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mb-8">
                 <Loader2 className="w-3 h-3 animate-spin" />
-                Checking payment status...
+                Checking payment status every few seconds&hellip;
               </div>
             </>
           ) : (
@@ -160,18 +170,37 @@ export default function BookingConfirmation() {
             <p className="text-gray-500 text-sm mb-8">A confirmation has been sent to {booking.passengerEmail}.</p>
           )}
 
-          <div className="flex flex-col sm:flex-row justify-center gap-4">
-            <Link href="/passenger/rides">
-              <Button className="w-full sm:w-auto bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
-                View My Bookings
+          {awaitingPayment ? (
+            <div className="flex flex-col sm:flex-row justify-center gap-4">
+              <Button
+                variant="outline"
+                onClick={() => void load(true)}
+                disabled={isRefreshing}
+                className="w-full sm:w-auto border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none"
+              >
+                {isRefreshing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+                Check Status
               </Button>
-            </Link>
-            <Link href="/">
-              <Button variant="outline" className="w-full sm:w-auto border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
-                Return Home
-              </Button>
-            </Link>
-          </div>
+              <Link href="/passenger/rides">
+                <Button variant="ghost" className="w-full sm:w-auto text-gray-400 hover:text-white font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                  View My Bookings
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row justify-center gap-4">
+              <Link href="/passenger/rides">
+                <Button className="w-full sm:w-auto bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                  View My Bookings
+                </Button>
+              </Link>
+              <Link href="/">
+                <Button variant="outline" className="w-full sm:w-auto border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                  Return Home
+                </Button>
+              </Link>
+            </div>
+          )}
         </div>
       </div>
     </div>

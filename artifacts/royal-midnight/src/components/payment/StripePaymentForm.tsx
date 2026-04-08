@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
@@ -106,7 +106,8 @@ interface StripePaymentFormProps {
 }
 
 export function StripePaymentForm({ clientSecret, publishableKey, amount, returnUrl, onSuccess, onError }: StripePaymentFormProps) {
-  const stripePromise = loadStripe(publishableKey);
+  // Memoize so the Stripe instance isn't re-created on every parent render
+  const stripePromise = useMemo(() => loadStripe(publishableKey), [publishableKey]);
 
   return (
     <Elements stripe={stripePromise} options={{ clientSecret, appearance }}>

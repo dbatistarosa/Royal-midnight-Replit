@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -99,6 +99,7 @@ export default function Book() {
   const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null);
   const [paymentPublishableKey, setPaymentPublishableKey] = useState<string | null>(null);
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
+  const pendingBookingIdRef = useRef<number | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [minBookingHours, setMinBookingHours] = useState(2);
@@ -118,30 +119,45 @@ export default function Book() {
     const status = searchParams.get("redirect_status");
     if (!pi || status !== "succeeded") return;
 
-    // Recover bookingId from sessionStorage
-    const savedId = sessionStorage.getItem("rm_pending_booking_id");
-    const bookingId = savedId ? parseInt(savedId, 10) : 0;
-    sessionStorage.removeItem("rm_pending_booking_id");
+    void (async () => {
+      // Prefer sessionStorage, fall back to server lookup (in case storage was cleared)
+      const savedId = sessionStorage.getItem("rm_pending_booking_id");
+      sessionStorage.removeItem("rm_pending_booking_id");
+      let bookingId = savedId ? parseInt(savedId, 10) : 0;
 
-    if (bookingId) {
-      // Confirm server-side then redirect — same pattern as admin Charge Card.
-      // Webhook is also the safety net; confirmation page polls until status updates.
-      void (async () => {
+      if (!bookingId) {
+        // Ask the server which booking this PI belongs to
         try {
-          const res = await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paymentIntentId: pi }),
-          });
-          if (!res.ok) {
-            console.warn("[book] 3DS confirm responded", res.status, "— webhook will finalise booking");
+          const lookupRes = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`);
+          if (lookupRes.ok) {
+            const lookup = await lookupRes.json() as { bookingId?: number };
+            if (lookup.bookingId) bookingId = lookup.bookingId;
           }
         } catch {
-          console.warn("[book] 3DS confirm network error — webhook will finalise booking");
+          console.warn("[book] 3DS find-booking lookup failed");
         }
-        setLocation(`/booking-confirmation/${bookingId}`);
-      })();
-    }
+      }
+
+      if (!bookingId) {
+        console.warn("[book] 3DS redirect: could not determine booking — webhook will finalise");
+        return;
+      }
+
+      // Confirm server-side then redirect — webhook is also a safety net.
+      try {
+        const res = await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentIntentId: pi }),
+        });
+        if (!res.ok) {
+          console.warn("[book] 3DS confirm responded", res.status, "— webhook will finalise booking");
+        }
+      } catch {
+        console.warn("[book] 3DS confirm network error — webhook will finalise booking");
+      }
+      setLocation(`/booking-confirmation/${bookingId}`);
+    })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -362,6 +378,7 @@ export default function Book() {
       const booking = await bookingRes.json() as { id: number };
       const bookingId = booking.id;
       setPendingBookingId(bookingId);
+      pendingBookingIdRef.current = bookingId;
       // Persist for 3DS redirect recovery (page reload wipes React state)
       sessionStorage.setItem("rm_pending_booking_id", String(bookingId));
 
@@ -399,8 +416,13 @@ export default function Book() {
       const res = await fetch(`${API_BASE}/promos/validate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: promoCode.trim(), amount: selectedQuote.totalWithTax }),
+        body: JSON.stringify({ code: promoCode.trim(), bookingAmount: selectedQuote.totalWithTax }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        setPromoResult({ valid: false, discountAmount: null, finalAmount: null, message: err.error || "Invalid promo code." });
+        return;
+      }
       const data = await res.json() as { valid: boolean; discountAmount: number | null; finalAmount: number | null; message: string };
       setPromoResult(data);
     } catch {
@@ -411,7 +433,11 @@ export default function Book() {
   };
 
   const handlePaymentSuccess = async (paymentIntentId: string) => {
-    const bookingId = pendingBookingId;
+    // Read from ref first (always current), then state, then sessionStorage
+    const bookingId = pendingBookingIdRef.current ?? pendingBookingId ?? (() => {
+      const s = sessionStorage.getItem("rm_pending_booking_id");
+      return s ? parseInt(s, 10) : null;
+    })();
     if (!bookingId) return;
 
     // Clean up sessionStorage — payment completed without redirect
