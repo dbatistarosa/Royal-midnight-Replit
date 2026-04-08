@@ -268,6 +268,30 @@ ${invoicePdfUrl ? `<p style="margin-top:16px;text-align:center"><a href="${invoi
   await send(b.passengerEmail, `Invoice for Booking ${bookingRef} — Royal Midnight`, html, "invoice_passenger");
 }
 
+export async function sendBookingCancelledPassenger(b: BookingEmailData, cancellationFee: number) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
+  const refundAmount = Math.max(0, b.priceQuoted - cancellationFee);
+  const html = wrap(`
+<h2 style="color:#ef4444;font-size:20px;margin:0 0 8px">Booking Cancelled</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, your reservation has been cancelled. Here is a summary.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking", bookingRef)}
+  ${row("Route", `${b.pickupAddress} → ${b.dropoffAddress}`)}
+  ${row("Was Scheduled", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+  ${row("Booking Total", `$${b.priceQuoted.toFixed(2)}`)}
+  ${cancellationFee > 0 ? row("Cancellation Fee", `<span style="color:#ef4444">$${cancellationFee.toFixed(2)}</span>`) : row("Cancellation Fee", '<span style="color:#22c55e">None</span>')}
+  ${refundAmount > 0 ? row("Refund Amount", `<span style="color:#22c55e;font-weight:bold">$${refundAmount.toFixed(2)}</span>`) : ""}
+</table>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  ${cancellationFee > 0 ? `A cancellation fee applies per our policy. A refund of $${refundAmount.toFixed(2)} will be processed within 5–10 business days.` : "No cancellation fee applies. If payment was collected, a full refund will be processed within 5–10 business days."}
+</p>
+<p style="margin-top:20px">
+  <a href="${appUrl}/book" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">BOOK AGAIN</a>
+</p>`);
+  await send(b.passengerEmail, `Booking ${bookingRef} Cancelled — Royal Midnight`, html, "booking_cancelled_passenger");
+}
+
 export async function sendStatusChangedAdmin(bookingId: number, oldStatus: string, newStatus: string, passengerName: string) {
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 20px">Booking #${bookingId} Status Changed</h2>

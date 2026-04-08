@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -149,6 +149,15 @@ export default function AdminBookings() {
   const [chargePublishableKey, setChargePublishableKey] = useState<string | null>(null);
   const [chargeLoading, setChargeLoading] = useState(false);
   const [sendingInvoiceId, setSendingInvoiceId] = useState<number | null>(null);
+
+  // Cancellation state
+  type CancelPreview = {
+    canCancel: boolean; tier: string; feePercent: number; feeAmount: number;
+    netRefund: number; hoursUntilPickup: number; message: string; priceQuoted: number;
+  };
+  const [cancelPreview, setCancelPreview] = useState<{ booking: BookingRow; policy: CancelPreview } | null>(null);
+  const [cancelPreviewLoading, setCancelPreviewLoading] = useState<number | null>(null);
+  const [cancelConfirming, setCancelConfirming] = useState(false);
 
   const authHdr = token ? `Bearer ${token}` : "";
 
@@ -327,6 +336,49 @@ export default function AdminBookings() {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Could not send invoice.", variant: "destructive" });
     } finally {
       setSendingInvoiceId(null);
+    }
+  };
+
+  const handleCancelPreview = async (b: BookingRow) => {
+    setCancelPreviewLoading(b.id);
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${b.id}/cancel-preview`, {
+        headers: { Authorization: authHdr },
+      });
+      if (!res.ok) throw new Error("Could not load cancellation policy.");
+      const policy = await res.json() as { canCancel: boolean; tier: string; feePercent: number; feeAmount: number; netRefund: number; hoursUntilPickup: number; message: string; priceQuoted: number };
+      setCancelPreview({ booking: b, policy });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not load cancellation policy.", variant: "destructive" });
+    } finally {
+      setCancelPreviewLoading(null);
+    }
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!cancelPreview) return;
+    setCancelConfirming(true);
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${cancelPreview.booking.id}`, {
+        method: "DELETE",
+        headers: { Authorization: authHdr },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Could not cancel booking.");
+      }
+      toast({
+        title: "Booking cancelled",
+        description: cancelPreview.policy.feeAmount > 0
+          ? `Booking #RM-${String(cancelPreview.booking.id).padStart(4, "0")} cancelled. A ${cancelPreview.policy.feePercent}% fee ($${cancelPreview.policy.feeAmount.toFixed(2)}) applies.`
+          : `Booking #RM-${String(cancelPreview.booking.id).padStart(4, "0")} cancelled at no charge.`,
+      });
+      setCancelPreview(null);
+      refetch();
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not cancel booking.", variant: "destructive" });
+    } finally {
+      setCancelConfirming(false);
     }
   };
 
@@ -627,6 +679,21 @@ export default function AdminBookings() {
                                   <p className="text-muted-foreground text-xs">{format(new Date(b.createdAt), "PPP 'at' p")}</p>
                                 </div>
                               )}
+
+                              {/* Cancel booking */}
+                              {!["completed", "cancelled"].includes(b.status) && (
+                                <div className="pt-3 border-t border-white/8 mt-2">
+                                  <button
+                                    onClick={() => void handleCancelPreview(b)}
+                                    disabled={cancelPreviewLoading === b.id}
+                                    className="flex items-center gap-1.5 text-xs text-red-400/70 hover:text-red-400 transition-colors disabled:opacity-50"
+                                  >
+                                    {cancelPreviewLoading === b.id
+                                      ? <><Loader2 className="w-3 h-3 animate-spin" />Loading policy...</>
+                                      : <><Ban className="w-3 h-3" />Cancel Booking</>}
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -811,6 +878,81 @@ export default function AdminBookings() {
                   <Loader2 className="w-5 h-5 animate-spin text-primary" />
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Booking Modal */}
+      {cancelPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-[#0f0f0f] border border-white/10 w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
+              <div>
+                <h2 className="text-sm uppercase tracking-widest font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" /> Cancel Booking
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  #{`RM-${String(cancelPreview.booking.id).padStart(4, "0")}`} — {cancelPreview.booking.passengerName}
+                </p>
+              </div>
+              <button onClick={() => setCancelPreview(null)} className="text-muted-foreground hover:text-white transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-6 py-6 space-y-5">
+              {/* Policy message */}
+              <div className={`border p-4 text-sm flex items-start gap-2 ${cancelPreview.policy.tier === "free" ? "border-green-500/30 bg-green-500/5 text-green-400" : "border-amber-500/30 bg-amber-500/5 text-amber-400"}`}>
+                {cancelPreview.policy.tier === "free"
+                  ? <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  : <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />}
+                <span>{cancelPreview.policy.message}</span>
+              </div>
+
+              {/* Fee breakdown */}
+              <div className="space-y-2 text-sm border border-white/8 p-4">
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Booking Total</span>
+                  <span>${cancelPreview.policy.priceQuoted.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className={cancelPreview.policy.feeAmount > 0 ? "text-red-400" : "text-muted-foreground"}>
+                    Cancellation Fee {cancelPreview.policy.feePercent > 0 ? `(${cancelPreview.policy.feePercent}%)` : ""}
+                  </span>
+                  <span className={cancelPreview.policy.feeAmount > 0 ? "text-red-400" : "text-muted-foreground"}>
+                    {cancelPreview.policy.feeAmount > 0 ? `$${cancelPreview.policy.feeAmount.toFixed(2)}` : "None"}
+                  </span>
+                </div>
+                <div className="flex justify-between font-medium pt-2 border-t border-white/8 text-base">
+                  <span>Passenger Refund</span>
+                  <span className="text-primary">${cancelPreview.policy.netRefund.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                This will cancel the booking and notify both the admin and the passenger by email. Stripe refunds must be processed manually via the Stripe dashboard.
+              </p>
+            </div>
+
+            <div className="px-6 py-5 border-t border-white/10 flex justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setCancelPreview(null)}
+                disabled={cancelConfirming}
+                className="rounded-none border-white/20 text-white hover:bg-white/10 text-xs uppercase tracking-widest"
+              >
+                Keep Booking
+              </Button>
+              <Button
+                onClick={() => void handleConfirmCancel()}
+                disabled={cancelConfirming}
+                className="bg-red-600 hover:bg-red-700 text-white rounded-none text-xs uppercase tracking-widest px-6"
+              >
+                {cancelConfirming
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Cancelling...</>
+                  : <><XCircle className="w-3.5 h-3.5 mr-2" />Confirm Cancel</>}
+              </Button>
             </div>
           </div>
         </div>

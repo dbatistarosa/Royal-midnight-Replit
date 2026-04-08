@@ -7,6 +7,7 @@ import {
   sendNewBookingAdmin,
   sendNewBookingAvailableToDrivers,
   sendBookingCancelledAdmin,
+  sendBookingCancelledPassenger,
   sendDriverAcceptedAdmin,
   sendDriverAcceptedPassenger,
   sendDriverUnassignedAdmin,
@@ -34,6 +35,78 @@ function parseBooking(b: typeof bookingsTable.$inferSelect) {
     pickupAt: b.pickupAt.toISOString(),
     createdAt: b.createdAt.toISOString(),
     updatedAt: b.updatedAt.toISOString(),
+  };
+}
+
+// ─── Cancellation policy ─────────────────────────────────────────────────────
+
+type CancellationTier = "free" | "partial_25" | "partial_50" | "non_cancellable";
+
+interface CancelPreview {
+  canCancel: boolean;
+  tier: CancellationTier;
+  feePercent: number;
+  feeAmount: number;
+  netRefund: number;
+  hoursUntilPickup: number;
+  message: string;
+  priceQuoted: number;
+}
+
+function getCancellationPolicy(pickupAt: Date, priceQuoted: number, status: string): CancelPreview {
+  const now = new Date();
+  const hoursUntilPickup = (pickupAt.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+  if (["completed", "cancelled", "in_progress"].includes(status)) {
+    return {
+      canCancel: false, tier: "non_cancellable",
+      feePercent: 0, feeAmount: 0, netRefund: 0,
+      hoursUntilPickup,
+      message: status === "in_progress"
+        ? "This ride is currently in progress and cannot be cancelled."
+        : "This booking cannot be cancelled.",
+      priceQuoted,
+    };
+  }
+
+  if (status === "awaiting_payment") {
+    return {
+      canCancel: true, tier: "free",
+      feePercent: 0, feeAmount: 0, netRefund: priceQuoted,
+      hoursUntilPickup,
+      message: "No payment has been processed yet — you may cancel at no charge.",
+      priceQuoted,
+    };
+  }
+
+  if (hoursUntilPickup >= 24) {
+    return {
+      canCancel: true, tier: "free",
+      feePercent: 0, feeAmount: 0, netRefund: priceQuoted,
+      hoursUntilPickup,
+      message: "Cancellations made 24 hours or more before pickup are fully refunded — no fee applies.",
+      priceQuoted,
+    };
+  }
+
+  if (hoursUntilPickup >= 12) {
+    const feeAmount = Math.round(priceQuoted * 0.25 * 100) / 100;
+    return {
+      canCancel: true, tier: "partial_25",
+      feePercent: 25, feeAmount, netRefund: Math.round((priceQuoted - feeAmount) * 100) / 100,
+      hoursUntilPickup,
+      message: "Cancellations made 12–24 hours before pickup incur a 25% cancellation fee.",
+      priceQuoted,
+    };
+  }
+
+  const feeAmount = Math.round(priceQuoted * 0.50 * 100) / 100;
+  return {
+    canCancel: true, tier: "partial_50",
+    feePercent: 50, feeAmount, netRefund: Math.round((priceQuoted - feeAmount) * 100) / 100,
+    hoursUntilPickup,
+    message: "Cancellations made less than 12 hours before pickup incur a 50% cancellation fee.",
+    priceQuoted,
   };
 }
 
@@ -435,7 +508,28 @@ router.post("/bookings/:id/unassign", requireAdmin, async (req, res): Promise<vo
   })();
 });
 
-router.delete("/bookings/:id", async (req, res): Promise<void> => {
+// ─── Cancel preview — returns fee info without cancelling ─────────────────────
+
+router.get("/bookings/:id/cancel-preview", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (!id) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && booking.userId !== caller.userId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  const priceQuoted = parseFloat(String(booking.priceQuoted));
+  const policy = getCancellationPolicy(booking.pickupAt, priceQuoted, booking.status);
+  res.json(policy);
+});
+
+// ─── Cancel booking ───────────────────────────────────────────────────────────
+
+router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
   const params = CancelBookingParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -443,35 +537,49 @@ router.delete("/bookings/:id", async (req, res): Promise<void> => {
   }
 
   const [existing] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, params.data.id));
-
-  const [booking] = await db
-    .update(bookingsTable)
-    .set({ status: "cancelled" })
-    .where(eq(bookingsTable.id, params.data.id))
-    .returning();
-
-  if (!booking) {
+  if (!existing) {
     res.status(404).json({ error: "Booking not found" });
     return;
   }
 
-  res.sendStatus(204);
+  const caller = req.currentUser!;
 
-  // Fire-and-forget: notify admin
-  if (existing) {
-    (async () => {
-      try {
-        const parsed2 = parseBooking(existing);
-        await sendBookingCancelledAdmin({
-          ...parsed2,
-          vehicleClass: parsed2.vehicleClass ?? "business",
-          passengers: parsed2.passengers ?? 1,
-        });
-      } catch (err) {
-        console.error("[bookings] cancel email error:", err);
-      }
-    })();
+  // Passengers/corporate can only cancel their own bookings in cancellable statuses
+  if (caller.role !== "admin") {
+    if (existing.userId !== caller.userId) {
+      res.status(403).json({ error: "Access denied" }); return;
+    }
+    if (["completed", "cancelled", "in_progress"].includes(existing.status)) {
+      res.status(400).json({ error: "This booking cannot be cancelled." }); return;
+    }
   }
+
+  const priceQuoted = parseFloat(String(existing.priceQuoted));
+  const policy = getCancellationPolicy(existing.pickupAt, priceQuoted, existing.status);
+
+  await db
+    .update(bookingsTable)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(eq(bookingsTable.id, params.data.id));
+
+  res.json({ success: true, feePercent: policy.feePercent, feeAmount: policy.feeAmount, netRefund: policy.netRefund });
+
+  // Fire-and-forget: email admin + passenger
+  (async () => {
+    try {
+      const emailData = {
+        ...parseBooking(existing),
+        vehicleClass: existing.vehicleClass ?? "business",
+        passengers: existing.passengers ?? 1,
+      };
+      await sendBookingCancelledAdmin(emailData);
+      if (existing.passengerEmail) {
+        await sendBookingCancelledPassenger(emailData, policy.feeAmount);
+      }
+    } catch (err) {
+      console.error("[bookings] cancel email error:", err);
+    }
+  })();
 });
 
 export default router;

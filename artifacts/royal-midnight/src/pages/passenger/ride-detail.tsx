@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2 } from "lucide-react";
-import { Link, useParams } from "wouter";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle } from "lucide-react";
+import { Link, useParams, useLocation } from "wouter";
 import { format } from "date-fns";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -33,12 +35,28 @@ type BookingDetail = {
   driverId?: number | null;
 };
 
+type CancelPreview = {
+  canCancel: boolean;
+  tier: string;
+  feePercent: number;
+  feeAmount: number;
+  netRefund: number;
+  hoursUntilPickup: number;
+  message: string;
+  priceQuoted: number;
+};
+
 function PassengerRideDetailInner() {
   const params = useParams();
   const id = parseInt(params.id || "0", 10);
   const { token } = useAuth();
+  const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [cancelPreview, setCancelPreview] = useState<CancelPreview | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelConfirming, setCancelConfirming] = useState(false);
 
   useEffect(() => {
     if (!id || !token) return;
@@ -54,6 +72,43 @@ function PassengerRideDetailInner() {
       .catch(() => setBooking(null))
       .finally(() => setIsLoading(false));
   }, [id, token]);
+
+  const handleCancelPreview = async () => {
+    if (!token) return;
+    setCancelLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${id}/cancel-preview`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Could not load cancellation policy.");
+      const data = await res.json() as CancelPreview;
+      setCancelPreview(data);
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Could not load cancellation policy.", variant: "destructive" });
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!token || !cancelPreview) return;
+    setCancelConfirming(true);
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Could not cancel booking.");
+      }
+      toast({ title: "Booking cancelled", description: cancelPreview.feeAmount > 0 ? `A $${cancelPreview.feeAmount.toFixed(2)} cancellation fee applies.` : "Your booking has been cancelled at no charge." });
+      setLocation("/passenger/rides");
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Could not cancel booking.", variant: "destructive" });
+      setCancelConfirming(false);
+    }
+  };
 
   const statusLabel = booking?.status?.replace(/_/g, " ") ?? "";
   const statusColor =
@@ -188,6 +243,22 @@ function PassengerRideDetailInner() {
               </div>
             )}
 
+            {/* Cancel Booking */}
+            {booking && !["completed", "cancelled", "in_progress"].includes(booking.status) && (
+              <div className="bg-card border border-red-500/20 p-5 sm:p-6">
+                <h2 className="font-serif text-lg mb-2 text-red-400">Cancel Booking</h2>
+                <p className="text-sm text-muted-foreground mb-4">Need to cancel? Review the cancellation policy before proceeding.</p>
+                <Button
+                  variant="outline"
+                  onClick={() => void handleCancelPreview()}
+                  disabled={cancelLoading}
+                  className="w-full border-red-500/40 text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-none text-xs uppercase tracking-widest"
+                >
+                  {cancelLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Loading Policy...</> : <><XCircle className="w-3.5 h-3.5 mr-2" />Cancel This Ride</>}
+                </Button>
+              </div>
+            )}
+
             {/* Need Help */}
             <div className="bg-card border border-border p-5 sm:p-6">
               <h2 className="font-serif text-lg mb-3">Need Help?</h2>
@@ -204,6 +275,76 @@ function PassengerRideDetailInner() {
           <Link href="/passenger/rides" className="text-primary text-sm hover:underline">
             ← Back to My Rides
           </Link>
+        </div>
+      )}
+
+      {/* Cancellation policy modal */}
+      {cancelPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="bg-card border border-border w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border">
+              <h2 className="font-serif text-xl flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-400" /> Cancel Booking
+              </h2>
+              <button onClick={() => setCancelPreview(null)} className="text-muted-foreground hover:text-white">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Policy message */}
+              <div className={`border p-4 text-sm ${cancelPreview.tier === "free" ? "border-green-500/30 bg-green-500/5 text-green-400" : "border-amber-500/30 bg-amber-500/5 text-amber-400"}`}>
+                {cancelPreview.tier === "free"
+                  ? <CheckCircle className="w-4 h-4 inline mr-2" />
+                  : <AlertTriangle className="w-4 h-4 inline mr-2" />}
+                {cancelPreview.message}
+              </div>
+
+              {/* Fee breakdown */}
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Booking Total</span>
+                  <span>${cancelPreview.priceQuoted.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className={cancelPreview.feeAmount > 0 ? "text-red-400" : "text-muted-foreground"}>
+                    Cancellation Fee {cancelPreview.feePercent > 0 ? `(${cancelPreview.feePercent}%)` : ""}
+                  </span>
+                  <span className={cancelPreview.feeAmount > 0 ? "text-red-400" : "text-muted-foreground"}>
+                    {cancelPreview.feeAmount > 0 ? `$${cancelPreview.feeAmount.toFixed(2)}` : "None"}
+                  </span>
+                </div>
+                <div className="flex justify-between font-medium text-base pt-2 border-t border-border">
+                  <span>Refund Amount</span>
+                  <span className="text-primary">${cancelPreview.netRefund.toFixed(2)}</span>
+                </div>
+              </div>
+
+              {cancelPreview.feeAmount > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Refunds are processed within 5–10 business days to your original payment method.
+                </p>
+              )}
+            </div>
+
+            <div className="px-6 py-5 border-t border-border flex justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setCancelPreview(null)}
+                disabled={cancelConfirming}
+                className="rounded-none border-white/20 text-white hover:bg-white/10 text-xs uppercase tracking-widest"
+              >
+                Keep Booking
+              </Button>
+              <Button
+                onClick={() => void handleConfirmCancel()}
+                disabled={cancelConfirming}
+                className="bg-red-600 hover:bg-red-700 text-white rounded-none text-xs uppercase tracking-widest px-6"
+              >
+                {cancelConfirming ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Cancelling...</> : "Confirm Cancellation"}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </PortalLayout>
