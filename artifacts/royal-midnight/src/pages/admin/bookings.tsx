@@ -809,8 +809,8 @@ export default function AdminBookings() {
       {/* Charge Card Modal */}
       {chargeBooking && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#0f0f0f] border border-white/10 w-full max-w-md">
-            <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
+          <div className="bg-[#0f0f0f] border border-white/10 w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 shrink-0">
               <div>
                 <h2 className="text-sm uppercase tracking-widest font-semibold">Charge Card</h2>
                 <p className="text-xs text-muted-foreground mt-1">
@@ -824,7 +824,7 @@ export default function AdminBookings() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="px-6 py-6">
+            <div className="px-6 py-6 overflow-y-auto flex-1">
               <div className="flex items-center gap-2 text-xs text-amber-400 border border-amber-400/20 bg-amber-400/5 px-3 py-2 mb-6">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                 <span>Charging <strong>${chargeBooking.priceQuoted.toFixed(2)}</strong> to the passenger's card. Booking will move to <em>Pending</em> on success.</span>
