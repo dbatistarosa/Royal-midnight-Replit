@@ -7,6 +7,7 @@ import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
   sendNewBookingAvailableToDrivers,
+  sendInvoiceToPassenger,
   getMailerStatus,
 } from "../lib/mailer.js";
 import { requireAdmin } from "../middleware/auth.js";
@@ -343,9 +344,27 @@ router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<voi
     });
 
     const finalised = await stripe.invoices.finalizeInvoice(invoice.id);
-    await stripe.invoices.sendInvoice(finalised.id);
 
-    res.json({ success: true, invoiceId: finalised.id, invoiceUrl: finalised.hosted_invoice_url });
+    const invoiceUrl = finalised.hosted_invoice_url ?? "";
+    const invoicePdfUrl = finalised.invoice_pdf ?? null;
+
+    await sendInvoiceToPassenger(
+      {
+        id: bId,
+        passengerName: booking.passengerName,
+        passengerEmail: booking.passengerEmail,
+        pickupAddress: booking.pickupAddress,
+        dropoffAddress: booking.dropoffAddress,
+        pickupAt: String(booking.pickupAt),
+        vehicleClass: booking.vehicleClass,
+        passengers: booking.passengers,
+        priceQuoted: parseFloat(String(booking.priceQuoted)),
+      },
+      invoiceUrl,
+      invoicePdfUrl,
+    );
+
+    res.json({ success: true, invoiceId: finalised.id, invoiceUrl });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -242,6 +242,32 @@ export async function sendDriverUnassignedAdmin(bookingId: number, driverName: s
   await send(ADMIN_EMAIL, `Driver Unassigned — Booking #${bookingId}`, html, "driver_unassigned_admin");
 }
 
+export async function sendInvoiceToPassenger(b: BookingEmailData, invoiceUrl: string, invoicePdfUrl: string | null) {
+  const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Your Invoice is Ready</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Please find your invoice for booking ${bookingRef} below. Payment is due within 7 days.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking #", bookingRef)}
+  ${row("Passenger", b.passengerName)}
+  ${row("Pickup", b.pickupAddress)}
+  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+  ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
+  ${row("Total Due", `<span style="color:#c9a84c;font-weight:bold">$${b.priceQuoted.toFixed(2)}</span>`)}
+</table>
+<p style="margin-top:28px;text-align:center">
+  <a href="${invoiceUrl}" style="background:#c9a84c;color:#050505;padding:12px 32px;text-decoration:none;font-weight:bold;font-size:14px;letter-spacing:1px;display:inline-block">PAY INVOICE</a>
+</p>
+${invoicePdfUrl ? `<p style="margin-top:16px;text-align:center"><a href="${invoicePdfUrl}" style="color:#c9a84c;font-size:12px;text-decoration:underline">Download PDF</a></p>` : ""}
+<p style="margin-top:24px;color:#888;font-size:12px">
+  Questions? Reply to this email or visit <a href="${appUrl}/contact" style="color:#c9a84c">${appUrl}/contact</a>.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(b.passengerEmail, `Invoice for Booking ${bookingRef} — Royal Midnight`, html, "invoice_passenger");
+}
+
 export async function sendStatusChangedAdmin(bookingId: number, oldStatus: string, newStatus: string, passengerName: string) {
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 20px">Booking #${bookingId} Status Changed</h2>
