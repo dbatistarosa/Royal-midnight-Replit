@@ -149,7 +149,6 @@ export default function AdminBookings() {
   const [chargePublishableKey, setChargePublishableKey] = useState<string | null>(null);
   const [chargeLoading, setChargeLoading] = useState(false);
   const [sendingInvoiceId, setSendingInvoiceId] = useState<number | null>(null);
-  const [checkingPaymentId, setCheckingPaymentId] = useState<number | null>(null);
 
   const authHdr = token ? `Bearer ${token}` : "";
 
@@ -313,27 +312,6 @@ export default function AdminBookings() {
     }
   };
 
-  const handleCheckPayment = async (b: BookingRow) => {
-    setCheckingPaymentId(b.id);
-    try {
-      const res = await fetch(`${API_BASE}/admin/payments/check/${b.id}`, {
-        method: "POST",
-        headers: { Authorization: authHdr },
-      });
-      const data = await res.json() as { confirmed?: boolean; message?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Check failed");
-      if (data.confirmed) {
-        toast({ title: "Payment confirmed", description: data.message ?? "Booking moved to pending." });
-        refetch();
-      } else {
-        toast({ title: "No payment found", description: data.message ?? "Payment not yet received." });
-      }
-    } catch (err: unknown) {
-      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not check payment.", variant: "destructive" });
-    }
-    setCheckingPaymentId(null);
-  };
-
   const handleSendInvoice = async (b: BookingRow) => {
     if (!confirm(`Send a Stripe invoice to ${b.passengerEmail} for $${b.priceQuoted.toFixed(2)}?`)) return;
     setSendingInvoiceId(b.id);
@@ -472,15 +450,6 @@ export default function AdminBookings() {
                           >
                             {sendingInvoiceId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                             Send Invoice
-                          </button>
-                          <button
-                            onClick={() => void handleCheckPayment(b)}
-                            disabled={checkingPaymentId === b.id}
-                            className="flex items-center gap-1 text-xs border border-green-400/30 text-green-400 hover:bg-green-400/10 px-2.5 py-1.5 transition-colors disabled:opacity-50"
-                            title="Check Stripe for a completed payment on this booking"
-                          >
-                            {checkingPaymentId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <AlertCircle className="w-3 h-3" />}
-                            Check Payment
                           </button>
                         </div>
                       ) : assigningId === b.id ? (
