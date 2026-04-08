@@ -106,6 +106,8 @@ function AdminSettingsInner() {
   const [emailLogs, setEmailLogs] = useState<EmailLog[]>([]);
   const [emailLogsLoading, setEmailLogsLoading] = useState(false);
   const [showEmailLogs, setShowEmailLogs] = useState(false);
+  const [testEmailTo, setTestEmailTo] = useState("");
+  const [testEmailSending, setTestEmailSending] = useState(false);
 
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -709,10 +711,54 @@ function AdminSettingsInner() {
               </div>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground mb-6">
             Also set <code className="text-primary">SMTP_FROM</code> (display name + address, e.g. "Royal Midnight &lt;noreply@yourdomain.com&gt;")
             and <code className="text-primary">ADMIN_EMAIL</code> to receive admin notifications.
           </p>
+
+          {/* Test Email Send */}
+          <div className="border-t border-white/10 pt-5">
+            <p className="text-sm font-medium text-white mb-3">Send Test Email</p>
+            <div className="flex gap-3 items-start">
+              <input
+                type="email"
+                value={testEmailTo}
+                onChange={e => setTestEmailTo(e.target.value)}
+                placeholder="recipient@example.com"
+                className="flex-1 bg-white/5 border border-white/20 text-sm text-white placeholder:text-muted-foreground px-3 py-2 rounded-none outline-none focus:border-primary/60 transition-colors"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  if (!testEmailTo) return;
+                  setTestEmailSending(true);
+                  try {
+                    const r = await fetch(`${API_BASE}/admin/email/test-send`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", ...authHeader },
+                      body: JSON.stringify({ to: testEmailTo }),
+                    });
+                    const data = await r.json() as { message?: string; error?: string };
+                    if (r.ok) {
+                      toast({ title: "Test email sent", description: data.message ?? "Check your inbox." });
+                    } else {
+                      toast({ title: "Failed", description: data.error ?? "Could not send test email.", variant: "destructive" });
+                    }
+                  } catch {
+                    toast({ title: "Error", description: "Network error sending test email.", variant: "destructive" });
+                  } finally {
+                    setTestEmailSending(false);
+                  }
+                }}
+                disabled={testEmailSending || !testEmailTo}
+                className="rounded-none text-xs uppercase tracking-widest border-white/20 whitespace-nowrap"
+              >
+                {testEmailSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Send Test"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">Sends a sample booking confirmation to verify your email provider is working.</p>
+          </div>
         </div>
 
         {/* Email Audit Log */}

@@ -155,6 +155,35 @@ router.get("/admin/revenue", async (_req, res): Promise<void> => {
   }));
 });
 
+router.post("/admin/email/test-send", requireAdmin, async (req, res): Promise<void> => {
+  const { to } = req.body as { to?: string };
+  if (!to || !to.includes("@")) {
+    res.status(400).json({ error: "Valid 'to' email address required" });
+    return;
+  }
+  const { getMailerStatus } = await import("../lib/mailer.js");
+  const status = getMailerStatus();
+  if (!status.configured) {
+    res.status(503).json({ error: "No email provider configured (set RESEND_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS)" });
+    return;
+  }
+  const { sendBookingConfirmationPassenger } = await import("../lib/mailer.js");
+  await sendBookingConfirmationPassenger({
+    id: 0,
+    passengerName: "Test Passenger",
+    passengerEmail: to,
+    pickupAddress: "Fort Lauderdale–Hollywood International Airport (FLL)",
+    dropoffAddress: "1 Hotel South Beach, Miami Beach",
+    pickupAt: new Date(Date.now() + 86400000).toISOString(),
+    vehicleClass: "business",
+    passengers: 2,
+    priceQuoted: 149.0,
+    flightNumber: "AA1234",
+    specialRequests: "This is a test email from Royal Midnight.",
+  });
+  res.json({ success: true, provider: status.provider, message: `Test email sent via ${status.provider} to ${to}` });
+});
+
 router.get("/admin/email-logs", requireAdmin, async (req, res): Promise<void> => {
   const limit = Math.min(parseInt((req.query["limit"] as string) ?? "50", 10), 200);
   const logs = await db

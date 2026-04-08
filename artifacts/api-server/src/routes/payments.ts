@@ -198,13 +198,25 @@ router.post("/admin/payments/check/:bookingId", requireAdmin, async (req, res): 
 
 router.get("/admin/stripe/webhook-status", requireAdmin, async (_req, res): Promise<void> => {
   const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
-  const webhookSecretSet = !!process.env.STRIPE_WEBHOOK_SECRET;
+  const webhookSecretInEnv = !!process.env.STRIPE_WEBHOOK_SECRET;
   const mailerStatus = getMailerStatus();
+
+  // Check DB fallback for webhook secret
+  const dbSecret = await db
+    .select({ value: settingsTable.value })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, "stripe_webhook_secret"))
+    .limit(1)
+    .then(rows => rows[0]?.value ?? null);
+
+  const webhookSecretSet = webhookSecretInEnv || !!dbSecret;
+  const webhookSecretSource = webhookSecretInEnv ? "env" : (dbSecret ? "db" : "none");
 
   if (!stripeConfigured) {
     res.json({
       stripeConfigured: false,
       webhookSecretSet: false,
+      webhookSecretSource,
       webhooks: [],
       expectedUrl: WEBHOOK_URL,
       mailer: mailerStatus,
@@ -226,6 +238,7 @@ router.get("/admin/stripe/webhook-status", requireAdmin, async (_req, res): Prom
     res.json({
       stripeConfigured: true,
       webhookSecretSet,
+      webhookSecretSource,
       webhooks,
       expectedUrl: WEBHOOK_URL,
       isRegistered,
