@@ -422,6 +422,66 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
   res.json(parseBooking(booking));
 });
 
+// GET /bookings/:id/driver-location — passenger-accessible live driver position.
+// Only returns data when booking status is on_way or on_location and driver has shared coords.
+router.get("/bookings/:id/driver-location", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const caller = req.currentUser!;
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+  // Passengers: only their own bookings
+  if (caller.role === "passenger" || caller.role === "corporate") {
+    if (booking.userId !== caller.userId) {
+      const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
+      if (!callerUser || booking.passengerEmail !== callerUser.email) {
+        res.status(403).json({ error: "Access denied" }); return;
+      }
+    }
+  } else if (caller.role !== "admin") {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  // Only active while driver is on the way or on location
+  if (!["on_way", "on_location"].includes(booking.status)) {
+    res.json({ available: false, status: booking.status });
+    return;
+  }
+
+  if (!booking.driverId) { res.json({ available: false, status: booking.status }); return; }
+
+  const [driver] = await db
+    .select({
+      latitude: driversTable.latitude,
+      longitude: driversTable.longitude,
+      locationUpdatedAt: driversTable.locationUpdatedAt,
+      name: usersTable.name,
+    })
+    .from(driversTable)
+    .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
+    .where(eq(driversTable.id, booking.driverId));
+
+  if (!driver?.latitude || !driver?.longitude) {
+    res.json({ available: false, status: booking.status, reason: "no_location" });
+    return;
+  }
+
+  res.json({
+    available: true,
+    status: booking.status,
+    lat: parseFloat(driver.latitude),
+    lng: parseFloat(driver.longitude),
+    driverName: driver.name,
+    locationUpdatedAt: driver.locationUpdatedAt ? driver.locationUpdatedAt.toISOString() : null,
+    pickupAddress: booking.pickupAddress,
+    dropoffAddress: booking.dropoffAddress,
+    pickupLat: null,
+    pickupLng: null,
+  });
+});
+
 router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = UpdateBookingParams.safeParse(req.params);
   if (!params.success) {

@@ -1,13 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle, Navigation } from "lucide-react";
 import { Link, useParams, useLocation } from "wouter";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -35,6 +36,16 @@ type BookingDetail = {
   driverId?: number | null;
 };
 
+type DriverLocation = {
+  available: boolean;
+  status: string;
+  lat?: number;
+  lng?: number;
+  driverName?: string;
+  locationUpdatedAt?: string | null;
+  reason?: string;
+};
+
 type CancelPreview = {
   canCancel: boolean;
   tier: string;
@@ -46,6 +57,191 @@ type CancelPreview = {
   priceQuoted: number;
 };
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Live Driver Tracking Map
+// ──────────────────────────────────────────────────────────────────────────────
+const MAP_STYLES: google.maps.MapTypeStyle[] = [
+  { elementType: "geometry", stylers: [{ color: "#1a1a2e" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#1a1a2e" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#9ca3af" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#2d2d4e" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#16162a" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0f0f23" }] },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+  { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#c9a84c" }] },
+];
+
+function createCarSvgMarker(color: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+    <circle cx="20" cy="20" r="18" fill="${color}" stroke="white" stroke-width="2.5"/>
+    <path d="M13 22 L15 16 L25 16 L27 22 Z" fill="white" opacity="0.9"/>
+    <circle cx="15" cy="23" r="2" fill="white" opacity="0.8"/>
+    <circle cx="25" cy="23" r="2" fill="white" opacity="0.8"/>
+    <rect x="14" y="17" width="5" height="3" rx="0.5" fill="${color}" opacity="0.6"/>
+    <rect x="21" y="17" width="5" height="3" rx="0.5" fill="${color}" opacity="0.6"/>
+  </svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+function createPickupMarker(): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40">
+    <circle cx="16" cy="16" r="14" fill="#c9a84c" stroke="white" stroke-width="2.5"/>
+    <polygon points="10,27 22,27 16,38" fill="#c9a84c"/>
+    <circle cx="16" cy="16" r="5" fill="white"/>
+  </svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+interface DriverTrackingMapProps {
+  bookingId: number;
+  token: string;
+  status: string;
+}
+
+function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps) {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const googleMapRef = useRef<google.maps.Map | null>(null);
+  const driverMarkerRef = useRef<google.maps.Marker | null>(null);
+  const pickupMarkerRef = useRef<google.maps.Marker | null>(null);
+  const [mapsReady, setMapsReady] = useState(false);
+  const [mapsError, setMapsError] = useState<string | null>(null);
+  const [location, setLocation] = useState<DriverLocation | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const fetchLocation = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${bookingId}/driver-location`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json() as DriverLocation;
+      setLocation(data);
+      if (data.available) setLastUpdated(new Date());
+    } catch {
+      // silent — will retry
+    }
+  }, [bookingId, token]);
+
+  // Load Google Maps SDK once
+  useEffect(() => {
+    const apiKey = import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] as string | undefined;
+    if (!apiKey) { setMapsError("Maps not available."); return; }
+    setOptions({ key: apiKey });
+    importLibrary("maps")
+      .then(() => setMapsReady(true))
+      .catch(() => setMapsError("Failed to load map."));
+  }, []);
+
+  // Init map once SDK is ready
+  useEffect(() => {
+    if (!mapsReady || !mapRef.current || googleMapRef.current) return;
+    googleMapRef.current = new google.maps.Map(mapRef.current, {
+      zoom: 14,
+      center: { lat: 25.9, lng: -80.3 },
+      mapTypeId: "roadmap",
+      disableDefaultUI: true,
+      zoomControl: true,
+      styles: MAP_STYLES,
+    });
+  }, [mapsReady]);
+
+  // Fetch location on mount and every 10 seconds
+  useEffect(() => {
+    fetchLocation();
+    const interval = setInterval(() => { fetchLocation(); }, 10000);
+    return () => clearInterval(interval);
+  }, [fetchLocation]);
+
+  // Update map markers when location changes
+  useEffect(() => {
+    if (!googleMapRef.current || !location?.available || !location.lat || !location.lng) return;
+    const map = googleMapRef.current;
+    const driverPos = { lat: location.lat, lng: location.lng };
+
+    // Create or move driver marker
+    if (!driverMarkerRef.current) {
+      driverMarkerRef.current = new google.maps.Marker({
+        map,
+        position: driverPos,
+        icon: { url: createCarSvgMarker("#3b82f6"), scaledSize: new google.maps.Size(40, 40), anchor: new google.maps.Point(20, 20) },
+        title: location.driverName ?? "Your Driver",
+        zIndex: 10,
+      });
+    } else {
+      driverMarkerRef.current.setPosition(driverPos);
+    }
+
+    // Center map on driver
+    map.panTo(driverPos);
+  }, [location]);
+
+  // Add pickup pin once (pickup address label only — no geocoding needed for visual)
+  useEffect(() => {
+    if (!googleMapRef.current || pickupMarkerRef.current) return;
+    // We'll show pickup pin only if we have driver coords to center from
+    if (!location?.available) return;
+    // We can't geocode without extra API call — skip pickup pin for now
+  }, [location]);
+
+  // Status label
+  const trackingLabel =
+    status === "on_way" ? "Your driver is on the way" :
+    status === "on_location" ? "Your driver has arrived at pickup" :
+    "Tracking active";
+
+  const trackingColor =
+    status === "on_way" ? "text-sky-400 border-sky-400/30 bg-sky-400/5" :
+    "text-violet-400 border-violet-400/30 bg-violet-400/5";
+
+  if (mapsError) {
+    return (
+      <div className="bg-card border border-border p-5 text-center text-sm text-muted-foreground">
+        <Navigation className="w-5 h-5 mx-auto mb-2 text-primary" />
+        {mapsError}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-card border border-border overflow-hidden">
+      {/* Header bar */}
+      <div className={`flex items-center justify-between px-5 py-3 border-b ${trackingColor} border-opacity-30`} style={{ borderColor: status === "on_way" ? "rgb(56 189 248 / 0.2)" : "rgb(167 139 250 / 0.2)" }}>
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full animate-pulse ${status === "on_way" ? "bg-sky-400" : "bg-violet-400"}`} />
+          <span className="text-xs uppercase tracking-widest font-medium">{trackingLabel}</span>
+        </div>
+        {lastUpdated && (
+          <span className="text-[10px] text-muted-foreground">
+            Updated {formatDistanceToNow(lastUpdated)} ago
+          </span>
+        )}
+      </div>
+
+      {/* Map */}
+      <div ref={mapRef} style={{ height: 280 }} className="w-full" />
+
+      {/* Driver name + no-location fallback */}
+      <div className="px-5 py-3 border-t border-border flex items-center justify-between text-sm">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Car className="w-4 h-4 text-primary" />
+          {location?.available && location.driverName ? (
+            <span>{location.driverName} · Live tracking</span>
+          ) : location && !location.available && location.reason === "no_location" ? (
+            <span>Driver location sharing is off — they are en route</span>
+          ) : (
+            <span>Locating your driver…</span>
+          )}
+        </div>
+        {!mapsReady && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Main Page
+// ──────────────────────────────────────────────────────────────────────────────
 function PassengerRideDetailInner() {
   const params = useParams();
   const id = parseInt(params.id || "0", 10);
@@ -58,9 +254,8 @@ function PassengerRideDetailInner() {
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelConfirming, setCancelConfirming] = useState(false);
 
-  useEffect(() => {
+  const loadBooking = useCallback(() => {
     if (!id || !token) return;
-    setIsLoading(true);
     fetch(`${API_BASE}/bookings/${id}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -73,6 +268,24 @@ function PassengerRideDetailInner() {
       .finally(() => setIsLoading(false));
   }, [id, token]);
 
+  // Initial load
+  useEffect(() => {
+    setIsLoading(true);
+    loadBooking();
+  }, [loadBooking]);
+
+  // Poll booking status every 15 seconds so the map appears automatically when driver departs
+  useEffect(() => {
+    if (!id || !token) return;
+    const interval = setInterval(() => {
+      fetch(`${API_BASE}/bookings/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() as Promise<BookingDetail> : Promise.reject())
+        .then(data => setBooking(prev => (prev?.status !== data.status ? data : prev)))
+        .catch(() => {});
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [id, token]);
+
   const handleCancelPreview = async () => {
     if (!token) return;
     setCancelLoading(true);
@@ -83,8 +296,8 @@ function PassengerRideDetailInner() {
       if (!res.ok) throw new Error("Could not load cancellation policy.");
       const data = await res.json() as CancelPreview;
       setCancelPreview(data);
-    } catch (err: any) {
-      toast({ title: "Error", description: err?.message || "Could not load cancellation policy.", variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not load cancellation policy.", variant: "destructive" });
     } finally {
       setCancelLoading(false);
     }
@@ -104,17 +317,21 @@ function PassengerRideDetailInner() {
       }
       toast({ title: "Booking cancelled", description: cancelPreview.feeAmount > 0 ? `A $${cancelPreview.feeAmount.toFixed(2)} cancellation fee applies.` : "Your booking has been cancelled at no charge." });
       setLocation("/passenger/rides");
-    } catch (err: any) {
-      toast({ title: "Error", description: err?.message || "Could not cancel booking.", variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not cancel booking.", variant: "destructive" });
       setCancelConfirming(false);
     }
   };
 
   const statusLabel = booking?.status?.replace(/_/g, " ") ?? "";
+  const isTracking = booking?.status === "on_way" || booking?.status === "on_location";
+
   const statusColor =
     booking?.status === "awaiting_payment" ? "border-amber-500/40 bg-amber-500/10 text-amber-400" :
     booking?.status === "pending" ? "border-blue-500/40 bg-blue-500/10 text-blue-400" :
     booking?.status === "confirmed" ? "border-primary/30 bg-primary/10 text-primary" :
+    booking?.status === "on_way" ? "border-sky-500/40 bg-sky-500/10 text-sky-400" :
+    booking?.status === "on_location" ? "border-violet-500/40 bg-violet-500/10 text-violet-400" :
     booking?.status === "in_progress" ? "border-green-500/40 bg-green-500/10 text-green-400" :
     booking?.status === "completed" ? "border-white/20 bg-white/5 text-muted-foreground" :
     "border-red-500/40 bg-red-500/10 text-red-400";
@@ -142,6 +359,15 @@ function PassengerRideDetailInner() {
       ) : booking ? (
         <div className="grid md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-5">
+            {/* Live driver tracking — shown only when driver is on the way or on location */}
+            {isTracking && token && (
+              <DriverTrackingMap
+                bookingId={id}
+                token={token}
+                status={booking.status}
+              />
+            )}
+
             {/* Trip Details */}
             <div className="bg-card border border-border p-5 sm:p-6">
               <h2 className="font-serif text-xl mb-6">Trip Details</h2>
@@ -244,7 +470,7 @@ function PassengerRideDetailInner() {
             )}
 
             {/* Cancel Booking */}
-            {booking && !["completed", "cancelled", "in_progress"].includes(booking.status) && (
+            {booking && !["completed", "cancelled", "in_progress", "on_way", "on_location"].includes(booking.status) && (
               <div className="bg-card border border-red-500/20 p-5 sm:p-6">
                 <h2 className="font-serif text-lg mb-2 text-red-400">Cancel Booking</h2>
                 <p className="text-sm text-muted-foreground mb-4">Need to cancel? Review the cancellation policy before proceeding.</p>
@@ -292,7 +518,6 @@ function PassengerRideDetailInner() {
             </div>
 
             <div className="p-6 space-y-5">
-              {/* Policy message */}
               <div className={`border p-4 text-sm ${cancelPreview.tier === "free" ? "border-green-500/30 bg-green-500/5 text-green-400" : "border-amber-500/30 bg-amber-500/5 text-amber-400"}`}>
                 {cancelPreview.tier === "free"
                   ? <CheckCircle className="w-4 h-4 inline mr-2" />
@@ -300,7 +525,6 @@ function PassengerRideDetailInner() {
                 {cancelPreview.message}
               </div>
 
-              {/* Fee breakdown */}
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-muted-foreground">
                   <span>Booking Total</span>
