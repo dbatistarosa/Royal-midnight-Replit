@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRoute, Link } from "wouter";
 import { API_BASE } from "@/lib/constants";
 import { format } from "date-fns";
-import { CheckCircle2, Clock, Loader2, Calendar, MapPin, User, RefreshCw } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, Calendar, MapPin, User, RefreshCw, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type PublicBooking = {
@@ -13,8 +13,9 @@ type PublicBooking = {
   pickupAddress: string;
   dropoffAddress: string;
   pickupAt: string;
-  priceQuoted?: number;
-  vehicleClass?: string;
+  priceQuoted?: number | null;
+  discountAmount?: number | null;
+  vehicleClass?: string | null;
 };
 
 async function fetchBooking(id: number): Promise<PublicBooking> {
@@ -163,6 +164,18 @@ export default function BookingConfirmation() {
                   <p className="text-white">{booking.dropoffAddress}</p>
                 </div>
               </div>
+              {booking.priceQuoted != null && (
+                <div className="flex gap-3 sm:col-span-2 pt-2 border-t border-white/5">
+                  <CreditCard className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Total Charged</p>
+                    <p className="text-white font-medium">${booking.priceQuoted.toFixed(2)}</p>
+                    {booking.discountAmount != null && booking.discountAmount > 0 && (
+                      <p className="text-green-400 text-xs mt-0.5">Includes ${booking.discountAmount.toFixed(2)} promo discount</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

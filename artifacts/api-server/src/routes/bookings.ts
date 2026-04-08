@@ -307,16 +307,19 @@ router.get("/bookings/:id/track", async (req, res): Promise<void> => {
     return;
   }
 
-  // Public view: only status, identity, and routing — no fare or full PII
+  // Public view: status, identity, routing, and fare for receipt display
   res.json({
     id: booking.id,
     status: booking.status,
     passengerName: booking.passengerName,
+    passengerEmail: booking.passengerEmail,
     pickupAddress: booking.pickupAddress,
     dropoffAddress: booking.dropoffAddress,
     pickupAt: booking.pickupAt.toISOString(),
     driverId: booking.driverId,
     vehicleClass: booking.vehicleClass,
+    priceQuoted: booking.priceQuoted ? parseFloat(booking.priceQuoted) : null,
+    discountAmount: booking.discountAmount ? parseFloat(booking.discountAmount) : null,
   });
 });
 

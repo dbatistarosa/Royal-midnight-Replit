@@ -476,13 +476,28 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       const intent = event.data.object as Stripe.PaymentIntent;
       const bookingId = parseInt(intent.metadata.bookingId || "0");
       if (bookingId) {
-        const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
-        if (current && current.status === "awaiting_payment") {
-          await db.update(bookings)
-            .set({ status: "pending", updatedAt: new Date() })
-            .where(eq(bookings.id, bookingId));
-          firePostPaymentEmails(bookingId).catch(err => console.error("[payments] webhook pi email error:", err));
-        }
+        // Attempt to confirm the booking, retrying a few times in case the booking
+        // row has not yet been committed (e.g. webhook arrived before the booking
+        // creation transaction completed — a narrow but real race condition).
+        const confirmBookingWithRetry = async (attemptsLeft: number): Promise<void> => {
+          const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
+          if (!current) {
+            if (attemptsLeft > 0) {
+              console.warn(`[payments] webhook: booking #${bookingId} not found yet — retrying in 2 s (${attemptsLeft} left)`);
+              setTimeout(() => { confirmBookingWithRetry(attemptsLeft - 1).catch(e => console.error("[payments] webhook retry error:", e)); }, 2000);
+            } else {
+              console.warn(`[payments] webhook: booking #${bookingId} not found after all retries — skipping`);
+            }
+            return;
+          }
+          if (current.status === "awaiting_payment") {
+            await db.update(bookings)
+              .set({ status: "pending", updatedAt: new Date() })
+              .where(eq(bookings.id, bookingId));
+            firePostPaymentEmails(bookingId).catch(err => console.error("[payments] webhook pi email error:", err));
+          }
+        };
+        confirmBookingWithRetry(3).catch(err => console.error("[payments] webhook confirm error:", err));
       }
     }
 
