@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { setAuthTokenGetter } from "@workspace/api-client-react";
 
 export interface AuthUser {
   id: number;
@@ -44,6 +45,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    setAuthTokenGetter(token ? () => token : null);
+  }, [token]);
 
   function login(user: AuthUser, token: string, driverIdArg?: number | null) {
     const did = driverIdArg ?? null;
