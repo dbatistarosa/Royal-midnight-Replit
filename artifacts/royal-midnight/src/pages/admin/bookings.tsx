@@ -811,10 +811,23 @@ export default function AdminBookings() {
                               {b.stripePaymentIntentId && (
                                 <div className="col-span-2">
                                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
-                                    <CreditCard className={`w-3 h-3 ${b.status === "awaiting_payment" ? "text-orange-400" : b.status === "authorized" ? "text-amber-400" : "text-green-400"}`} />
-                                    {b.status === "awaiting_payment" ? "Payment Intent (Unpaid)" : b.status === "authorized" ? "Card Authorization Hold" : "Payment Received"}
+                                    <CreditCard className={`w-3 h-3 ${
+                                      b.status === "awaiting_payment" ? "text-orange-400"
+                                      : b.status === "authorized" ? "text-amber-400"
+                                      : b.status === "cancelled" ? "text-gray-400"
+                                      : "text-green-400"
+                                    }`} />
+                                    {b.status === "awaiting_payment" ? "Payment Intent (Unpaid)"
+                                      : b.status === "authorized" ? "Card Authorization Hold"
+                                      : b.status === "cancelled" ? "Payment Voided / Refunded"
+                                      : "Payment Received"}
                                   </p>
-                                  <p className={`text-xs font-mono break-all ${b.status === "awaiting_payment" ? "text-orange-400" : b.status === "authorized" ? "text-amber-400" : "text-green-400"}`}>{b.stripePaymentIntentId}</p>
+                                  <p className={`text-xs font-mono break-all ${
+                                    b.status === "awaiting_payment" ? "text-orange-400"
+                                    : b.status === "authorized" ? "text-amber-400"
+                                    : b.status === "cancelled" ? "text-gray-400"
+                                    : "text-green-400"
+                                  }`}>{b.stripePaymentIntentId}</p>
                                 </div>
                               )}
                               <div>

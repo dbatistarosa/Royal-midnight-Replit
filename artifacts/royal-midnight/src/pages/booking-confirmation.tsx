@@ -158,7 +158,7 @@ export default function BookingConfirmation() {
             <>
               <XCircle className="w-20 h-20 text-red-500 mx-auto mb-8" />
               <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Booking Cancelled</h1>
-              <p className="text-gray-400 text-base mb-8">This reservation was cancelled. No charge was made to your card.</p>
+              <p className="text-gray-400 text-base mb-8">This reservation was cancelled. If any charge was applied to your card, a full refund has been issued.</p>
               <div className="flex flex-col sm:flex-row justify-center gap-4 mb-8">
                 <Link href="/book">
                   <Button className="w-full sm:w-auto bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">

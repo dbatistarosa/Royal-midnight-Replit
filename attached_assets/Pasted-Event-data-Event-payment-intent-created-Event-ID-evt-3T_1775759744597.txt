@@ -1,0 +1,431 @@
+Event data 
+
+Event
+payment_intent.created
+
+Event ID
+evt_3TK8DrDPidO5fADr0k52zg5m
+Origin date
+Apr 9, 2026, 2:21:36 AM UTC
+Source
+API
+View logs
+API version
+2026-03-25.dahlia
+Description
+A new payment pi_3TK8DrDPidO5fADr0JycP0vO for USD 77.90 was created
+
+Payment intented created
+
+{
+  "object": {
+    "id": "pi_3TK8DrDPidO5fADr0JycP0vO",
+    "object": "payment_intent",
+    "amount": 7790,
+    "amount_capturable": 0,
+    "amount_details": {
+      "tip": {}
+    },
+    "amount_received": 0,
+    "application": null,
+    "application_fee_amount": null,
+    "automatic_payment_methods": null,
+    "canceled_at": null,
+    "cancellation_reason": null,
+    "capture_method": "automatic_async",
+    "client_secret": "pi_3TK8DrDPidO5fADr0JycP0vO_secret_LbIwMWCnxIO4jOdW2xGZiESq6",
+    "confirmation_method": "automatic",
+    "created": 1775701295,
+    "currency": "usd",
+    "customer": null,
+    "customer_account": null,
+    "description": "Royal Midnight — Booking #RM-0014",
+    "excluded_payment_method_types": null,
+    "last_payment_error": null,
+    "latest_charge": null,
+    "livemode": false,
+    "metadata": {
+      "bookingId": "14",
+      "dropoffAddress": "PBI - Palm Beach International Airport",
+      "passengerName": "Bats",
+      "pickupAddress": "4041 San Marino Boulevard, West Palm Beach, FL, USA"
+    },
+    "next_action": null,
+    "on_behalf_of": null,
+    "payment_method": null,
+    "payment_method_configuration_details": null,
+    "payment_method_options": {
+      "card": {
+        "installments": null,
+        "mandate_options": null,
+        "network": null,
+        "request_three_d_secure": "automatic"
+      }
+    },
+    "payment_method_types": [
+      "card"
+    ],
+    "processing": null,
+    "receipt_email": null,
+    "review": null,
+    "setup_future_usage": null,
+    "shipping": null,
+    "source": null,
+    "statement_descriptor": null,
+    "statement_descriptor_suffix": null,
+    "status": "requires_payment_method",
+    "transfer_data": null,
+    "transfer_group": null
+  },
+  "previous_attributes": null
+}
+Event
+charge.succeeded
+
+Event ID
+evt_3TK8DrDPidO5fADr0DEIvIZv
+Origin date
+Apr 9, 2026, 2:21:53 AM UTC
+Source
+API
+View logs
+API version
+2026-03-25.dahlia
+Description
+ch_3TK8DrDPidO5fADr0tQ6y8L3 was charged USD 77.90
+
+{
+  "object": {
+    "id": "ch_3TK8DrDPidO5fADr0tQ6y8L3",
+    "object": "charge",
+    "amount": 7790,
+    "amount_captured": 7790,
+    "amount_refunded": 0,
+    "application": null,
+    "application_fee": null,
+    "application_fee_amount": null,
+    "balance_transaction": null,
+    "billing_details": {
+      "address": {
+        "city": null,
+        "country": "US",
+        "line1": null,
+        "line2": null,
+        "postal_code": "63553",
+        "state": null
+      },
+      "email": null,
+      "name": null,
+      "phone": null,
+      "tax_id": null
+    },
+    "calculated_statement_descriptor": "ROYAL MIDNIGHT",
+    "captured": true,
+    "created": 1775701311,
+    "currency": "usd",
+    "customer": null,
+    "description": "Royal Midnight — Booking #RM-0014",
+    "destination": null,
+    "dispute": null,
+    "disputed": false,
+    "failure_balance_transaction": null,
+    "failure_code": null,
+    "failure_message": null,
+    "fraud_details": {},
+    "livemode": false,
+    "metadata": {
+      "bookingId": "14",
+      "dropoffAddress": "PBI - Palm Beach International Airport",
+      "passengerName": "Bats",
+      "pickupAddress": "4041 San Marino Boulevard, West Palm Beach, FL, USA"
+    },
+    "on_behalf_of": null,
+    "order": null,
+    "outcome": {
+      "advice_code": null,
+      "network_advice_code": null,
+      "network_decline_code": null,
+      "network_status": "approved_by_network",
+      "reason": null,
+      "risk_level": "normal",
+      "risk_score": 4,
+      "seller_message": "Payment complete.",
+      "type": "authorized"
+    },
+    "paid": true,
+    "payment_intent": "pi_3TK8DrDPidO5fADr0JycP0vO",
+    "payment_method": "pm_1TK8E7DPidO5fADrtUz23tuv",
+    "payment_method_details": {
+      "card": {
+        "amount_authorized": 7790,
+        "authorization_code": "573203",
+        "brand": "visa",
+        "checks": {
+          "address_line1_check": null,
+          "address_postal_code_check": "pass",
+          "cvc_check": "pass"
+        },
+        "country": "US",
+        "exp_month": 2,
+        "exp_year": 2028,
+        "extended_authorization": {
+          "status": "disabled"
+        },
+        "fingerprint": "kw49aNPqD9sMh78X",
+        "funding": "credit",
+        "incremental_authorization": {
+          "status": "unavailable"
+        },
+        "installments": null,
+        "last4": "4242",
+        "mandate": null,
+        "multicapture": {
+          "status": "unavailable"
+        },
+        "network": "visa",
+        "network_token": {
+          "used": false
+        },
+        "network_transaction_id": "107119525797788",
+        "overcapture": {
+          "maximum_amount_capturable": 7790,
+          "status": "unavailable"
+        },
+        "regulated_status": "unregulated",
+        "three_d_secure": null,
+        "wallet": null
+      },
+      "type": "card"
+    },
+    "radar_options": {},
+    "receipt_email": null,
+    "receipt_number": null,
+    "receipt_url": "https://pay.stripe.com/receipts/payment/CAcaFwoVYWNjdF8xVEhjUE9EUGlkTzVmQURyKMCa3M4GMgbcSOsQKCI6LBY_KvJchImM7Qa0Y6glz2PtCC57IbLEk9OH5WSOIGz1n6xGyNAzKxofT4R4",
+    "refunded": false,
+    "review": null,
+    "shipping": null,
+    "source": null,
+    "source_transfer": null,
+    "statement_descriptor": null,
+    "statement_descriptor_suffix": null,
+    "status": "succeeded",
+    "transfer_data": null,
+    "transfer_group": null
+  },
+  "previous_attributes": null
+}
+
+Event
+payment_intent.succeeded
+
+Event ID
+evt_3TK8DrDPidO5fADr0yrvkGKC
+Origin date
+Apr 9, 2026, 2:21:53 AM UTC
+Source
+API
+View logs
+API version
+2026-03-25.dahlia
+Description
+The payment pi_3TK8DrDPidO5fADr0JycP0vO for USD 77.90 has succeeded
+
+{
+  "object": {
+    "id": "pi_3TK8DrDPidO5fADr0JycP0vO",
+    "object": "payment_intent",
+    "amount": 7790,
+    "amount_capturable": 0,
+    "amount_details": {
+      "tip": {}
+    },
+    "amount_received": 7790,
+    "application": null,
+    "application_fee_amount": null,
+    "automatic_payment_methods": null,
+    "canceled_at": null,
+    "cancellation_reason": null,
+    "capture_method": "automatic_async",
+    "client_secret": "pi_3TK8DrDPidO5fADr0JycP0vO_secret_LbIwMWCnxIO4jOdW2xGZiESq6",
+    "confirmation_method": "automatic",
+    "created": 1775701295,
+    "currency": "usd",
+    "customer": null,
+    "customer_account": null,
+    "description": "Royal Midnight — Booking #RM-0014",
+    "excluded_payment_method_types": null,
+    "last_payment_error": null,
+    "latest_charge": "ch_3TK8DrDPidO5fADr0tQ6y8L3",
+    "livemode": false,
+    "metadata": {
+      "bookingId": "14",
+      "dropoffAddress": "PBI - Palm Beach International Airport",
+      "passengerName": "Bats",
+      "pickupAddress": "4041 San Marino Boulevard, West Palm Beach, FL, USA"
+    },
+    "next_action": null,
+    "on_behalf_of": null,
+    "payment_method": "pm_1TK8E7DPidO5fADrtUz23tuv",
+    "payment_method_configuration_details": null,
+    "payment_method_options": {
+      "card": {
+        "installments": null,
+        "mandate_options": null,
+        "network": null,
+        "request_three_d_secure": "automatic"
+      }
+    },
+    "payment_method_types": [
+      "card"
+    ],
+    "processing": null,
+    "receipt_email": null,
+    "review": null,
+    "setup_future_usage": null,
+    "shipping": null,
+    "source": null,
+    "statement_descriptor": null,
+    "statement_descriptor_suffix": null,
+    "status": "succeeded",
+    "transfer_data": null,
+    "transfer_group": null
+  },
+  "previous_attributes": null
+}
+Event
+charge.updated
+
+Event ID
+evt_3TK8DrDPidO5fADr0rfegvXh
+Origin date
+Apr 9, 2026, 2:21:55 AM UTC
+Source
+Automatic
+API version
+2026-03-25.dahlia
+Description
+A USD 77.90 payment for ch_3TK8DrDPidO5fADr0tQ6y8L3 was updated
+
+{
+  "object": {
+    "id": "ch_3TK8DrDPidO5fADr0tQ6y8L3",
+    "object": "charge",
+    "amount": 7790,
+    "amount_captured": 7790,
+    "amount_refunded": 0,
+    "application": null,
+    "application_fee": null,
+    "application_fee_amount": null,
+    "balance_transaction": "txn_3TK8DrDPidO5fADr0uGOhJc4",
+    "billing_details": {
+      "address": {
+        "city": null,
+        "country": "US",
+        "line1": null,
+        "line2": null,
+        "postal_code": "63553",
+        "state": null
+      },
+      "email": null,
+      "name": null,
+      "phone": null,
+      "tax_id": null
+    },
+    "calculated_statement_descriptor": "ROYAL MIDNIGHT",
+    "captured": true,
+    "created": 1775701311,
+    "currency": "usd",
+    "customer": null,
+    "description": "Royal Midnight — Booking #RM-0014",
+    "destination": null,
+    "dispute": null,
+    "disputed": false,
+    "failure_balance_transaction": null,
+    "failure_code": null,
+    "failure_message": null,
+    "fraud_details": {},
+    "livemode": false,
+    "metadata": {
+      "bookingId": "14",
+      "dropoffAddress": "PBI - Palm Beach International Airport",
+      "passengerName": "Bats",
+      "pickupAddress": "4041 San Marino Boulevard, West Palm Beach, FL, USA"
+    },
+    "on_behalf_of": null,
+    "order": null,
+    "outcome": {
+      "advice_code": null,
+      "network_advice_code": null,
+      "network_decline_code": null,
+      "network_status": "approved_by_network",
+      "reason": null,
+      "risk_level": "normal",
+      "risk_score": 4,
+      "seller_message": "Payment complete.",
+      "type": "authorized"
+    },
+    "paid": true,
+    "payment_intent": "pi_3TK8DrDPidO5fADr0JycP0vO",
+    "payment_method": "pm_1TK8E7DPidO5fADrtUz23tuv",
+    "payment_method_details": {
+      "card": {
+        "amount_authorized": 7790,
+        "authorization_code": "573203",
+        "brand": "visa",
+        "checks": {
+          "address_line1_check": null,
+          "address_postal_code_check": "pass",
+          "cvc_check": "pass"
+        },
+        "country": "US",
+        "exp_month": 2,
+        "exp_year": 2028,
+        "extended_authorization": {
+          "status": "disabled"
+        },
+        "fingerprint": "kw49aNPqD9sMh78X",
+        "funding": "credit",
+        "incremental_authorization": {
+          "status": "unavailable"
+        },
+        "installments": null,
+        "last4": "4242",
+        "mandate": null,
+        "multicapture": {
+          "status": "unavailable"
+        },
+        "network": "visa",
+        "network_token": {
+          "used": false
+        },
+        "network_transaction_id": "107119525797788",
+        "overcapture": {
+          "maximum_amount_capturable": 7790,
+          "status": "unavailable"
+        },
+        "regulated_status": "unregulated",
+        "three_d_secure": null,
+        "wallet": null
+      },
+      "type": "card"
+    },
+    "radar_options": {},
+    "receipt_email": null,
+    "receipt_number": null,
+    "receipt_url": "https://pay.stripe.com/receipts/payment/CAcaFwoVYWNjdF8xVEhjUE9EUGlkTzVmQURyKMOa3M4GMgZdAG7AOGQ6LBZ327ig47HJqtydW4SsDC2_SIHvWTSIHfe3R8cYG4BaKencPiqSVjsYYC8r",
+    "refunded": false,
+    "review": null,
+    "shipping": null,
+    "source": null,
+    "source_transfer": null,
+    "statement_descriptor": null,
+    "statement_descriptor_suffix": null,
+    "status": "succeeded",
+    "transfer_data": null,
+    "transfer_group": null
+  },
+  "previous_attributes": {
+    "balance_transaction": null,
+    "receipt_url": "https://pay.stripe.com/receipts/payment/CAcaFwoVYWNjdF8xVEhjUE9EUGlkTzVmQURyKMOa3M4GMgaw-q1Kcj46LBZDXaCHWnW463k8Te1raYKsDYIzeCT597NMYg_6QmHOp9pEKMOBO4XyTUnq"
+  }
+}
