@@ -1,0 +1,45 @@
+
+🔴 Critical Bug — setIsProcessing(false) Always Runs
+
+    } catch (err: unknown) {
+      onError(...);
+    }
+    setIsProcessing(false); // ← THIS IS OUTSIDE the try/catch
+
+
+SetIsProcessing(false) is not inside a finally block — but more importantly, if the payment succeeds, you call onSuccess() and then immediately set isProcessing back to false. Depending on what onSuccess does (navigation, state change, unmounting the component), this can cause a state update on an unmounted component crash, killing the flow silently.
+
+    } finally {
+      setIsProcessing(false);
+    }
+
+🔴 paymentIntent.status === "processing" Treated as Success
+
+} else if (paymentIntent?.status === "succeeded" || paymentIntent?.status === "processing") {
+  onSuccess(paymentIntent.id);
+
+"processing" means Stripe has NOT confirmed the payment yet — it’s pending (common with bank transfers, SEPA, etc.). Calling onSuccess here will book the ride before money is confirmed. You need to handle "processing" separately, like showing a “pending confirmation” message.
+
+🟡 return_url Points Back to the Same Page
+return_url: window.location.href,
+
+If Stripe does a redirect (3D Secure, bank auth), the user comes back to the booking form page, not a confirmation page. You should point this to a dedicated confirmation URL like:
+
+return_url: `${window.location.origin}/booking-confirmation`,
+
+🟡 stripePromise Recreates on Every Render
+
+const stripePromise = useMemo(() => loadStripe(publishableKey), [publishableKey]);
+
+useMemo inside a component means if the parent re-renders, publishableKey is compared by value — this is fine IF the key is stable. But if the parent passes a new string reference each render, Stripe reloads. Better to move loadStripe outside the component entirely:
+
+// Outside the component, at module level
+let stripePromise: ReturnType<typeof loadStripe> | null = null;
+
+export function StripePaymentForm({ publishableKey, ... }) {
+  if (!stripePromise) stripePromise = loadStripe(publishableKey);
+  ...
+}
+
+🟡 No Error Reset Between Attempts
+If a user gets an error, fixes their card, and tries again — the previous onError message stays displayed (depending on how the parent handles it). You should call onError("") or a reset function at the top of handleSubmit.
