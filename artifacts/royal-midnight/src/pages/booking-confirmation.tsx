@@ -25,6 +25,7 @@ async function fetchBooking(id: number): Promise<PublicBooking> {
 }
 
 const POLL_TIMEOUT_MS = 3 * 60 * 1000;
+const RETRY_HINT_MS = 15 * 1000;
 
 export default function BookingConfirmation() {
   const [, params] = useRoute("/booking-confirmation/:id");
@@ -36,8 +37,10 @@ export default function BookingConfirmation() {
   const [error, setError] = useState(false);
   const [pollTimedOut, setPollTimedOut] = useState(false);
   const [paymentFailed, setPaymentFailed] = useState(false);
+  const [showRetryButton, setShowRetryButton] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartRef = useRef<number>(Date.now());
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = async (manual = false) => {
     if (!id) return;
@@ -77,6 +80,7 @@ export default function BookingConfirmation() {
         }).catch(() => { });
       } else if (redirectStatus && redirectStatus !== "processing") {
         setPaymentFailed(true);
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       }
     }
   }, [id]);
@@ -85,9 +89,24 @@ export default function BookingConfirmation() {
     pollStartRef.current = Date.now();
     void load();
     pollRef.current = setInterval(() => { void load(); }, 4000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    if (booking?.status === "awaiting_payment" && !paymentFailed && !showRetryButton) {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = setTimeout(() => setShowRetryButton(true), RETRY_HINT_MS);
+    }
+    if (booking?.status !== "awaiting_payment" && retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking?.status, paymentFailed]);
 
   if (isLoading) {
     return (
@@ -177,10 +196,20 @@ export default function BookingConfirmation() {
               </div>
               <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Payment Processing</h1>
               <p className="text-gray-400 text-base mb-4">Your payment is being confirmed. This page will update automatically.</p>
-              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mb-8">
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mb-6">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 Checking payment status every few seconds&hellip;
               </div>
+              {showRetryButton && (
+                <div className="mb-8 p-4 border border-white/10 bg-white/3 text-sm text-gray-400">
+                  <p className="mb-3">Taking longer than expected? If your payment didn't go through, you can try again.</p>
+                  <Link href="/book">
+                    <Button className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-6 py-4 rounded-none">
+                      Retry Payment
+                    </Button>
+                  </Link>
+                </div>
+              )}
             </>
           ) : isAuthorized ? (
             <>
