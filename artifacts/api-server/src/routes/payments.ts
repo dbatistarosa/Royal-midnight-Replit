@@ -622,7 +622,7 @@ async function confirmBookingFromPaymentIntent(bookingId: number, intentId: stri
         .set({ status: "pending", stripePaymentIntentId: intentId, updatedAt: new Date() })
         .where(eq(bookings.id, bookingId));
       console.log(`[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intentId})`);
-      await firePostPaymentEmails(bookingId);
+      firePostPaymentEmails(bookingId).catch(err => console.error("[payments] post-payment email error:", err));
     } else if (!current.stripePaymentIntentId) {
       await db.update(bookings)
         .set({ stripePaymentIntentId: intentId, updatedAt: new Date() })
@@ -741,13 +741,9 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       const intent = event.data.object as Stripe.PaymentIntent;
       const bookingId = parseInt(intent.metadata.bookingId || "0");
       if (bookingId) {
-        const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
-        if (current && current.status === "awaiting_payment") {
-          await db.update(bookings)
-            .set({ status: "cancelled", updatedAt: new Date() })
-            .where(eq(bookings.id, bookingId));
-          console.warn(`[payments] Booking #${bookingId} cancelled due to payment failure:`, intent.last_payment_error?.message);
-        }
+        // Do NOT cancel the booking on payment failure — the passenger should be able to
+        // retry with a different card. The booking stays at awaiting_payment.
+        console.warn(`[payments] Payment failed for booking #${bookingId}:`, intent.last_payment_error?.message ?? "unknown reason");
       }
     }
 
