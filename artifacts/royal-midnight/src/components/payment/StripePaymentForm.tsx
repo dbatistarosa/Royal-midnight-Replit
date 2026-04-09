@@ -58,12 +58,14 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!stripe || !elements) return;
 
     onError("");
+    setPendingMessage(null);
     setIsProcessing(true);
 
     let navigating = false;
@@ -82,11 +84,13 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
         navigating = true;
         onSuccess(paymentIntent.id);
       } else if (paymentIntent?.status === "processing") {
-        navigating = true;
         if (onProcessing) {
+          navigating = true;
           onProcessing(paymentIntent.id);
         } else {
-          onSuccess(paymentIntent.id);
+          setPendingMessage(
+            "Your payment is being processed. We'll confirm your booking by email once payment clears."
+          );
         }
       } else {
         onError("Unexpected payment status. Please contact support.");
@@ -97,6 +101,15 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
       if (!navigating) setIsProcessing(false);
     }
   };
+
+  if (pendingMessage) {
+    return (
+      <div className="flex items-start gap-3 rounded-none border border-primary/30 bg-primary/5 p-4 text-sm text-primary/90 leading-relaxed">
+        <Loader2 className="w-4 h-4 animate-spin mt-0.5 shrink-0" />
+        <span>{pendingMessage}</span>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
