@@ -145,7 +145,10 @@ router.get("/payments/intent/:intentId/client-secret", requireAdmin, async (req,
     }
     res.json({ clientSecret: intent.client_secret, status: intent.status });
   } catch (err: any) {
-    res.status(500).json({ error: err.message ?? "Stripe error" });
+    // Stripe returns a resource_missing error code when the PI doesn't exist.
+    // Surface as 404 so callers can distinguish "not found" from transient errors.
+    const isNotFound = err?.code === "resource_missing" || err?.statusCode === 404;
+    res.status(isNotFound ? 404 : 500).json({ error: err.message ?? "Stripe error" });
   }
 });
 
@@ -182,6 +185,15 @@ router.post("/payments/intent-for-booking/:bookingId", requireAuth, async (req, 
         res.status(403).json({ error: "Access denied" });
         return;
       }
+    }
+
+    // API-level guard — this endpoint is only valid for awaiting_payment bookings
+    if (booking.status !== "awaiting_payment") {
+      res.status(400).json({
+        error: `Cannot issue payment for a booking with status "${booking.status}".`,
+        bookingStatus: booking.status,
+      });
+      return;
     }
 
     const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY ?? "";

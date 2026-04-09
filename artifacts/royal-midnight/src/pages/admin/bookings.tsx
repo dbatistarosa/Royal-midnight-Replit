@@ -338,8 +338,12 @@ export default function AdminBookings() {
           }
 
           // PI is canceled — fall through to create a replacement
+        } else if (existingRes.status !== 404) {
+          // Transient error (5xx, network issue) — do NOT create a new PI to avoid duplicates
+          const errData = await existingRes.json().catch(() => ({})) as { error?: string };
+          throw new Error(errData.error ?? "Could not retrieve payment status. Please try again.");
         }
-        // If fetch failed (PI deleted/expired on Stripe), also fall through to create new
+        // 404 means PI is gone from Stripe (canceled/deleted) — fall through to create new
       }
 
       // Create a fresh PI (only when no existing PI, or existing one is canceled/expired)
