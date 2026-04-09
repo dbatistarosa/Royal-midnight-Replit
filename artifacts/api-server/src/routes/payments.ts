@@ -88,7 +88,7 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
 });
 
 router.post("/payments/create-intent", async (req, res): Promise<void> => {
-  const { bookingId, amount } = req.body as { bookingId?: number; amount: number };
+  const { bookingId, amount, captureMethod } = req.body as { bookingId?: number; amount: number; captureMethod?: "manual" | "automatic" };
   if (!amount || amount <= 0) {
     res.status(400).json({ error: "amount is required" });
     return;
@@ -111,9 +111,13 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
       }
     }
 
+    // Default to manual capture for passenger-initiated bookings (hold-then-charge-on-accept).
+    // Admin Charge Card passes captureMethod: "automatic" for immediate charge.
+    const resolvedCaptureMethod: "manual" | "automatic" = captureMethod ?? "manual";
+
     const paymentIntent = await stripe.paymentIntents.create(
-      { amount: Math.round(amount * 100), currency: "usd", payment_method_types: ["card"], capture_method: "manual", metadata, description },
-      bookingId ? { idempotencyKey: `create-intent-booking-${bookingId}` } : undefined,
+      { amount: Math.round(amount * 100), currency: "usd", payment_method_types: ["card"], capture_method: resolvedCaptureMethod, metadata, description },
+      bookingId ? { idempotencyKey: `create-intent-booking-${bookingId}-${resolvedCaptureMethod}` } : undefined,
     );
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (err: any) {

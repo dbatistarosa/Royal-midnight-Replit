@@ -573,27 +573,14 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
 
   const isAuthorized = booking.status === "authorized";
 
-  // For authorized bookings (manual-capture), attempt Stripe capture first
-  if (isAuthorized) {
-    if (!booking.stripePaymentIntentId) {
-      res.status(400).json({ error: "Booking has no payment intent to capture" });
-      return;
-    }
-    try {
-      const stripe = getStripe();
-      await stripe.paymentIntents.capture(booking.stripePaymentIntentId);
-      // Capture succeeded — continue to assign driver and mark confirmed below
-    } catch (stripeErr: any) {
-      console.error(`[bookings] Stripe capture failed for booking #${id}:`, stripeErr.message);
-      // Capture failed — revert booking to authorized (unmodified), inform driver
-      res.status(402).json({
-        error: `Payment capture failed: ${stripeErr.message}. The booking remains available but could not be charged.`,
-        captureError: true,
-      });
-      return;
-    }
+  if (isAuthorized && !booking.stripePaymentIntentId) {
+    res.status(400).json({ error: "Booking has no payment intent to capture" });
+    return;
   }
 
+  // Step 1: Atomically assign the driver (optimistic locking via isNull check).
+  // We do this BEFORE Stripe capture so that if capture succeeds we have a
+  // consistent DB record. If capture then fails we explicitly revert.
   const [updated] = await db
     .update(bookingsTable)
     .set({ driverId: driverRow.id, status: "confirmed" })
@@ -603,6 +590,29 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
   if (!updated) {
     res.status(409).json({ error: "Booking was just taken by another driver" });
     return;
+  }
+
+  // Step 2: For authorized bookings, attempt Stripe capture now that the assignment is recorded.
+  // On capture failure: revert booking to awaiting_payment + unassign driver + alert admin.
+  if (isAuthorized) {
+    try {
+      const stripe = getStripe();
+      await stripe.paymentIntents.capture(booking.stripePaymentIntentId!);
+      // Capture succeeded — booking stays confirmed, continue to send emails below.
+    } catch (stripeErr: any) {
+      console.error(`[bookings] Stripe capture failed for booking #${id}:`, stripeErr.message);
+      // Revert: unassign driver and move booking back to awaiting_payment so admin is alerted.
+      await db
+        .update(bookingsTable)
+        .set({ driverId: null, status: "awaiting_payment", updatedAt: new Date() })
+        .where(eq(bookingsTable.id, id));
+      console.warn(`[bookings] Booking #${id} reverted to awaiting_payment after capture failure`);
+      res.status(402).json({
+        error: `Payment capture failed: ${stripeErr.message}. The booking is now back in awaiting payment — please contact the admin.`,
+        captureError: true,
+      });
+      return;
+    }
   }
 
   const commissionPct2 = await getCommissionPct();
