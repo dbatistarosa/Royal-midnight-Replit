@@ -937,15 +937,26 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
 
   res.json({ success: true, feePercent: policy.feePercent, feeAmount: policy.feeAmount, netRefund: policy.netRefund });
 
-  // Fire-and-forget: release Stripe authorization hold if booking was authorized
-  if (existing.status === "authorized" && existing.stripePaymentIntentId) {
+  // Fire-and-forget: void the Stripe payment intent on cancellation
+  // - awaiting_payment: PI may not have been paid yet — try to cancel it so the customer cannot be charged
+  // - authorized: card hold has been placed — cancel the PI to release the hold
+  if (["awaiting_payment", "authorized"].includes(existing.status) && existing.stripePaymentIntentId) {
     (async () => {
       try {
         const stripe = getStripe();
-        await stripe.paymentIntents.cancel(existing.stripePaymentIntentId!);
-        console.log(`[bookings] PI authorization released on cancel for booking #${existing.id}`);
+        const pi = await stripe.paymentIntents.retrieve(existing.stripePaymentIntentId!);
+        if (["requires_payment_method", "requires_confirmation", "requires_action", "requires_capture"].includes(pi.status)) {
+          await stripe.paymentIntents.cancel(existing.stripePaymentIntentId!);
+          console.log(`[bookings] PI cancelled on booking cancel for booking #${existing.id} (PI status was: ${pi.status})`);
+        } else if (pi.status === "succeeded") {
+          // Payment came through before we could cancel — issue a full refund
+          await stripe.refunds.create({ payment_intent: existing.stripePaymentIntentId! });
+          console.log(`[bookings] PI already succeeded on cancel for booking #${existing.id} — full refund issued`);
+        } else {
+          console.log(`[bookings] PI in unvoidable status '${pi.status}' for booking #${existing.id} — no action taken`);
+        }
       } catch (err) {
-        console.error("[bookings] Stripe PI cancel failed on booking cancel:", err);
+        console.error("[bookings] Stripe PI cancel/refund failed on booking cancel:", err);
       }
     })();
   }

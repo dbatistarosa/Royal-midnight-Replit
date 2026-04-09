@@ -623,6 +623,16 @@ async function confirmBookingFromPaymentIntent(bookingId: number, intentId: stri
         .where(eq(bookings.id, bookingId));
       console.log(`[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intentId})`);
       firePostPaymentEmails(bookingId).catch(err => console.error("[payments] post-payment email error:", err));
+    } else if (current.status === "cancelled") {
+      // Booking was cancelled but payment went through anyway (race condition) — issue full refund
+      console.warn(`[payments] PI succeeded for already-cancelled booking #${bookingId} — issuing full refund (PI: ${intentId})`);
+      try {
+        const stripe = getStripe();
+        await stripe.refunds.create({ payment_intent: intentId });
+        console.log(`[payments] Full refund issued for cancelled booking #${bookingId} (PI: ${intentId})`);
+      } catch (refundErr: any) {
+        console.error(`[payments] Failed to refund cancelled booking #${bookingId}:`, refundErr.message);
+      }
     } else if (!current.stripePaymentIntentId) {
       await db.update(bookings)
         .set({ stripePaymentIntentId: intentId, updatedAt: new Date() })
