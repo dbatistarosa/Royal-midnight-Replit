@@ -86,9 +86,18 @@ export default function BookingConfirmation() {
   }, [id]);
 
   useEffect(() => {
+    const search = new URLSearchParams(window.location.search);
+    const redirectStatus = search.get("redirect_status");
+    const hasPaymentParam = Boolean(search.get("payment_intent"));
+    const isFailedRedirect = hasPaymentParam && redirectStatus && !["succeeded", "requires_capture", "processing"].includes(redirectStatus);
+
     pollStartRef.current = Date.now();
     void load();
-    pollRef.current = setInterval(() => { void load(); }, 4000);
+
+    if (!isFailedRedirect) {
+      pollRef.current = setInterval(() => { void load(); }, 4000);
+    }
+
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
