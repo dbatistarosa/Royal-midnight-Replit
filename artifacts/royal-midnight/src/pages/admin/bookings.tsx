@@ -307,7 +307,7 @@ export default function AdminBookings() {
         fetch(`${API_BASE}/payments/create-intent`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: authHdr },
-          body: JSON.stringify({ bookingId: b.id, amount: b.priceQuoted, captureMethod: "automatic" }),
+          body: JSON.stringify({ bookingId: b.id, amount: b.priceQuoted }),
         }),
       ]);
       const { publishableKey } = await configRes.json() as { publishableKey: string };

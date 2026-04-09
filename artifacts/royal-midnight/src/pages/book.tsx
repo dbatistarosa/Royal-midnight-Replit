@@ -445,7 +445,10 @@ export default function Book() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount: effectiveTotal, bookingId }),
       });
-      if (!intentRes.ok) throw new Error("Could not initiate payment. Please try again.");
+      if (!intentRes.ok) {
+        const errData = await intentRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(errData.error || "Could not initiate payment. Please try again.");
+      }
       const { clientSecret } = await intentRes.json() as { clientSecret: string };
 
       setPaymentClientSecret(clientSecret);
