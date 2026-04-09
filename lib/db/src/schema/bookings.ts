@@ -25,6 +25,7 @@ export const bookingsTable = pgTable("bookings", {
   paymentType: text("payment_type").default("standard"),
   stripePaymentIntentId: text("stripe_payment_intent_id"),
   reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
+  authorizedAt: timestamp("authorized_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

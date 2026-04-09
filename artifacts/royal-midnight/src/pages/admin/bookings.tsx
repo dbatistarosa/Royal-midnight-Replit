@@ -65,6 +65,7 @@ type DriverOption = { id: number; name: string; status: string };
 
 const STATUS_COLORS: Record<string, string> = {
   awaiting_payment: "text-orange-400 bg-orange-400/10 border-orange-400/20",
+  authorized:       "text-amber-400 bg-amber-400/10 border-amber-400/20",
   pending:          "text-yellow-400 bg-yellow-400/10 border-yellow-400/20",
   confirmed:        "text-primary bg-primary/10 border-primary/20",
   on_way:           "text-sky-400 bg-sky-400/10 border-sky-400/20",
@@ -155,6 +156,7 @@ export default function AdminBookings() {
   const [chargeLoading, setChargeLoading] = useState(false);
   const [sendingInvoiceId, setSendingInvoiceId] = useState<number | null>(null);
   const [syncingPaymentId, setSyncingPaymentId] = useState<number | null>(null);
+  const [cancelAuthId, setCancelAuthId] = useState<number | null>(null);
   const [linkingUserId, setLinkingUserId] = useState<Record<number, string>>({});
   const [linkingLoading, setLinkingLoading] = useState<number | null>(null);
 
@@ -381,6 +383,25 @@ export default function AdminBookings() {
     }
   };
 
+  const handleCancelAuth = async (b: BookingRow) => {
+    if (!confirm(`Cancel the card authorization for booking #RM-${String(b.id).padStart(4, "0")}? The hold on the passenger's card will be released.`)) return;
+    setCancelAuthId(b.id);
+    try {
+      const res = await fetch(`${API_BASE}/admin/payments/cancel-auth/${b.id}`, {
+        method: "POST",
+        headers: { Authorization: authHdr },
+      });
+      const data = await res.json() as { success?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed to cancel authorization");
+      toast({ title: "Authorization cancelled", description: `Card hold released for booking #RM-${String(b.id).padStart(4, "0")}.` });
+      refetch();
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not cancel authorization.", variant: "destructive" });
+    } finally {
+      setCancelAuthId(null);
+    }
+  };
+
   const handleCancelPreview = async (b: BookingRow) => {
     setCancelPreviewLoading(b.id);
     try {
@@ -558,6 +579,18 @@ export default function AdminBookings() {
                           >
                             {syncingPaymentId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                             Sync Payment
+                          </button>
+                        </div>
+                      ) : b.status === "authorized" ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => void handleCancelAuth(b)}
+                            disabled={cancelAuthId === b.id}
+                            title="Cancel the Stripe authorization and release the card hold"
+                            className="flex items-center gap-1 text-xs border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 px-2.5 py-1.5 transition-colors disabled:opacity-50"
+                          >
+                            {cancelAuthId === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />}
+                            Cancel Auth
                           </button>
                         </div>
                       ) : assigningId === b.id ? (

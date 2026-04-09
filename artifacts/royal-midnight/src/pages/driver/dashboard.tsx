@@ -616,9 +616,17 @@ function TabAvailable({ authHeader, onRideAccepted }: { authHeader: string; onRi
   const [loading, setLoading] = useState(true);
 
   const loadTrips = () => {
-    fetch(`${API_BASE}/bookings?status=pending`, { headers: { Authorization: authHeader } })
-      .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
-      .then(data => setTrips(Array.isArray(data) ? data : []))
+    Promise.all([
+      fetch(`${API_BASE}/bookings?status=pending`, { headers: { Authorization: authHeader } })
+        .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([])),
+      fetch(`${API_BASE}/bookings?status=authorized`, { headers: { Authorization: authHeader } })
+        .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([])),
+    ])
+      .then(([pending, authorized]) => {
+        const combined = [...pending, ...authorized];
+        combined.sort((a, b) => new Date(a.pickupAt).getTime() - new Date(b.pickupAt).getTime());
+        setTrips(combined);
+      })
       .catch(() => setTrips([]))
       .finally(() => setLoading(false));
   };

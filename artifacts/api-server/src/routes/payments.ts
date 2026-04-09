@@ -112,7 +112,7 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
     }
 
     const paymentIntent = await stripe.paymentIntents.create(
-      { amount: Math.round(amount * 100), currency: "usd", payment_method_types: ["card"], metadata, description },
+      { amount: Math.round(amount * 100), currency: "usd", payment_method_types: ["card"], capture_method: "manual", metadata, description },
       bookingId ? { idempotencyKey: `create-intent-booking-${bookingId}` } : undefined,
     );
     res.json({ clientSecret: paymentIntent.client_secret });
@@ -163,36 +163,43 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
       return;
     }
 
-    if (intent.status === "succeeded" || intent.status === "processing") {
+    if (intent.status === "succeeded" || intent.status === "requires_capture" || intent.status === "processing") {
       const [current] = await db.select({ status: bookings.status, stripePaymentIntentId: bookings.stripePaymentIntentId }).from(bookings).where(eq(bookings.id, bId));
       if (!current) {
         res.status(404).json({ error: "Booking not found" });
         return;
       }
-      if (intent.status === "succeeded" && current.status === "awaiting_payment") {
-        // Direct success — promote to pending immediately and send emails.
+      if (intent.status === "requires_capture" && current.status === "awaiting_payment") {
+        // Manual-capture flow — card authorized, hold placed. Do NOT charge yet.
+        // Charge happens when a driver accepts the booking.
+        await db.update(bookings)
+          .set({ status: "authorized", stripePaymentIntentId: paymentIntentId, authorizedAt: new Date(), updatedAt: new Date() })
+          .where(eq(bookings.id, bId));
+        // No post-payment emails here — they fire after capture (driver accept).
+        res.json({ success: true, status: "authorized", paymentIntentId, paymentStatus: intent.status });
+      } else if (intent.status === "succeeded" && current.status === "awaiting_payment") {
+        // Direct success (legacy / non-manual-capture path) — promote to pending immediately.
         await db.update(bookings)
           .set({ status: "pending", stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
           .where(eq(bookings.id, bId));
         firePostPaymentEmails(bId).catch(err => console.error("[payments] post-confirm email error:", err));
+        res.json({ success: true, status: "pending", paymentIntentId, paymentStatus: intent.status });
       } else if (intent.status === "processing" && current.status === "awaiting_payment") {
         // Async payment method (e.g. ACH/bank transfer) — store the PI ID now.
         // The booking stays awaiting_payment; the payment_intent.succeeded webhook
-        // will promote it to pending once the charge actually settles.
+        // will promote it once the charge settles.
         await db.update(bookings)
           .set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
           .where(eq(bookings.id, bId));
-      } else if (!current.stripePaymentIntentId) {
-        // Store PI ID even if booking was already moved to pending (e.g. by webhook)
-        await db.update(bookings)
-          .set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
-          .where(eq(bookings.id, bId));
-      }
-      if (intent.status === "processing") {
         res.json({ success: true, status: "awaiting_payment", paymentIntentId, paymentStatus: "processing" });
+      } else if (!current.stripePaymentIntentId) {
+        // Store PI ID even if booking was already moved past awaiting_payment (e.g. by webhook)
+        await db.update(bookings)
+          .set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
+          .where(eq(bookings.id, bId));
+        res.json({ success: true, status: current.status, paymentIntentId, paymentStatus: intent.status });
       } else {
-        const resolvedStatus = current.status === "awaiting_payment" ? "pending" : current.status;
-        res.json({ success: true, status: resolvedStatus, paymentIntentId, paymentStatus: intent.status });
+        res.json({ success: true, status: current.status, paymentIntentId, paymentStatus: intent.status });
       }
     } else {
       // Definitive failure statuses (canceled, requires_payment_method, etc.)
@@ -329,6 +336,7 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
 
     const REQUIRED_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
       "payment_intent.created",
+      "payment_intent.amount_capturable_updated",
       "payment_intent.succeeded",
       "payment_intent.payment_failed",
       "charge.succeeded",
@@ -364,6 +372,7 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
       url: WEBHOOK_URL,
       enabled_events: [
         "payment_intent.created",
+        "payment_intent.amount_capturable_updated",
         "payment_intent.succeeded",
         "payment_intent.payment_failed",
         "charge.succeeded",
@@ -403,6 +412,7 @@ router.post("/admin/stripe/ensure-webhook-events", requireAdmin, async (_req, re
   }
   const REQUIRED_EVENTS: Stripe.WebhookEndpointUpdateParams.EnabledEvent[] = [
     "payment_intent.created",
+    "payment_intent.amount_capturable_updated",
     "payment_intent.succeeded",
     "payment_intent.payment_failed",
     "charge.succeeded",
@@ -429,6 +439,38 @@ router.post("/admin/stripe/ensure-webhook-events", requireAdmin, async (_req, re
     const mergedEvents = Array.from(new Set([...currentEvents, ...REQUIRED_EVENTS])) as Stripe.WebhookEndpointUpdateParams.EnabledEvent[];
     const updated = await stripe.webhookEndpoints.update(ours.id, { enabled_events: mergedEvents });
     res.json({ updated: true, webhookId: updated.id, enabledEvents: updated.enabled_events, addedEvents: missingEvents, message: "Webhook events updated to include all required events." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Admin: cancel a Stripe authorization (manual-capture PI) and release the hold
+
+router.post("/admin/payments/cancel-auth/:bookingId", requireAdmin, async (req, res): Promise<void> => {
+  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+  if (booking.status !== "authorized") {
+    res.status(400).json({ error: `Booking is not in authorized status (current: ${booking.status})` });
+    return;
+  }
+
+  if (!booking.stripePaymentIntentId) {
+    res.status(400).json({ error: "Booking has no associated payment intent to cancel" });
+    return;
+  }
+
+  try {
+    const stripe = getStripe();
+    await stripe.paymentIntents.cancel(booking.stripePaymentIntentId);
+    await db.update(bookings)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(eq(bookings.id, bId));
+    console.log(`[payments] Admin cancelled PI authorization for booking #${bId} (PI: ${booking.stripePaymentIntentId})`);
+    res.json({ success: true, message: "Authorization cancelled and card hold released." });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -566,12 +608,43 @@ async function confirmBookingFromPaymentIntent(bookingId: number, intentId: stri
       console.error(`[payments] Booking #${bookingId} not found after ${maxAttempts} attempts`);
       return;
     }
+    // payment_intent.succeeded fires after capture — move authorized → confirmed
+    // (the driver accept flow already moves it, but webhook is a safety net)
     if (current.status === "awaiting_payment") {
       await db.update(bookings)
         .set({ status: "pending", stripePaymentIntentId: intentId, updatedAt: new Date() })
         .where(eq(bookings.id, bookingId));
       console.log(`[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intentId})`);
       await firePostPaymentEmails(bookingId);
+    } else if (!current.stripePaymentIntentId) {
+      await db.update(bookings)
+        .set({ stripePaymentIntentId: intentId, updatedAt: new Date() })
+        .where(eq(bookings.id, bookingId));
+    }
+    return;
+  }
+}
+
+async function authorizeBookingFromPaymentIntent(bookingId: number, intentId: string, maxAttempts = 4): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const [current] = await db
+      .select({ status: bookings.status, stripePaymentIntentId: bookings.stripePaymentIntentId })
+      .from(bookings)
+      .where(eq(bookings.id, bookingId));
+    if (!current) {
+      if (attempt < maxAttempts) {
+        console.warn(`[payments] webhook: booking #${bookingId} not found yet — retrying in ${2 * attempt}s (attempt ${attempt}/${maxAttempts})`);
+        await new Promise(r => setTimeout(r, 2000 * attempt));
+        continue;
+      }
+      console.error(`[payments] Booking #${bookingId} not found after ${maxAttempts} attempts`);
+      return;
+    }
+    if (current.status === "awaiting_payment") {
+      await db.update(bookings)
+        .set({ status: "authorized", stripePaymentIntentId: intentId, authorizedAt: new Date(), updatedAt: new Date() })
+        .where(eq(bookings.id, bookingId));
+      console.log(`[payments] PI requires_capture → Booking #${bookingId} → authorized (PI: ${intentId})`);
     } else if (!current.stripePaymentIntentId) {
       await db.update(bookings)
         .set({ stripePaymentIntentId: intentId, updatedAt: new Date() })
@@ -637,6 +710,15 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
           console.log(`[payments] Invoice paid → Booking #${bookingId} → pending (PI: ${piId ?? "N/A"})`);
           firePostPaymentEmails(bookingId).catch(err => console.error("[payments] invoice.paid email error:", err));
         }
+      }
+    }
+
+    if (event.type === "payment_intent.amount_capturable_updated") {
+      // Fired when a manual-capture PI reaches requires_capture state (card authorized)
+      const intent = event.data.object as Stripe.PaymentIntent;
+      const bookingId = parseInt(intent.metadata.bookingId || "0");
+      if (bookingId && intent.status === "requires_capture") {
+        await authorizeBookingFromPaymentIntent(bookingId, intent.id);
       }
     }
 

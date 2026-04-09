@@ -221,9 +221,11 @@ function RideCard({ booking, isPast }: { booking: Booking; isPast?: boolean }) {
           <div className={`text-xs px-2.5 py-1 border capitalize ${
             isPast
               ? "bg-muted/50 text-muted-foreground border-border"
+              : booking.status === "authorized"
+              ? "bg-amber-400/10 text-amber-300 border-amber-400/20"
               : "bg-primary/10 text-primary border-primary/20"
           }`}>
-            {booking.status.replace(/_/g, " ")}
+            {booking.status === "authorized" ? "Awaiting driver" : booking.status.replace(/_/g, " ")}
           </div>
         </div>
       </div>
@@ -254,7 +256,7 @@ function PassengerRidesInner() {
   const userId = user?.id ?? 0;
   const { data: bookings, isLoading } = useGetUserBookings(userId, { query: { enabled: !!userId, queryKey: ["userBookings", userId] } });
 
-  const upcomingBookings = (bookings?.filter(b => ['awaiting_payment', 'pending', 'confirmed', 'in_progress'].includes(b.status)) || []) as Booking[];
+  const upcomingBookings = (bookings?.filter(b => ['awaiting_payment', 'authorized', 'pending', 'confirmed', 'in_progress'].includes(b.status)) || []) as Booking[];
   const pastBookings = (bookings?.filter(b => ['completed', 'cancelled'].includes(b.status)) || []) as Booking[];
 
   return (

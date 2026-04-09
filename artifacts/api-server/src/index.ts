@@ -26,7 +26,8 @@ async function runStartupMigrations(): Promise<void> {
   try {
     await client.query(`
       ALTER TABLE bookings
-        ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ
+        ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS authorized_at TIMESTAMPTZ
     `);
   } finally {
     client.release();

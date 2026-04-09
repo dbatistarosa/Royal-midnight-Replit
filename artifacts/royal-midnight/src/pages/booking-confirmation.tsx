@@ -41,7 +41,7 @@ export default function BookingConfirmation() {
       const data = await fetchBooking(id);
       setBooking(data);
       setError(false);
-      // Stop polling once payment is confirmed (status moves past awaiting_payment)
+      // Stop polling once status moves past awaiting_payment (authorized, pending, confirmed, etc.)
       if (data.status !== "awaiting_payment") {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       }
@@ -101,6 +101,7 @@ export default function BookingConfirmation() {
   }
 
   const awaitingPayment = booking.status === "awaiting_payment";
+  const isAuthorized = booking.status === "authorized";
 
   return (
     <div className="min-h-screen bg-[#050505] pt-32 pb-24">
@@ -118,6 +119,15 @@ export default function BookingConfirmation() {
               <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mb-8">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 Checking payment status every few seconds&hellip;
+              </div>
+            </>
+          ) : isAuthorized ? (
+            <>
+              <CheckCircle2 className="w-20 h-20 text-primary mx-auto mb-8" />
+              <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Reservation Received</h1>
+              <div className="inline-flex items-center gap-2 bg-amber-400/10 border border-amber-400/30 text-amber-300 text-sm px-5 py-3 mb-6">
+                <CreditCard className="w-4 h-4 flex-shrink-0" />
+                <span>Your card has been authorized — you will only be charged when a driver accepts your booking.</span>
               </div>
             </>
           ) : (
@@ -168,7 +178,7 @@ export default function BookingConfirmation() {
                 <div className="flex gap-3 sm:col-span-2 pt-2 border-t border-white/5">
                   <CreditCard className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Total Charged</p>
+                    <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">{isAuthorized ? "Amount Authorized" : "Total Charged"}</p>
                     <p className="text-white font-medium">${booking.priceQuoted.toFixed(2)}</p>
                     {booking.discountAmount != null && booking.discountAmount > 0 && (
                       <p className="text-green-400 text-xs mt-0.5">Includes ${booking.discountAmount.toFixed(2)} promo discount</p>

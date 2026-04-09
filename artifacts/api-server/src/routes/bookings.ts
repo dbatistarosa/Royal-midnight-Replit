@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
@@ -36,6 +37,7 @@ function parseBooking(b: typeof bookingsTable.$inferSelect) {
     priceQuoted: parseFloat(b.priceQuoted ?? "0"),
     discountAmount: b.discountAmount != null ? parseFloat(b.discountAmount) : null,
     pickupAt: b.pickupAt.toISOString(),
+    authorizedAt: b.authorizedAt != null ? b.authorizedAt.toISOString() : null,
     createdAt: b.createdAt.toISOString(),
     updatedAt: b.updatedAt.toISOString(),
   };
@@ -119,6 +121,12 @@ async function getCommissionPct(): Promise<number> {
   return row ? parseFloat(row.value) / 100 : 0.70;
 }
 
+function getStripe(): Stripe {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) throw new Error("STRIPE_SECRET_KEY is not configured");
+  return new Stripe(key, { apiVersion: "2024-06-20" as const });
+}
+
 function toDriverView<T extends { priceQuoted: number }>(
   booking: T,
   commissionPct: number
@@ -168,8 +176,8 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
         return;
       }
       // Already in conditions via parsed.data.driverId above — no extra condition needed
-    } else if (requestedStatus === "pending") {
-      // Requesting the open/unassigned pool — limit to bookings with no driver assigned
+    } else if (requestedStatus === "pending" || requestedStatus === "authorized") {
+      // Requesting the open/unassigned pool — includes both pending and authorized bookings
       conditions.push(isNull(bookingsTable.driverId));
     } else {
       // Default: own assigned bookings only
@@ -558,9 +566,32 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
     return;
   }
 
-  if (booking.status !== "pending" || booking.driverId != null) {
+  if (!["pending", "authorized"].includes(booking.status) || booking.driverId != null) {
     res.status(400).json({ error: "Booking is already assigned or not available" });
     return;
+  }
+
+  const isAuthorized = booking.status === "authorized";
+
+  // For authorized bookings (manual-capture), attempt Stripe capture first
+  if (isAuthorized) {
+    if (!booking.stripePaymentIntentId) {
+      res.status(400).json({ error: "Booking has no payment intent to capture" });
+      return;
+    }
+    try {
+      const stripe = getStripe();
+      await stripe.paymentIntents.capture(booking.stripePaymentIntentId);
+      // Capture succeeded — continue to assign driver and mark confirmed below
+    } catch (stripeErr: any) {
+      console.error(`[bookings] Stripe capture failed for booking #${id}:`, stripeErr.message);
+      // Capture failed — revert booking to authorized (unmodified), inform driver
+      res.status(402).json({
+        error: `Payment capture failed: ${stripeErr.message}. The booking remains available but could not be charged.`,
+        captureError: true,
+      });
+      return;
+    }
   }
 
   const [updated] = await db
@@ -578,7 +609,7 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
   const parsedUpdated = parseBooking(updated);
   res.json(parsedUpdated);
 
-  // Fire-and-forget: notify admin and passenger that driver accepted
+  // Fire-and-forget emails
   (async () => {
     try {
       const [driverUser] = await db
@@ -588,10 +619,29 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
         .where(eq(usersTable.id, caller.userId));
       const bookingEmailData = { ...parsedUpdated, vehicleClass: parsedUpdated.vehicleClass ?? "business", passengers: parsedUpdated.passengers ?? 1, driverEarnings: Math.round(parsedUpdated.priceQuoted * commissionPct2 * 100) / 100 };
       const vehicleDescription = [driverUser?.vehicleColor, driverUser?.vehicleYear, driverUser?.vehicleMake, driverUser?.vehicleModel].filter(Boolean).join(" ") || "Luxury Vehicle";
-      await Promise.all([
+
+      const emailPromises: Promise<void>[] = [
         sendDriverAcceptedAdmin(bookingEmailData, driverUser?.name ?? "Driver", driverUser?.email ?? ""),
         sendDriverAcceptedPassenger(bookingEmailData, driverUser?.name ?? "Driver", driverUser?.phone ?? "", vehicleDescription),
-      ]);
+      ];
+
+      // For authorized (captured) bookings, also fire the post-payment confirmation emails
+      // since they were deferred at authorization time
+      if (isAuthorized) {
+        const approvedDrivers = await db
+          .select({ email: usersTable.email })
+          .from(driversTable)
+          .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
+          .where(eq(driversTable.approvalStatus, "approved"));
+        const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
+        emailPromises.push(
+          sendBookingConfirmationPassenger(bookingEmailData),
+          sendNewBookingAdmin(bookingEmailData),
+          sendNewBookingAvailableToDrivers(bookingEmailData, driverEmails),
+        );
+      }
+
+      await Promise.all(emailPromises);
     } catch (err) {
       console.error("[bookings] accept email error:", err);
     }
@@ -876,6 +926,19 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     .where(eq(bookingsTable.id, params.data.id));
 
   res.json({ success: true, feePercent: policy.feePercent, feeAmount: policy.feeAmount, netRefund: policy.netRefund });
+
+  // Fire-and-forget: release Stripe authorization hold if booking was authorized
+  if (existing.status === "authorized" && existing.stripePaymentIntentId) {
+    (async () => {
+      try {
+        const stripe = getStripe();
+        await stripe.paymentIntents.cancel(existing.stripePaymentIntentId!);
+        console.log(`[bookings] PI authorization released on cancel for booking #${existing.id}`);
+      } catch (err) {
+        console.error("[bookings] Stripe PI cancel failed on booking cancel:", err);
+      }
+    })();
+  }
 
   // Fire-and-forget: email admin + passenger
   (async () => {
