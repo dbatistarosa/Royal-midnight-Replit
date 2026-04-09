@@ -5,6 +5,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { hashPassword, isValidHash } from "./lib/hash.js";
 import { safeDecryptField } from "./lib/encrypt.js";
+import { readFileSync, readdirSync, readlinkSync } from "fs";
 
 const rawPort = process.env["PORT"];
 
@@ -336,25 +337,73 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
   }
 }
 
+// Kill any process currently holding a given TCP port using /proc/net/tcp.
+// Works on Linux without fuser/lsof — both are absent from this container.
+function killProcessOnPort(targetPort: number): void {
+  try {
+    const tcpContent = readFileSync("/proc/net/tcp", "utf8");
+    const hexPort = targetPort.toString(16).padStart(4, "0").toUpperCase();
+
+    let targetInode: string | null = null;
+    for (const line of tcpContent.split("\n").slice(1)) {
+      const parts = line.trim().split(/\s+/);
+      const localAddr = parts[1] ?? "";
+      const [, localPortHex] = localAddr.split(":");
+      if (localPortHex?.toUpperCase() === hexPort) {
+        targetInode = parts[9] ?? null;
+        break;
+      }
+    }
+    if (!targetInode) return;
+
+    for (const pid of readdirSync("/proc").filter(d => /^\d+$/.test(d))) {
+      try {
+        for (const fd of readdirSync(`/proc/${pid}/fd`)) {
+          try {
+            const link = readlinkSync(`/proc/${pid}/fd/${fd}`);
+            if (link === `socket:[${targetInode}]`) {
+              process.kill(parseInt(pid, 10), "SIGTERM");
+              logger.info({ pid, port: targetPort }, "Killed process holding port — will retry listen");
+              return;
+            }
+          } catch { /* fd unreadable — process may have exited */ }
+        }
+      } catch { /* pid directory gone */ }
+    }
+  } catch (err) {
+    logger.warn({ err }, "killProcessOnPort failed (non-fatal)");
+  }
+}
+
+function startListening(attempt = 1): void {
+  const server = app.listen(port);
+
+  server.on("listening", () => {
+    logger.info({ port }, "Server listening");
+
+    // Run payout check immediately on startup, then every hour
+    void runWeeklyPayoutIfNeeded();
+    setInterval(() => void runWeeklyPayoutIfNeeded(), 60 * 60 * 1000);
+
+    // Run trip reminder check immediately on startup, then every minute
+    void sendTripReminders();
+    setInterval(() => void sendTripReminders(), 60 * 1000);
+  });
+
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE" && attempt <= 2) {
+      logger.warn({ port, attempt }, "Port in use — killing old process and retrying in 1s");
+      killProcessOnPort(port);
+      setTimeout(() => startListening(attempt + 1), 1000);
+      return;
+    }
+    logger.error({ err }, "Error listening on port");
+    process.exit(1);
+  });
+}
+
 runStartupMigrations()
   .then(() => seedDatabase())
   .then(() => retroactiveEmailLink())
   .then(() => ensureStripeWebhook())
-  .then(() => {
-    app.listen(port, (err) => {
-      if (err) {
-        logger.error({ err }, "Error listening on port");
-        process.exit(1);
-      }
-
-      logger.info({ port }, "Server listening");
-
-      // Run payout check immediately on startup, then every hour
-      void runWeeklyPayoutIfNeeded();
-      setInterval(() => void runWeeklyPayoutIfNeeded(), 60 * 60 * 1000);
-
-      // Run trip reminder check immediately on startup, then every minute
-      void sendTripReminders();
-      setInterval(() => void sendTripReminders(), 60 * 1000);
-    });
-  });
+  .then(() => startListening());

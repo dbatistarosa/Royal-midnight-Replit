@@ -9,6 +9,7 @@ import { API_BASE } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
+import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -253,6 +254,11 @@ function PassengerRideDetailInner() {
   const [cancelPreview, setCancelPreview] = useState<CancelPreview | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelConfirming, setCancelConfirming] = useState(false);
+  const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null);
+  const [paymentPublishableKey, setPaymentPublishableKey] = useState<string | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState<number>(0);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   const loadBooking = useCallback(() => {
     if (!id || !token) return;
@@ -321,6 +327,47 @@ function PassengerRideDetailInner() {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Could not cancel booking.", variant: "destructive" });
       setCancelConfirming(false);
     }
+  };
+
+  const handleCompletePayment = async () => {
+    if (!token || !id) return;
+    setPaymentLoading(true);
+    setPaymentError(null);
+    try {
+      const res = await fetch(`${API_BASE}/payments/intent-for-booking/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Could not open payment form.");
+      }
+      const data = await res.json() as { clientSecret: string; publishableKey: string; amount: number };
+      setPaymentClientSecret(data.clientSecret);
+      setPaymentPublishableKey(data.publishableKey);
+      setPaymentAmount(data.amount);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not open payment form.";
+      setPaymentError(msg);
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  const handlePaymentDone = async (paymentIntentId: string) => {
+    if (!token) return;
+    try {
+      await fetch(`${API_BASE}/payments/confirm/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ paymentIntentId }),
+      });
+    } catch { /* webhook will handle it */ }
+    setPaymentClientSecret(null);
+    setPaymentPublishableKey(null);
+    toast({ title: "Payment complete", description: "Your booking is being confirmed." });
+    loadBooking();
   };
 
   const statusLabel = booking?.status?.replace(/_/g, " ") ?? "";
@@ -425,11 +472,47 @@ function PassengerRideDetailInner() {
               </div>
             </div>
 
-            {/* Awaiting Payment notice */}
+            {/* Awaiting Payment notice — with self-service "Complete Payment" option */}
             {booking.status === "awaiting_payment" && (
-              <div className="border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-400">
-                <p className="font-medium mb-1">Payment Pending</p>
-                <p className="text-amber-400/70">Your reservation is confirmed but awaiting payment. Our team will be in touch to complete the process.</p>
+              <div className="border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-400 space-y-4">
+                <div>
+                  <p className="font-medium mb-1">Payment Pending</p>
+                  <p className="text-amber-400/70">Your reservation is confirmed but awaiting payment. Complete your payment below to secure your ride.</p>
+                </div>
+
+                {paymentError && (
+                  <p className="text-red-400 text-xs">{paymentError}</p>
+                )}
+
+                {paymentClientSecret && paymentPublishableKey ? (
+                  <div className="border-t border-amber-500/20 pt-4 space-y-3">
+                    <p className="text-xs text-amber-400/60 uppercase tracking-widest">Secure Payment</p>
+                    <StripePaymentForm
+                      clientSecret={paymentClientSecret}
+                      publishableKey={paymentPublishableKey}
+                      amount={paymentAmount}
+                      returnUrl={`${window.location.origin}${(import.meta.env.BASE_URL ?? "/").replace(/\/$/, "")}/booking-confirmation/${id}`}
+                      onSuccess={(intentId) => void handlePaymentDone(intentId)}
+                      onProcessing={(intentId) => void handlePaymentDone(intentId)}
+                      onError={(msg) => setPaymentError(msg || null)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { setPaymentClientSecret(null); setPaymentPublishableKey(null); setPaymentError(null); }}
+                      className="text-xs text-amber-400/40 hover:text-amber-400/70 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <Button
+                    onClick={() => void handleCompletePayment()}
+                    disabled={paymentLoading}
+                    className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-6 py-2 rounded-none"
+                  >
+                    {paymentLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Loading...</> : <><CreditCard className="w-3.5 h-3.5 mr-2" />Complete Payment</>}
+                  </Button>
+                )}
               </div>
             )}
           </div>

@@ -302,16 +302,44 @@ export default function AdminBookings() {
   const handleChargeCard = async (b: BookingRow) => {
     setChargeLoading(true);
     try {
-      const [configRes, intentRes] = await Promise.all([
-        fetch(`${API_BASE}/payments/config`, { headers: { Authorization: authHdr } }),
-        fetch(`${API_BASE}/payments/create-intent`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: authHdr },
-          body: JSON.stringify({ bookingId: b.id, amount: b.priceQuoted }),
-        }),
-      ]);
+      const configRes = await fetch(`${API_BASE}/payments/config`, { headers: { Authorization: authHdr } });
       const { publishableKey } = await configRes.json() as { publishableKey: string };
-      const { clientSecret } = await intentRes.json() as { clientSecret: string };
+
+      let clientSecret: string;
+
+      if (b.stripePaymentIntentId) {
+        // Reuse the existing PaymentIntent to avoid creating duplicates in Stripe
+        const existingRes = await fetch(
+          `${API_BASE}/payments/intent/${b.stripePaymentIntentId}/client-secret`,
+          { headers: { Authorization: authHdr } }
+        );
+        if (existingRes.ok) {
+          const existing = await existingRes.json() as { clientSecret: string; status: string };
+          // Only reuse if PI is in a payable state; otherwise fall through to create a new one
+          const payable = ["requires_payment_method", "requires_confirmation", "requires_action"];
+          if (payable.includes(existing.status)) {
+            clientSecret = existing.clientSecret;
+            setChargePublishableKey(publishableKey);
+            setChargeClientSecret(clientSecret);
+            setChargeBooking(b);
+            return;
+          }
+        }
+      }
+
+      // No existing usable PI — create a fresh one
+      const intentRes = await fetch(`${API_BASE}/payments/create-intent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: authHdr },
+        body: JSON.stringify({ bookingId: b.id, amount: b.priceQuoted }),
+      });
+      if (!intentRes.ok) {
+        const err = await intentRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Could not create payment intent.");
+      }
+      const { clientSecret: newClientSecret } = await intentRes.json() as { clientSecret: string };
+      clientSecret = newClientSecret;
+
       setChargePublishableKey(publishableKey);
       setChargeClientSecret(clientSecret);
       setChargeBooking(b);

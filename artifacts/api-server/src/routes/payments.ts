@@ -128,6 +128,91 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
   }
 });
 
+// Retrieve the client_secret for an existing PaymentIntent — used by admin
+// "Charge Card" to reuse an existing PI instead of creating a duplicate.
+router.get("/payments/intent/:intentId/client-secret", requireAdmin, async (req, res): Promise<void> => {
+  const { intentId } = req.params;
+  if (!intentId) {
+    res.status(400).json({ error: "intentId is required" });
+    return;
+  }
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.retrieve(intentId);
+    if (!intent.client_secret) {
+      res.status(400).json({ error: "PaymentIntent has no client secret" });
+      return;
+    }
+    res.json({ clientSecret: intent.client_secret, status: intent.status });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? "Stripe error" });
+  }
+});
+
+// Get or create a PaymentIntent for a booking — used by the passenger ride-detail
+// "Complete Payment" button. Reuses the existing PI if one exists and is payable,
+// otherwise creates a fresh one.
+router.post("/payments/intent-for-booking/:bookingId", async (req, res): Promise<void> => {
+  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  if (!bId) {
+    res.status(400).json({ error: "Invalid booking id" });
+    return;
+  }
+  try {
+    const stripe = getStripe();
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
+    if (!booking) {
+      res.status(404).json({ error: "Booking not found" });
+      return;
+    }
+
+    const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY ?? "";
+
+    // Attempt to reuse existing PI if it's in a retryable state
+    if (booking.stripePaymentIntentId) {
+      try {
+        const existing = await stripe.paymentIntents.retrieve(booking.stripePaymentIntentId);
+        const retryable = ["requires_payment_method", "requires_confirmation", "requires_action"];
+        if (retryable.includes(existing.status) && existing.client_secret) {
+          res.json({
+            clientSecret: existing.client_secret,
+            publishableKey,
+            amount: parseFloat(String(booking.priceQuoted)),
+            reused: true,
+          });
+          return;
+        }
+      } catch {
+        // PI no longer retrievable — fall through to create a fresh one
+      }
+    }
+
+    // Create a new PI
+    const priceQuoted = parseFloat(String(booking.priceQuoted));
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(priceQuoted * 100),
+      currency: "usd",
+      payment_method_types: ["card"],
+      metadata: {
+        bookingId: String(bId),
+        passengerName: booking.passengerName,
+        pickupAddress: booking.pickupAddress,
+        dropoffAddress: booking.dropoffAddress,
+      },
+      description: `Royal Midnight — Booking #RM-${String(bId).padStart(4, "0")} (retry)`,
+    });
+
+    res.json({
+      clientSecret: paymentIntent.client_secret,
+      publishableKey,
+      amount: priceQuoted,
+      reused: false,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? "Stripe error — please try again." });
+  }
+});
+
 // Lookup which booking a PaymentIntent belongs to (via PI metadata) — used by
 // the frontend 3DS recovery path when sessionStorage is unavailable.
 router.get("/payments/find-booking", async (req, res): Promise<void> => {

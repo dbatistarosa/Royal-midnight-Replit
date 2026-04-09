@@ -102,6 +102,8 @@ export default function Book() {
   const pendingBookingIdRef = useRef<number | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [paymentError, setPaymentError] = useState("");
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmRetryIntentId, setConfirmRetryIntentId] = useState<string | null>(null);
   const [minBookingHours, setMinBookingHours] = useState(2);
   const [pickupAirline, setPickupAirline] = useState("");
   const [dropoffAirline, setDropoffAirline] = useState("");
@@ -347,9 +349,10 @@ export default function Book() {
     let existingBookingId: number | null = rawExistingId;
     if (rawExistingId) {
       try {
-        const authHeader = token ? { "Authorization": `Bearer ${token}` } : {};
+        const authHeaders: Record<string, string> = {};
+        if (token) authHeaders["Authorization"] = `Bearer ${token}`;
         const checkRes = await fetch(`${API_BASE}/bookings/${rawExistingId}`, {
-          headers: { ...authHeader },
+          headers: authHeaders,
         });
         if (checkRes.ok) {
           const bk = await checkRes.json() as { status: string; priceQuoted: number };
@@ -498,9 +501,8 @@ export default function Book() {
     // Clean up sessionStorage — payment completed without redirect
     sessionStorage.removeItem("rm_pending_booking_id");
 
-    // Confirm server-side using the same flow as admin Charge Card:
-    // call /payments/confirm, check res.ok, then navigate.
-    // The payment_intent.succeeded webhook also fires as a safety net.
+    // Confirm server-side. The payment_intent.succeeded webhook is a safety net,
+    // but we prefer the direct confirm call to update the booking immediately.
     try {
       const res = await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
         method: "POST",
@@ -512,12 +514,40 @@ export default function Book() {
         throw new Error(data.error || "Booking confirmation failed");
       }
     } catch (err: any) {
-      // Log and continue — the webhook will update the booking if the direct call failed.
-      // The confirmation page polls until status changes.
-      console.warn("[book] confirm failed, falling back to webhook:", err?.message);
+      // Payment succeeded on Stripe but the booking status update failed.
+      // Show a visible error with a retry button so the passenger can complete the booking.
+      // The card has already been charged — do NOT redirect to the confirmation page yet.
+      console.warn("[book] confirm failed:", err?.message);
+      setPaymentClientSecret(null);
+      setPaymentPublishableKey(null);
+      setConfirmError(err?.message ?? "We couldn't update your booking status. Your card was charged. Please use the button below to retry.");
+      setConfirmRetryIntentId(paymentIntentId);
+      return;
     }
 
     setLocation(`/booking-confirmation/${bookingId}`);
+  };
+
+  const handleRetryConfirm = async () => {
+    const bookingId = pendingBookingIdRef.current ?? pendingBookingId;
+    const intentId = confirmRetryIntentId;
+    if (!bookingId || !intentId) return;
+    setConfirmError(null);
+    try {
+      const res = await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentIntentId: intentId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Booking confirmation failed");
+      }
+      setConfirmRetryIntentId(null);
+      setLocation(`/booking-confirmation/${bookingId}`);
+    } catch (err: any) {
+      setConfirmError(err?.message ?? "Still unable to update booking. Please contact support.");
+    }
   };
 
   const handlePaymentError = (message: string) => {
@@ -1061,7 +1091,22 @@ export default function Book() {
                       <h2 className="text-xl font-serif text-white">Complete Your Reservation</h2>
                     </div>
 
-                    {paymentClientSecret && paymentPublishableKey ? (
+                    {confirmError ? (
+                      <div className="space-y-4">
+                        <div className="border border-amber-500/30 bg-amber-500/5 p-5 text-sm">
+                          <p className="font-medium text-amber-400 mb-2">Payment received — booking update needed</p>
+                          <p className="text-amber-400/70 mb-3">Your card was successfully charged, but we couldn't update your booking status. Click below to complete the booking.</p>
+                          {confirmError && <p className="text-xs text-amber-400/50 font-mono mb-3">{confirmError}</p>}
+                          <Button
+                            onClick={() => void handleRetryConfirm()}
+                            className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-6 py-2 rounded-none"
+                          >
+                            Complete Booking
+                          </Button>
+                        </div>
+                        <p className="text-xs text-gray-600">If this keeps failing, please contact <a href="mailto:support@royalmidnight.com" className="text-primary hover:underline">support@royalmidnight.com</a> — your payment reference is: <span className="font-mono">{confirmRetryIntentId}</span></p>
+                      </div>
+                    ) : paymentClientSecret && paymentPublishableKey ? (
                       <div className="space-y-4">
                         <p className="text-xs text-gray-600 uppercase tracking-widest">Powered by Stripe</p>
                         <StripePaymentForm
