@@ -1,0 +1,115 @@
+=== CODE REVIEW: ISSUES TO FIX ===
+
+--- CRITICAL ---
+
+1. routes/addresses.ts (lines 14-42)
+   GET /addresses and POST /addresses are missing requireAuth middleware.
+   Any user can read or create addresses for any userId.
+   Fix: Add requireAuth and verify userId matches the authenticated user.
+
+2. routes/notifications.ts (lines 13-43)
+   GET /notifications and PATCH /notifications/:id/read are missing requireAuth.
+   Any user can read or mark notifications for any other user.
+   Fix: Add requireAuth and validate userId ownership.
+
+3. routes/github.ts (lines 6-71)
+   Admin GitHub endpoints (get user, list repos, create repo) have no requireAdmin middleware.
+   Anyone can call these endpoints.
+   Fix: Add requireAdmin to all three routes.
+
+4. index.ts (line 48)
+   Hardcoded default password "admin2024!" in the database seeding function.
+   Fix: Use an environment variable for the initial admin password.
+
+5. app.ts (line 28)
+   cors() is called with no configuration, allowing requests from any origin.
+   Fix: Set allowed origins explicitly, e.g. cors({ origin: "<https://yourdomain.com>" })
+
+
+--- HIGH ---
+
+6. lib/hash.ts (lines 5-6)
+   Passwords hashed with SHA256 and a static salt instead of bcrypt or argon2.
+   Vulnerable to brute force and rainbow table attacks.
+   Fix: Replace with bcrypt (e.g. bcrypt.hash(password, 10)).
+
+7. routes/auth.ts (line 15)
+   Token generation uses Date.now() making tokens predictable.
+   Fix: Use crypto.randomBytes() for token generation.
+
+8. routes/bookings.ts (lines 296, 304, 950, 954, 956) + routes/payments.ts
+   Multiple console.log() statements expose sensitive data like emails,
+   booking IDs, and payment intents in production logs.
+   Fix: Remove all debug console.log() calls.
+
+9. lib/mailer.ts (line 12)
+   Hardcoded fallback email "admin@royalmidnight.com" if env variable is not set.
+   Fix: Require the environment variable with no fallback in production.
+
+10. routes/payments.ts (lines 26-35) + index.ts (lines 116-121)
+    Stripe webhook signing secret stored in database as a fallback.
+    Fix: Require the environment variable only, no database fallback.
+
+
+--- MEDIUM ---
+
+11. routes/bookings.ts (line 350)
+    GET /bookings/:id/track has no authentication.
+    Anyone knowing a booking ID can track it.
+    Fix: Add requireAuth or at minimum optionalAuth with ownership check.
+
+12. routes/addresses.ts (lines 89-98)
+    DELETE /addresses/:id has no auth or ownership validation.
+    Anyone can delete any address.
+    Fix: Add requireAuth and verify the address belongs to the caller.
+
+13. routes/notifications.ts
+    No ownership check — users can read other users' notifications.
+    Fix: Verify userId in query matches the authenticated user's ID.
+
+14. routes/autocomplete.ts (line 11)
+    Query parameter "q" has no length limit or validation.
+    Could be used as a DoS vector.
+    Fix: Add max length validation on the input.
+
+15. routes/github.ts (lines 10, 19, 69)
+    Errors cast to "any" and raw error messages returned directly to the client.
+    Fix: Return generic error messages to client, log details server-side.
+
+
+--- LOW ---
+
+16. routes/auth.ts
+    No rate limiting on login, register, or forgot-password endpoints.
+    Vulnerable to brute force and credential stuffing.
+    Fix: Add express-rate-limit to these routes.
+
+17. routes/auth.ts (line 19)
+    OTP codes stored in memory — breaks with multiple server instances.
+    Fix: Store OTPs in Redis or the database.
+
+18. app.ts
+    No HTTPS enforcement or HSTS headers configured.
+    Fix: Add middleware to redirect HTTP to HTTPS and set HSTS headers.
+
+19. app.ts
+    No CSRF protection on state-changing requests.
+    Fix: Add CSRF middleware.
+
+20. index.ts (line 321)
+    catch {} silently swallows email send failures — no logging.
+    Fix: Log the error: catch (err) { console.error("Payout email failed", err); }
+
+21. chart.tsx (line 79) / mockup-sandbox chart.tsx (line 78)
+    dangerouslySetInnerHTML used — ensure data is sanitized before rendering.
+
+
+--- QUICK PRIORITY LIST ---
+
+1. Add requireAuth to addresses and notifications routes
+2. Add requireAdmin to GitHub admin routes
+3. Replace SHA256 with bcrypt in lib/hash.ts
+4. Configure CORS with specific allowed origins
+5. Remove hardcoded credentials from index.ts and replit.md
+6. Use crypto.randomBytes() for token generation in auth.ts
+7. Add rate limiting to login, register, forgot-password
