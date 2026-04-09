@@ -329,14 +329,32 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
   try {
     const stripe = getStripe();
 
+    const REQUIRED_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
+      "payment_intent.succeeded",
+      "payment_intent.payment_failed",
+      "charge.dispute.created",
+      "charge.refunded",
+      "invoice.paid",
+    ];
     const existing = await stripe.webhookEndpoints.list({ limit: 20 });
     const alreadyExists = existing.data.find(w => w.url === WEBHOOK_URL);
     if (alreadyExists) {
+      // Ensure the existing webhook has all required events
+      const currentEvents = alreadyExists.enabled_events ?? [];
+      const missingEvents = REQUIRED_EVENTS.filter(e => !currentEvents.includes(e));
+      if (missingEvents.length > 0) {
+        const mergedEvents = Array.from(new Set([...currentEvents, ...REQUIRED_EVENTS])) as Stripe.WebhookEndpointUpdateParams.EnabledEvent[];
+        await stripe.webhookEndpoints.update(alreadyExists.id, { enabled_events: mergedEvents });
+      }
       res.json({
         alreadyExists: true,
         webhookId: alreadyExists.id,
         url: alreadyExists.url,
-        message: "Webhook already registered. The signing secret was set when it was first created — update STRIPE_WEBHOOK_SECRET if needed.",
+        eventsUpdated: missingEvents.length > 0,
+        addedEvents: missingEvents,
+        message: missingEvents.length > 0
+          ? `Webhook events updated to include: ${missingEvents.join(", ")}. The signing secret was set when it was first created.`
+          : "Webhook already registered with all required events. The signing secret was set when it was first created — update STRIPE_WEBHOOK_SECRET if needed.",
       });
       return;
     }
@@ -368,6 +386,42 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
       signingSecret: webhook.secret,
       message: "Webhook registered successfully. The signing secret has been saved and is active. Optionally set it as STRIPE_WEBHOOK_SECRET in your environment for extra security.",
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Admin: ensure existing webhook has required events subscribed
+router.post("/admin/stripe/ensure-webhook-events", requireAdmin, async (_req, res): Promise<void> => {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    res.status(503).json({ error: "STRIPE_SECRET_KEY is not configured" });
+    return;
+  }
+  const REQUIRED_EVENTS: Stripe.WebhookEndpointUpdateParams.EnabledEvent[] = [
+    "payment_intent.succeeded",
+    "payment_intent.payment_failed",
+    "charge.dispute.created",
+    "charge.refunded",
+    "invoice.paid",
+  ];
+  try {
+    const stripe = getStripe();
+    const existing = await stripe.webhookEndpoints.list({ limit: 20 });
+    const ours = existing.data.find(w => w.url === WEBHOOK_URL);
+    if (!ours) {
+      res.json({ updated: false, message: "No webhook registered yet. Use register-webhook first." });
+      return;
+    }
+    const currentEvents = ours.enabled_events ?? [];
+    const missingEvents = REQUIRED_EVENTS.filter(e => !currentEvents.includes(e));
+    if (missingEvents.length === 0) {
+      res.json({ updated: false, webhookId: ours.id, enabledEvents: currentEvents, message: "All required events already subscribed." });
+      return;
+    }
+    // Merge existing events with required ones
+    const mergedEvents = Array.from(new Set([...currentEvents, ...REQUIRED_EVENTS])) as Stripe.WebhookEndpointUpdateParams.EnabledEvent[];
+    const updated = await stripe.webhookEndpoints.update(ours.id, { enabled_events: mergedEvents });
+    res.json({ updated: true, webhookId: updated.id, enabledEvents: updated.enabled_events, addedEvents: missingEvents, message: "Webhook events updated to include all required events." });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

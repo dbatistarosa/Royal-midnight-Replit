@@ -91,7 +91,7 @@ function detectAirportCode(address: string): AirportCode | null {
 export default function Book() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { user, login } = useAuth();
+  const { user, login, token } = useAuth();
   const [step, setStep] = useState<StepKey>(1);
   const [quotes, setQuotes] = useState<{ business: QuoteResult | null; suv: QuoteResult | null }>({ business: null, suv: null });
   const [selectedVehicle, setSelectedVehicle] = useState<"business" | "suv" | null>(null);
@@ -335,13 +335,47 @@ export default function Book() {
     if (!selectedQuote || !selectedVehicle) return;
     const values = form.getValues();
 
-    // If there is already a booking from a prior failed payment attempt, skip
-    // booking creation entirely and re-use the existing booking.  This prevents
-    // ghost "awaiting_payment" duplicates every time the passenger retries.
-    const existingBookingId = pendingBookingIdRef.current ?? pendingBookingId ?? (() => {
+    // If there is already a booking from a prior failed payment attempt, validate
+    // it before reusing — stale IDs from previous sessions must not be reused.
+    const rawExistingId = pendingBookingIdRef.current ?? pendingBookingId ?? (() => {
       const s = sessionStorage.getItem("rm_pending_booking_id");
       return s ? parseInt(s, 10) : null;
     })();
+
+    // Validate the stale booking ID: check it still exists, is awaiting_payment,
+    // and has a priceQuoted that matches the current effectiveTotal within $0.01.
+    let existingBookingId: number | null = rawExistingId;
+    if (rawExistingId) {
+      try {
+        const authHeader = token ? { "Authorization": `Bearer ${token}` } : {};
+        const checkRes = await fetch(`${API_BASE}/bookings/${rawExistingId}`, {
+          headers: { ...authHeader },
+        });
+        if (checkRes.ok) {
+          const bk = await checkRes.json() as { status: string; priceQuoted: number };
+          const priceMatch = Math.abs((bk.priceQuoted ?? 0) - effectiveTotal) <= 0.01;
+          if (bk.status !== "awaiting_payment" || !priceMatch) {
+            // Stale or mismatched — discard and create a fresh booking
+            existingBookingId = null;
+            setPendingBookingId(null);
+            pendingBookingIdRef.current = null;
+            sessionStorage.removeItem("rm_pending_booking_id");
+          }
+        } else {
+          // Booking not found or access denied — discard stale ID
+          existingBookingId = null;
+          setPendingBookingId(null);
+          pendingBookingIdRef.current = null;
+          sessionStorage.removeItem("rm_pending_booking_id");
+        }
+      } catch {
+        // Network error — discard stale ID to be safe
+        existingBookingId = null;
+        setPendingBookingId(null);
+        pendingBookingIdRef.current = null;
+        sessionStorage.removeItem("rm_pending_booking_id");
+      }
+    }
 
     if (!existingBookingId && !user && (!values.password || values.password.length < 6)) {
       toast({ title: "Password required", description: "Please create a password (min 6 characters) to track your booking.", variant: "destructive" });
@@ -354,7 +388,7 @@ export default function Book() {
       let bookingId: number;
 
       if (existingBookingId) {
-        // Retry path — booking already exists, just create a fresh Payment Intent.
+        // Retry path — booking already exists and is valid, just create a fresh Payment Intent.
         bookingId = existingBookingId;
         // Keep state/ref in sync so handlePaymentSuccess can read without sessionStorage fallback
         if (!pendingBookingIdRef.current) pendingBookingIdRef.current = existingBookingId;
@@ -921,7 +955,7 @@ export default function Book() {
                 )}
 
                 <div className="flex justify-between pt-3">
-                  <Button type="button" variant="outline" onClick={() => setStep(1)} className="border-white/15 text-white/60 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs px-6 h-11">
+                  <Button type="button" variant="outline" onClick={() => { sessionStorage.removeItem("rm_pending_booking_id"); setPendingBookingId(null); pendingBookingIdRef.current = null; setStep(1); }} className="border-white/15 text-white/60 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs px-6 h-11">
                     <ChevronLeft className="w-4 h-4 mr-1" /> Back
                   </Button>
                   <Button
@@ -1129,7 +1163,7 @@ export default function Book() {
                         <Button
                           type="button"
                           variant="outline"
-                          onClick={() => setStep(2)}
+                          onClick={() => { sessionStorage.removeItem("rm_pending_booking_id"); setPendingBookingId(null); pendingBookingIdRef.current = null; setStep(2); }}
                           className="w-full border-white/12 text-white/50 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs h-10"
                         >
                           <ChevronLeft className="w-4 h-4 mr-1" /> Change Vehicle

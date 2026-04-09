@@ -39,11 +39,12 @@ const appearance = {
 
 interface CheckoutFormProps {
   amount: number;
+  isTestMode: boolean;
   onSuccess: (paymentIntentId: string) => void;
   onError: (message: string) => void;
 }
 
-function CheckoutForm({ amount, onSuccess, onError }: CheckoutFormProps) {
+function CheckoutForm({ amount, isTestMode, onSuccess, onError }: CheckoutFormProps) {
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -77,6 +78,12 @@ function CheckoutForm({ amount, onSuccess, onError }: CheckoutFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {isTestMode && (
+        <div className="rounded-none border border-amber-500/60 bg-amber-500/10 px-4 py-3 text-sm text-amber-300 leading-snug">
+          <span className="font-semibold uppercase tracking-wide text-amber-400">Test mode active</span>
+          {" "}— use card number <span className="font-mono font-semibold">4242 4242 4242 4242</span>, any future expiry, any CVC.
+        </div>
+      )}
       <PaymentElement />
       <div className="flex items-center justify-between pt-4 border-t border-white/10">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -109,10 +116,11 @@ interface StripePaymentFormProps {
 
 export function StripePaymentForm({ clientSecret, publishableKey, amount, onSuccess, onError }: StripePaymentFormProps) {
   const stripePromise = useMemo(() => loadStripe(publishableKey), [publishableKey]);
+  const isTestMode = publishableKey.startsWith("pk_test_");
 
   return (
     <Elements stripe={stripePromise} options={{ clientSecret, appearance }}>
-      <CheckoutForm amount={amount} onSuccess={onSuccess} onError={onError} />
+      <CheckoutForm amount={amount} isTestMode={isTestMode} onSuccess={onSuccess} onError={onError} />
     </Elements>
   );
 }
