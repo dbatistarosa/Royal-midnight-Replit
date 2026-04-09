@@ -1,9 +1,10 @@
 import { Router, type IRouter } from "express";
 import { createRepo, listUserRepos, getAuthenticatedUser, pushFile, getFileSha } from "../lib/github";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
-router.get("/admin/github/user", async (_req, res): Promise<void> => {
+router.get("/admin/github/user", requireAdmin, async (_req, res): Promise<void> => {
   try {
     const user = await getAuthenticatedUser();
     res.json(user);
@@ -12,7 +13,7 @@ router.get("/admin/github/user", async (_req, res): Promise<void> => {
   }
 });
 
-router.get("/admin/github/repos", async (_req, res): Promise<void> => {
+router.get("/admin/github/repos", requireAdmin, async (_req, res): Promise<void> => {
   try {
     const repos = await listUserRepos();
     res.json(repos);
@@ -21,7 +22,7 @@ router.get("/admin/github/repos", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/admin/github/create-repo", async (req, res): Promise<void> => {
+router.post("/admin/github/create-repo", requireAdmin, async (req, res): Promise<void> => {
   const { name = "royal-midnight", description = "Royal Midnight — Luxury Black Car Service Platform", isPrivate = false } = req.body as {
     name?: string;
     description?: string;
@@ -55,9 +56,8 @@ A comprehensive platform for FLL, MIA, and PBI airport transfers and luxury grou
 - Stripe Payments
 - Google Maps Places API
 
-## Test Credentials
-- Passenger: alex@example.com / password123
-- Admin: admin@royalmidnight.com / admin2024!
+## Getting Started
+See your environment configuration for credentials. Do not commit secrets to this repository.
 
 Built with Royal Midnight Platform.
 `;

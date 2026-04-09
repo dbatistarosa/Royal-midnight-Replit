@@ -25,7 +25,13 @@ app.use(
     },
   }),
 );
-app.use(cors());
+
+const corsOrigin: cors.CorsOptions["origin"] =
+  process.env.NODE_ENV === "production"
+    ? (process.env.CORS_ORIGIN || "https://royalmidnight.com")
+    : true;
+
+app.use(cors({ origin: corsOrigin, credentials: true }));
 
 // Stripe webhook requires raw body for signature verification — must come before express.json()
 app.use("/api/webhook/stripe", express.raw({ type: "application/json" }));

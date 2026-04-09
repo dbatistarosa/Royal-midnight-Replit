@@ -11,10 +11,16 @@ import { requireAuth } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
-router.get("/addresses", async (req, res): Promise<void> => {
+router.get("/addresses", requireAuth, async (req, res): Promise<void> => {
   const parsed = ListAddressesQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== parsed.data.userId) {
+    res.status(403).json({ error: "Access denied" });
     return;
   }
 
@@ -30,10 +36,16 @@ router.get("/addresses", async (req, res): Promise<void> => {
   );
 });
 
-router.post("/addresses", async (req, res): Promise<void> => {
+router.post("/addresses", requireAuth, async (req, res): Promise<void> => {
   const parsed = CreateAddressBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== parsed.data.userId) {
+    res.status(403).json({ error: "Access denied" });
     return;
   }
 
@@ -55,7 +67,6 @@ router.patch("/addresses/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // Fetch address and verify ownership (admins may bypass)
   const [existing] = await db.select().from(savedAddressesTable).where(eq(savedAddressesTable.id, id));
   if (!existing) {
     res.status(404).json({ error: "Address not found" });
@@ -86,10 +97,22 @@ router.patch("/addresses/:id", requireAuth, async (req, res): Promise<void> => {
   res.json({ ...updated, createdAt: updated.createdAt.toISOString() });
 });
 
-router.delete("/addresses/:id", async (req, res): Promise<void> => {
+router.delete("/addresses/:id", requireAuth, async (req, res): Promise<void> => {
   const params = DeleteAddressParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [existing] = await db.select().from(savedAddressesTable).where(eq(savedAddressesTable.id, params.data.id));
+  if (!existing) {
+    res.status(404).json({ error: "Address not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && existing.userId !== caller.userId) {
+    res.status(403).json({ error: "Access denied" });
     return;
   }
 

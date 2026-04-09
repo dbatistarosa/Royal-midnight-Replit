@@ -4,21 +4,30 @@ import { db, usersTable, driversTable, sessionsTable, passwordResetTokensTable }
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
+import rateLimit from "express-rate-limit";
 import { requireAdmin } from "../middleware/auth.js";
-import { hashPassword } from "../lib/hash.js";
+import { hashPassword, verifyPassword } from "../lib/hash.js";
 
 const router: IRouter = Router();
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-function generateToken(userId: number): string {
-  return crypto.createHash("sha256").update(`${userId}_${Date.now()}_rm_secret`).digest("hex");
+function generateToken(): string {
+  return crypto.randomBytes(32).toString("hex");
 }
 
 // In-memory OTP store (production would use Redis)
 const otpStore = new Map<string, { otp: string; expiresAt: number }>();
 
-router.post("/auth/register", async (req, res): Promise<void> => {
+const authRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later." },
+});
+
+router.post("/auth/register", authRateLimit, async (req, res): Promise<void> => {
   const parsed = RegisterBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -40,11 +49,11 @@ router.post("/auth/register", async (req, res): Promise<void> => {
       email,
       phone: phone ?? null,
       role,
-      passwordHash: hashPassword(password),
+      passwordHash: await hashPassword(password),
     })
     .returning();
 
-  const token = generateToken(user.id);
+  const token = generateToken();
   await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
 
   res.status(201).json({
@@ -60,7 +69,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/auth/login", async (req, res): Promise<void> => {
+router.post("/auth/login", authRateLimit, async (req, res): Promise<void> => {
   const parsed = LoginBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -75,13 +84,23 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
-  const hashed = hashPassword(password);
-  if (user.passwordHash && user.passwordHash !== hashed) {
+  if (!user.passwordHash) {
     res.status(401).json({ error: "Invalid credentials" });
     return;
   }
 
-  const token = generateToken(user.id);
+  const { valid, needsRehash } = await verifyPassword(password, user.passwordHash);
+  if (!valid) {
+    res.status(401).json({ error: "Invalid credentials" });
+    return;
+  }
+
+  if (needsRehash) {
+    const newHash = await hashPassword(password);
+    await db.update(usersTable).set({ passwordHash: newHash }).where(eq(usersTable.id, user.id));
+  }
+
+  const token = generateToken();
   await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
 
   let driverId: number | null = null;
@@ -104,7 +123,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/auth/send-otp", async (req, res): Promise<void> => {
+router.post("/auth/send-otp", authRateLimit, async (req, res): Promise<void> => {
   const parsed = SendOtpBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -145,7 +164,7 @@ router.post("/auth/verify-otp", async (req, res): Promise<void> => {
     user = newUser;
   }
 
-  const token = generateToken(user.id);
+  const token = generateToken();
   await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
 
   res.json({
@@ -187,7 +206,7 @@ const DriverRegisterBody = z.object({
   profilePicture: z.string().optional(),
 });
 
-router.post("/auth/driver-register", async (req, res): Promise<void> => {
+router.post("/auth/driver-register", authRateLimit, async (req, res): Promise<void> => {
   const parsed = DriverRegisterBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -202,10 +221,12 @@ router.post("/auth/driver-register", async (req, res): Promise<void> => {
     return;
   }
 
+  const passwordHash = await hashPassword(password);
+
   const result = await db.transaction(async (tx) => {
     const [user] = await tx
       .insert(usersTable)
-      .values({ name, email, phone, role: "driver", passwordHash: hashPassword(password) })
+      .values({ name, email, phone, role: "driver", passwordHash })
       .returning();
 
     const [driver] = await tx
@@ -221,7 +242,7 @@ router.post("/auth/driver-register", async (req, res): Promise<void> => {
       })
       .returning();
 
-    const token = generateToken(user.id);
+    const token = generateToken();
     await tx.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
 
     return { user, driver, token };
@@ -271,7 +292,7 @@ router.post("/auth/admin-register", requireAdmin, async (req, res): Promise<void
       email,
       phone: phone ?? null,
       role: "admin",
-      passwordHash: hashPassword(password),
+      passwordHash: await hashPassword(password),
     })
     .returning();
 
@@ -318,7 +339,7 @@ router.post("/auth/corporate-register", requireAdmin, async (req, res): Promise<
       email,
       phone: phone ?? null,
       role: "corporate",
-      passwordHash: hashPassword(password),
+      passwordHash: await hashPassword(password),
     })
     .returning();
 
@@ -345,7 +366,7 @@ router.get("/auth/corporate-accounts", requireAdmin, async (req, res): Promise<v
 });
 
 // POST /auth/forgot-password — generate reset token and return link
-router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+router.post("/auth/forgot-password", authRateLimit, async (req, res): Promise<void> => {
   const email = (req.body?.email as string | undefined)?.trim().toLowerCase();
   if (!email) {
     res.status(400).json({ error: "email is required" });
@@ -405,7 +426,7 @@ router.post("/auth/reset-password", async (req, res): Promise<void> => {
 
   await db
     .update(usersTable)
-    .set({ passwordHash: hashPassword(password) })
+    .set({ passwordHash: await hashPassword(password) })
     .where(eq(usersTable.id, resetToken.userId));
 
   await db

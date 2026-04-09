@@ -40,12 +40,16 @@ async function seedDatabase(): Promise<void> {
     const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, adminEmail));
 
     if (!existing) {
+      const seedPassword = process.env.ADMIN_SEED_PASSWORD;
+      if (!seedPassword) {
+        logger.warn("ADMIN_SEED_PASSWORD is not set — using default seed password. Set this env var in production.");
+      }
       await db.insert(usersTable).values({
         name: "Royal Midnight Admin",
         email: adminEmail,
         phone: null,
         role: "admin",
-        passwordHash: hashPassword("admin2024!"),
+        passwordHash: await hashPassword(seedPassword || "admin2024!"),
       });
       logger.info("Admin user seeded successfully");
     } else {
@@ -55,7 +59,7 @@ async function seedDatabase(): Promise<void> {
     const allUsers = await db.select().from(usersTable);
     for (const user of allUsers) {
       if (user.passwordHash && !isValidHash(user.passwordHash)) {
-        const fixedHash = hashPassword(user.passwordHash);
+        const fixedHash = await hashPassword(user.passwordHash);
         await db
           .update(usersTable)
           .set({ passwordHash: fixedHash })
@@ -318,7 +322,7 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
     });
 
     for (const p of payouts) {
-      try { await sendWeeklyDriverPayout(p); } catch {}
+      try { await sendWeeklyDriverPayout(p); } catch (err) { logger.error({ err }, "Payout email failed"); }
     }
     await sendWeeklyPayoutAdminReport({
       weekLabel, payouts, commissionPct,
