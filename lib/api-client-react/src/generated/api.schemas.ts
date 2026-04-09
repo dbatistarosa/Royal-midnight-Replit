@@ -270,6 +270,7 @@ export type BookingStatus = (typeof BookingStatus)[keyof typeof BookingStatus];
 
 export const BookingStatus = {
   awaiting_payment: "awaiting_payment",
+  authorized: "authorized",
   pending: "pending",
   confirmed: "confirmed",
   in_progress: "in_progress",
@@ -366,6 +367,7 @@ export type UpdateBookingBodyStatus =
 
 export const UpdateBookingBodyStatus = {
   awaiting_payment: "awaiting_payment",
+  authorized: "authorized",
   pending: "pending",
   confirmed: "confirmed",
   in_progress: "in_progress",

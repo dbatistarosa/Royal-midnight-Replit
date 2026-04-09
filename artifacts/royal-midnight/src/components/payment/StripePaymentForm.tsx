@@ -80,7 +80,9 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
 
       if (error) {
         onError(error.message || "Payment failed. Please try again.");
-      } else if (paymentIntent?.status === "succeeded") {
+      } else if (paymentIntent?.status === "succeeded" || paymentIntent?.status === "requires_capture") {
+        // "succeeded" = immediate capture; "requires_capture" = manual-capture authorization hold
+        // Both are success states — the card was validated and a hold placed.
         navigating = true;
         onSuccess(paymentIntent.id);
       } else if (paymentIntent?.status === "processing") {
