@@ -71,7 +71,7 @@ function CheckoutForm({ amount, returnUrl, onSuccess, onError }: CheckoutFormPro
       });
 
       if (error) {
-        const detail = error.code ? ` (${error.type}: ${error.code})` : "";
+        const detail = ` (${error.type}${error.code ? `: ${error.code}` : ""})`;
         if (error.type === "card_error" || error.type === "validation_error") {
           // Keep the form mounted — user can correct the card details and retry
           setErrorMessage((error.message || "Card error.") + detail);
