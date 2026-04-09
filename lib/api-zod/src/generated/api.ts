@@ -128,6 +128,7 @@ export const ListBookingsResponseItem = zod.object({
   specialRequests: zod.string().nullish(),
   status: zod.enum([
     "awaiting_payment",
+    "authorized",
     "pending",
     "confirmed",
     "on_way",
@@ -199,6 +200,7 @@ export const GetBookingResponse = zod.object({
   specialRequests: zod.string().nullish(),
   status: zod.enum([
     "awaiting_payment",
+    "authorized",
     "pending",
     "confirmed",
     "on_way",
@@ -229,6 +231,7 @@ export const UpdateBookingBody = zod.object({
   status: zod
     .union([
       zod.literal("awaiting_payment"),
+      zod.literal("authorized"),
       zod.literal("pending"),
       zod.literal("confirmed"),
       zod.literal("on_way"),
@@ -258,6 +261,7 @@ export const UpdateBookingResponse = zod.object({
   specialRequests: zod.string().nullish(),
   status: zod.enum([
     "awaiting_payment",
+    "authorized",
     "pending",
     "confirmed",
     "on_way",
@@ -305,6 +309,7 @@ export const AcceptBookingResponse = zod.object({
   specialRequests: zod.string().nullish(),
   status: zod.enum([
     "awaiting_payment",
+    "authorized",
     "pending",
     "confirmed",
     "on_way",
@@ -721,6 +726,7 @@ export const GetUserBookingsResponseItem = zod.object({
   specialRequests: zod.string().nullish(),
   status: zod.enum([
     "awaiting_payment",
+    "authorized",
     "pending",
     "confirmed",
     "on_way",
@@ -1088,6 +1094,7 @@ export const GetRecentBookingsResponseItem = zod.object({
   specialRequests: zod.string().nullish(),
   status: zod.enum([
     "awaiting_payment",
+    "authorized",
     "pending",
     "confirmed",
     "on_way",
@@ -1155,6 +1162,7 @@ export const GetDispatchBoardResponse = zod.object({
       specialRequests: zod.string().nullish(),
       status: zod.enum([
         "awaiting_payment",
+        "authorized",
         "pending",
         "confirmed",
         "on_way",
@@ -1222,6 +1230,7 @@ export const GetDispatchBoardResponse = zod.object({
       specialRequests: zod.string().nullish(),
       status: zod.enum([
         "awaiting_payment",
+        "authorized",
         "pending",
         "confirmed",
         "on_way",
