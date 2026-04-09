@@ -337,23 +337,34 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
   }
 }
 
-// Kill any process currently holding a given TCP port using /proc/net/tcp.
-// Works on Linux without fuser/lsof — both are absent from this container.
+// Kill any process currently holding a given TCP port using /proc/net/tcp{,6}.
+// Node commonly binds on IPv6 (::) even for dual-stack sockets, so we check
+// both files. Works on Linux without fuser/lsof — both absent from this container.
 function killProcessOnPort(targetPort: number): void {
   try {
-    const tcpContent = readFileSync("/proc/net/tcp", "utf8");
     const hexPort = targetPort.toString(16).padStart(4, "0").toUpperCase();
-
     let targetInode: string | null = null;
-    for (const line of tcpContent.split("\n").slice(1)) {
-      const parts = line.trim().split(/\s+/);
-      const localAddr = parts[1] ?? "";
-      const [, localPortHex] = localAddr.split(":");
-      if (localPortHex?.toUpperCase() === hexPort) {
-        targetInode = parts[9] ?? null;
-        break;
-      }
+
+    // Check IPv4 and IPv6 proc files
+    for (const procFile of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+      try {
+        const content = readFileSync(procFile, "utf8");
+        for (const line of content.split("\n").slice(1)) {
+          const parts = line.trim().split(/\s+/);
+          const localAddr = parts[1] ?? "";
+          // IPv4:  "0100007F:1F40"  — port is after the single colon
+          // IPv6:  "000...0001:1F40" — port is after the last colon
+          const colonIdx = localAddr.lastIndexOf(":");
+          const localPortHex = colonIdx >= 0 ? localAddr.slice(colonIdx + 1) : "";
+          if (localPortHex.toUpperCase() === hexPort) {
+            targetInode = parts[9] ?? null;
+            break;
+          }
+        }
+      } catch { /* file may not exist on some kernels */ }
+      if (targetInode) break;
     }
+
     if (!targetInode) return;
 
     for (const pid of readdirSync("/proc").filter(d => /^\d+$/.test(d))) {

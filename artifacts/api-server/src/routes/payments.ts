@@ -10,7 +10,7 @@ import {
   sendInvoiceToPassenger,
   getMailerStatus,
 } from "../lib/mailer.js";
-import { requireAdmin } from "../middleware/auth.js";
+import { requireAdmin, requireAuth } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
@@ -150,9 +150,9 @@ router.get("/payments/intent/:intentId/client-secret", requireAdmin, async (req,
 });
 
 // Get or create a PaymentIntent for a booking — used by the passenger ride-detail
-// "Complete Payment" button. Reuses the existing PI if one exists and is payable,
-// otherwise creates a fresh one.
-router.post("/payments/intent-for-booking/:bookingId", async (req, res): Promise<void> => {
+// "Complete Payment" button. Requires the caller to own the booking (or be admin).
+// Reuses the existing PI if one exists and is payable, otherwise creates a fresh one.
+router.post("/payments/intent-for-booking/:bookingId", requireAuth, async (req, res): Promise<void> => {
   const bId = parseInt(req.params["bookingId"] ?? "", 10);
   if (!bId) {
     res.status(400).json({ error: "Invalid booking id" });
@@ -160,10 +160,28 @@ router.post("/payments/intent-for-booking/:bookingId", async (req, res): Promise
   }
   try {
     const stripe = getStripe();
+    const caller = req.currentUser!;
     const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
     if (!booking) {
       res.status(404).json({ error: "Booking not found" });
       return;
+    }
+
+    // Ownership check — admin can access any booking; passengers/corporate must own it.
+    if (caller.role !== "admin") {
+      let ownershipConfirmed = booking.userId === caller.userId;
+      if (!ownershipConfirmed) {
+        // Cover admin-created bookings linked by email only (userId may be null)
+        const [callerUser] = await db
+          .select({ email: usersTable.email })
+          .from(usersTable)
+          .where(eq(usersTable.id, caller.userId));
+        ownershipConfirmed = !!(callerUser && booking.passengerEmail === callerUser.email);
+      }
+      if (!ownershipConfirmed) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
     }
 
     const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY ?? "";
