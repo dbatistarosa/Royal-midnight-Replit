@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { sql, desc, eq } from "drizzle-orm";
 import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
+import { encryptField, safeDecryptField } from "../lib/encrypt.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
 import {
@@ -301,8 +302,8 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
       commissionPct,
       driverNet,
       bankName: d.payoutBankName ?? null,
-      routingNumber: d.payoutRoutingNumber ?? null,
-      accountNumber: d.payoutAccountNumber ?? null,
+      routingNumber: safeDecryptField(d.payoutRoutingNumber),
+      accountNumber: safeDecryptField(d.payoutAccountNumber),
       legalName: d.payoutLegalName ?? null,
       payoutEmail: d.payoutEmail ?? d.email,
       hasBankDetails: !!(d.payoutBankName && d.payoutRoutingNumber && d.payoutAccountNumber),
@@ -372,8 +373,8 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
       driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
       rides: earnings.rides, grossEarnings: Math.round(earnings.gross * 100) / 100,
       commissionPct, driverNet,
-      bankName: d.payoutBankName ?? null, routingNumber: d.payoutRoutingNumber ?? null,
-      accountNumber: d.payoutAccountNumber ?? null, legalName: d.payoutLegalName ?? null,
+      bankName: d.payoutBankName ?? null, routingNumber: safeDecryptField(d.payoutRoutingNumber),
+      accountNumber: safeDecryptField(d.payoutAccountNumber), legalName: d.payoutLegalName ?? null,
     };
   });
 
@@ -409,8 +410,8 @@ router.patch("/admin/drivers/:id/bank", requireAdmin, async (req, res): Promise<
     .update(driversTable)
     .set({
       payoutBankName: bankName ?? null,
-      payoutRoutingNumber: routingNumber ?? null,
-      payoutAccountNumber: accountNumber ?? null,
+      payoutRoutingNumber: routingNumber ? encryptField(routingNumber) : null,
+      payoutAccountNumber: accountNumber ? encryptField(accountNumber) : null,
       payoutLegalName: legalName ?? null,
       payoutEmail: payoutEmail ?? null,
     })

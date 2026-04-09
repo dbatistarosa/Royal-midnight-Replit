@@ -309,9 +309,9 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     })();
   }
 
-  // If a promo code was used, increment its usedCount (non-blocking)
+  // If a promo code was used, increment its usedCount (intentionally non-blocking)
   if (booking.promoCode) {
-    db.update(promoCodesTable)
+    void db.update(promoCodesTable)
       .set({ usedCount: sql`${promoCodesTable.usedCount} + 1` })
       .where(eq(promoCodesTable.code, booking.promoCode))
       .catch(err => console.error("[bookings] promoCode usedCount increment failed:", err));

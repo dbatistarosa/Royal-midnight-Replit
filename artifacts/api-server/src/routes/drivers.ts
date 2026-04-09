@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, driversTable, bookingsTable, settingsTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
+import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
 import {
   ListDriversQueryParams,
   ListDriversResponse,
@@ -249,17 +250,17 @@ router.get("/drivers/:id/payout", requireAuth, async (req, res): Promise<void> =
     res.status(403).json({ error: "Access denied" }); return;
   }
 
-  // Return masked sensitive fields
+  // Return masked sensitive fields — never return raw SSN/routing/account
   res.json({
     payoutLegalName: driver.payoutLegalName ?? "",
     payoutEmail: driver.payoutEmail ?? "",
     payoutBankName: driver.payoutBankName ?? "",
     hasSsn: !!driver.payoutSsn,
-    ssnLast4: driver.payoutSsn ? driver.payoutSsn.slice(-4) : null,
+    ssnLast4: lastN(driver.payoutSsn, 4),
     hasRoutingNumber: !!driver.payoutRoutingNumber,
-    routingLast4: driver.payoutRoutingNumber ? driver.payoutRoutingNumber.slice(-4) : null,
+    routingLast4: lastN(driver.payoutRoutingNumber, 4),
     hasAccountNumber: !!driver.payoutAccountNumber,
-    accountLast4: driver.payoutAccountNumber ? driver.payoutAccountNumber.slice(-4) : null,
+    accountLast4: lastN(driver.payoutAccountNumber, 4),
   });
 });
 
@@ -282,15 +283,15 @@ router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void>
   if (payoutLegalName !== undefined) updates.payoutLegalName = payoutLegalName.trim() || null;
   if (payoutEmail !== undefined) updates.payoutEmail = payoutEmail.trim() || null;
   if (payoutBankName !== undefined) updates.payoutBankName = payoutBankName.trim() || null;
-  // Only update sensitive fields if a new value is actually provided (non-empty)
+  // Encrypt sensitive fields before storage
   if (payoutSsn && payoutSsn.replace(/\D/g, "").length >= 9) {
-    updates.payoutSsn = payoutSsn.replace(/\D/g, "");
+    updates.payoutSsn = encryptField(payoutSsn.replace(/\D/g, ""));
   }
   if (payoutRoutingNumber && payoutRoutingNumber.replace(/\D/g, "").length === 9) {
-    updates.payoutRoutingNumber = payoutRoutingNumber.replace(/\D/g, "");
+    updates.payoutRoutingNumber = encryptField(payoutRoutingNumber.replace(/\D/g, ""));
   }
   if (payoutAccountNumber && payoutAccountNumber.replace(/\D/g, "").length >= 4) {
-    updates.payoutAccountNumber = payoutAccountNumber.replace(/\D/g, "");
+    updates.payoutAccountNumber = encryptField(payoutAccountNumber.replace(/\D/g, ""));
   }
 
   if (Object.keys(updates).length === 0) {
@@ -304,11 +305,11 @@ router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void>
     payoutEmail: updated.payoutEmail ?? "",
     payoutBankName: updated.payoutBankName ?? "",
     hasSsn: !!updated.payoutSsn,
-    ssnLast4: updated.payoutSsn ? updated.payoutSsn.slice(-4) : null,
+    ssnLast4: lastN(updated.payoutSsn, 4),
     hasRoutingNumber: !!updated.payoutRoutingNumber,
-    routingLast4: updated.payoutRoutingNumber ? updated.payoutRoutingNumber.slice(-4) : null,
+    routingLast4: lastN(updated.payoutRoutingNumber, 4),
     hasAccountNumber: !!updated.payoutAccountNumber,
-    accountLast4: updated.payoutAccountNumber ? updated.payoutAccountNumber.slice(-4) : null,
+    accountLast4: lastN(updated.payoutAccountNumber, 4),
   });
 });
 

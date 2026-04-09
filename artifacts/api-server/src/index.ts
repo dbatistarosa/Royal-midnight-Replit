@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { hashPassword, isValidHash } from "./lib/hash.js";
+import { safeDecryptField } from "./lib/encrypt.js";
 
 const rawPort = process.env["PORT"];
 
@@ -316,8 +317,8 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
         driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
         rides: e.rides, grossEarnings: Math.round(e.gross * 100) / 100,
         commissionPct, driverNet, weekLabel,
-        bankName: d.payoutBankName ?? null, routingNumber: d.payoutRoutingNumber ?? null,
-        accountNumber: d.payoutAccountNumber ?? null, legalName: d.payoutLegalName ?? null,
+        bankName: d.payoutBankName ?? null, routingNumber: safeDecryptField(d.payoutRoutingNumber),
+        accountNumber: safeDecryptField(d.payoutAccountNumber), legalName: d.payoutLegalName ?? null,
       };
     });
 

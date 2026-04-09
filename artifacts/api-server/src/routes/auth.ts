@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
-import { db, usersTable, driversTable, sessionsTable, passwordResetTokensTable } from "@workspace/db";
+import { eq, lt } from "drizzle-orm";
+import { db, usersTable, driversTable, sessionsTable, passwordResetTokensTable, otpCodesTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
@@ -15,9 +15,6 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 function generateToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
-
-// In-memory OTP store (production would use Redis)
-const otpStore = new Map<string, { otp: string; expiresAt: number }>();
 
 const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -132,7 +129,14 @@ router.post("/auth/send-otp", authRateLimit, async (req, res): Promise<void> => 
 
   const { phone } = parsed.data;
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  otpStore.set(phone, { otp, expiresAt: Date.now() + 10 * 60 * 1000 });
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  // Replace any existing OTP for this phone number
+  await db.delete(otpCodesTable).where(eq(otpCodesTable.phone, phone));
+  await db.insert(otpCodesTable).values({ phone, otp, expiresAt });
+
+  // Also clean up expired OTPs across all numbers (opportunistic housekeeping)
+  void db.delete(otpCodesTable).where(lt(otpCodesTable.expiresAt, new Date())).catch(() => null);
 
   req.log.info({ phone }, "OTP generated (SMS integration required for production)");
   res.json({ message: "OTP sent successfully" });
@@ -146,14 +150,17 @@ router.post("/auth/verify-otp", authRateLimit, async (req, res): Promise<void> =
   }
 
   const { phone, otp } = parsed.data;
-  const stored = otpStore.get(phone);
+  const [stored] = await db
+    .select()
+    .from(otpCodesTable)
+    .where(eq(otpCodesTable.phone, phone));
 
-  if (!stored || stored.otp !== otp || Date.now() > stored.expiresAt) {
+  if (!stored || stored.otp !== otp || new Date() > stored.expiresAt) {
     res.status(400).json({ error: "Invalid or expired OTP" });
     return;
   }
 
-  otpStore.delete(phone);
+  await db.delete(otpCodesTable).where(eq(otpCodesTable.id, stored.id));
 
   let [user] = await db.select().from(usersTable).where(eq(usersTable.phone, phone));
   if (!user) {

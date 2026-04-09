@@ -14,3 +14,4 @@ export * from "./ticket-messages";
 export * from "./password-reset-tokens";
 export * from "./email-logs";
 export * from "./vehicle-catalog";
+export * from "./otp-codes";
