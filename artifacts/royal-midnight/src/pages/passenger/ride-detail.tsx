@@ -338,14 +338,29 @@ function PassengerRideDetailInner() {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       });
+      const data = await res.json().catch(() => ({})) as {
+        clientSecret?: string;
+        publishableKey?: string;
+        amount?: number;
+        error?: string;
+        detail?: string;
+        piStatus?: string;
+      };
       if (!res.ok) {
-        const data = await res.json().catch(() => ({})) as { error?: string };
+        if (res.status === 409) {
+          // Payment already received / in-flight — inform user and reload to reflect latest status
+          toast({
+            title: "Payment already received",
+            description: data.detail ?? "Your payment was already processed. Refreshing your booking status...",
+          });
+          loadBooking();
+          return;
+        }
         throw new Error(data.error || "Could not open payment form.");
       }
-      const data = await res.json() as { clientSecret: string; publishableKey: string; amount: number };
-      setPaymentClientSecret(data.clientSecret);
-      setPaymentPublishableKey(data.publishableKey);
-      setPaymentAmount(data.amount);
+      setPaymentClientSecret(data.clientSecret ?? null);
+      setPaymentPublishableKey(data.publishableKey ?? null);
+      setPaymentAmount(data.amount ?? 0);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not open payment form.";
       setPaymentError(msg);

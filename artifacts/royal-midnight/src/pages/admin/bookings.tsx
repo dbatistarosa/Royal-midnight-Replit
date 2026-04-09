@@ -308,26 +308,41 @@ export default function AdminBookings() {
       let clientSecret: string;
 
       if (b.stripePaymentIntentId) {
-        // Reuse the existing PaymentIntent to avoid creating duplicates in Stripe
+        // Never create a duplicate PI when one already exists — check status first.
         const existingRes = await fetch(
           `${API_BASE}/payments/intent/${b.stripePaymentIntentId}/client-secret`,
           { headers: { Authorization: authHdr } }
         );
         if (existingRes.ok) {
           const existing = await existingRes.json() as { clientSecret: string; status: string };
-          // Only reuse if PI is in a payable state; otherwise fall through to create a new one
           const payable = ["requires_payment_method", "requires_confirmation", "requires_action"];
+          const alreadyPaid = ["succeeded", "processing", "requires_capture"];
+
           if (payable.includes(existing.status)) {
+            // Reuse the existing PI — passenger can complete payment with it
             clientSecret = existing.clientSecret;
             setChargePublishableKey(publishableKey);
             setChargeClientSecret(clientSecret);
             setChargeBooking(b);
             return;
           }
+
+          if (alreadyPaid.includes(existing.status)) {
+            // Payment already received or in-flight — do not create a new PI
+            toast({
+              title: "Payment already processed",
+              description: `Stripe shows this payment as "${existing.status}". Use the "Check Payment" action to sync the booking status.`,
+              variant: "destructive",
+            });
+            return;
+          }
+
+          // PI is canceled — fall through to create a replacement
         }
+        // If fetch failed (PI deleted/expired on Stripe), also fall through to create new
       }
 
-      // No existing usable PI — create a fresh one
+      // Create a fresh PI (only when no existing PI, or existing one is canceled/expired)
       const intentRes = await fetch(`${API_BASE}/payments/create-intent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: authHdr },

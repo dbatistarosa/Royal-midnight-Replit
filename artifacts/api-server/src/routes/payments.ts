@@ -186,12 +186,15 @@ router.post("/payments/intent-for-booking/:bookingId", requireAuth, async (req, 
 
     const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY ?? "";
 
-    // Attempt to reuse existing PI if it's in a retryable state
+    // Deduplicate: check the existing PI before creating a new one.
     if (booking.stripePaymentIntentId) {
       try {
         const existing = await stripe.paymentIntents.retrieve(booking.stripePaymentIntentId);
-        const retryable = ["requires_payment_method", "requires_confirmation", "requires_action"];
-        if (retryable.includes(existing.status) && existing.client_secret) {
+        const payable = ["requires_payment_method", "requires_confirmation", "requires_action"];
+        const alreadyPaid = ["succeeded", "processing", "requires_capture"];
+
+        if (payable.includes(existing.status) && existing.client_secret) {
+          // Reuse — passenger can complete payment using this existing PI
           res.json({
             clientSecret: existing.client_secret,
             publishableKey,
@@ -200,12 +203,25 @@ router.post("/payments/intent-for-booking/:bookingId", requireAuth, async (req, 
           });
           return;
         }
+
+        if (alreadyPaid.includes(existing.status)) {
+          // Payment is already received or in-flight — do NOT create a new PI.
+          // The webhook or a manual confirm call will update the booking status.
+          res.status(409).json({
+            error: "Payment already received",
+            detail: `Your payment is ${existing.status}. Your booking status will update shortly — please refresh the page in a moment.`,
+            piStatus: existing.status,
+          });
+          return;
+        }
+
+        // PI is canceled or unknown — fall through to create a replacement
       } catch {
-        // PI no longer retrievable — fall through to create a fresh one
+        // PI no longer retrievable (deleted/expired) — create a fresh one
       }
     }
 
-    // Create a new PI
+    // Create a new PI (only reached when no existing PI, or existing one is canceled/expired)
     const priceQuoted = parseFloat(String(booking.priceQuoted));
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(priceQuoted * 100),
