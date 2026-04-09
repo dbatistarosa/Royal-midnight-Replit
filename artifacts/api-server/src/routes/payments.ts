@@ -111,13 +111,10 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
       }
     }
 
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100),
-      currency: "usd",
-      payment_method_types: ["card"],
-      metadata,
-      description,
-    });
+    const paymentIntent = await stripe.paymentIntents.create(
+      { amount: Math.round(amount * 100), currency: "usd", payment_method_types: ["card"], metadata, description },
+      bookingId ? { idempotencyKey: `create-intent-booking-${bookingId}` } : undefined,
+    );
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -191,11 +188,12 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
           .set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
           .where(eq(bookings.id, bId));
       }
-      // Return success even if already confirmed (webhook may have beaten us)
-      const resolvedStatus = intent.status === "succeeded" && current.status === "awaiting_payment"
-        ? "pending"
-        : current.status;
-      res.json({ success: true, status: resolvedStatus, paymentIntentId, paymentStatus: intent.status });
+      if (intent.status === "processing") {
+        res.json({ success: true, status: "awaiting_payment", paymentIntentId, paymentStatus: "processing" });
+      } else {
+        const resolvedStatus = current.status === "awaiting_payment" ? "pending" : current.status;
+        res.json({ success: true, status: resolvedStatus, paymentIntentId, paymentStatus: intent.status });
+      }
     } else {
       // Definitive failure statuses (canceled, requires_payment_method, etc.)
       res.status(400).json({ error: "Payment not completed", status: intent.status });
@@ -330,10 +328,13 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
     const stripe = getStripe();
 
     const REQUIRED_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
+      "payment_intent.created",
       "payment_intent.succeeded",
       "payment_intent.payment_failed",
-      "charge.dispute.created",
+      "charge.succeeded",
+      "charge.updated",
       "charge.refunded",
+      "charge.dispute.created",
       "invoice.paid",
     ];
     const existing = await stripe.webhookEndpoints.list({ limit: 20 });
@@ -362,10 +363,13 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
     const webhook = await stripe.webhookEndpoints.create({
       url: WEBHOOK_URL,
       enabled_events: [
+        "payment_intent.created",
         "payment_intent.succeeded",
         "payment_intent.payment_failed",
-        "charge.dispute.created",
+        "charge.succeeded",
+        "charge.updated",
         "charge.refunded",
+        "charge.dispute.created",
         "invoice.paid",
       ],
       description: "Royal Midnight payment confirmation webhook",
@@ -398,10 +402,13 @@ router.post("/admin/stripe/ensure-webhook-events", requireAdmin, async (_req, re
     return;
   }
   const REQUIRED_EVENTS: Stripe.WebhookEndpointUpdateParams.EnabledEvent[] = [
+    "payment_intent.created",
     "payment_intent.succeeded",
     "payment_intent.payment_failed",
-    "charge.dispute.created",
+    "charge.succeeded",
+    "charge.updated",
     "charge.refunded",
+    "charge.dispute.created",
     "invoice.paid",
   ];
   try {
@@ -544,34 +551,79 @@ router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<voi
 
 // ─── Stripe webhook ──────────────────────────────────────────────────────────
 
+async function confirmBookingFromPaymentIntent(bookingId: number, intentId: string, maxAttempts = 4): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const [current] = await db
+      .select({ status: bookings.status, stripePaymentIntentId: bookings.stripePaymentIntentId })
+      .from(bookings)
+      .where(eq(bookings.id, bookingId));
+    if (!current) {
+      if (attempt < maxAttempts) {
+        console.warn(`[payments] webhook: booking #${bookingId} not found yet — retrying in ${2 * attempt}s (attempt ${attempt}/${maxAttempts})`);
+        await new Promise(r => setTimeout(r, 2000 * attempt));
+        continue;
+      }
+      console.error(`[payments] Booking #${bookingId} not found after ${maxAttempts} attempts`);
+      return;
+    }
+    if (current.status === "awaiting_payment") {
+      await db.update(bookings)
+        .set({ status: "pending", stripePaymentIntentId: intentId, updatedAt: new Date() })
+        .where(eq(bookings.id, bookingId));
+      console.log(`[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intentId})`);
+      await firePostPaymentEmails(bookingId);
+    } else if (!current.stripePaymentIntentId) {
+      await db.update(bookings)
+        .set({ stripePaymentIntentId: intentId, updatedAt: new Date() })
+        .where(eq(bookings.id, bookingId));
+    }
+    return;
+  }
+}
+
 router.post("/webhook/stripe", async (req, res): Promise<void> => {
   const sig = req.headers["stripe-signature"] as string | undefined;
-
   let event: Stripe.Event;
 
   try {
     const stripe = getStripe();
-
-    // Look up signing secret: env var preferred, DB fallback (from auto-registration)
     const webhookSecret = await getWebhookSecret();
-
     if (!webhookSecret) {
       console.error("[webhook] STRIPE_WEBHOOK_SECRET not set — refusing unsigned event");
       res.status(503).json({ error: "Webhook signing secret not configured" });
       return;
     }
-
     if (!sig) {
       res.status(400).json({ error: "Missing Stripe-Signature header" });
       return;
     }
-
-    // Signature verification is mandatory — no fallback to unsigned processing
     event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+  } catch (err: any) {
+    res.status(400).send(`Webhook Error: ${err.message}`);
+    return;
+  }
 
-    // Invoice paid — fired when a Stripe invoice (send_invoice flow) is paid.
-    // The booking ID lives in the invoice metadata since the PaymentIntent
-    // created by invoices does NOT inherit our custom metadata.
+  // Acknowledge Stripe immediately — processing happens below
+  res.json({ received: true });
+
+  try {
+    if (event.type === "payment_intent.created") {
+      const intent = event.data.object as Stripe.PaymentIntent;
+      const bookingId = parseInt(intent.metadata.bookingId || "0");
+      console.log(`[payments] PI created: ${intent.id}${bookingId ? ` (booking #${bookingId})` : ""}`);
+      if (bookingId) {
+        const [current] = await db
+          .select({ stripePaymentIntentId: bookings.stripePaymentIntentId })
+          .from(bookings)
+          .where(eq(bookings.id, bookingId));
+        if (current && !current.stripePaymentIntentId) {
+          await db.update(bookings)
+            .set({ stripePaymentIntentId: intent.id, updatedAt: new Date() })
+            .where(eq(bookings.id, bookingId));
+        }
+      }
+    }
+
     if (event.type === "invoice.paid") {
       const invoice = event.data.object as Stripe.Invoice;
       const bookingId = parseInt(invoice.metadata?.bookingId || "0");
@@ -592,33 +644,7 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       const intent = event.data.object as Stripe.PaymentIntent;
       const bookingId = parseInt(intent.metadata.bookingId || "0");
       if (bookingId) {
-        // Attempt to confirm the booking, retrying a few times in case the booking
-        // row has not yet been committed (e.g. webhook arrived before the booking
-        // creation transaction completed — a narrow but real race condition).
-        const confirmBookingWithRetry = async (attemptsLeft: number): Promise<void> => {
-          const [current] = await db.select({ status: bookings.status, stripePaymentIntentId: bookings.stripePaymentIntentId }).from(bookings).where(eq(bookings.id, bookingId));
-          if (!current) {
-            if (attemptsLeft > 0) {
-              console.warn(`[payments] webhook: booking #${bookingId} not found yet — retrying in 2 s (${attemptsLeft} left)`);
-              setTimeout(() => { confirmBookingWithRetry(attemptsLeft - 1).catch(e => console.error("[payments] webhook retry error:", e)); }, 2000);
-            } else {
-              console.warn(`[payments] webhook: booking #${bookingId} not found after all retries — skipping`);
-            }
-            return;
-          }
-          if (current.status === "awaiting_payment") {
-            await db.update(bookings)
-              .set({ status: "pending", stripePaymentIntentId: intent.id, updatedAt: new Date() })
-              .where(eq(bookings.id, bookingId));
-            console.log(`[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intent.id})`);
-            firePostPaymentEmails(bookingId).catch(err => console.error("[payments] webhook pi email error:", err));
-          } else if (!current.stripePaymentIntentId) {
-            await db.update(bookings)
-              .set({ stripePaymentIntentId: intent.id, updatedAt: new Date() })
-              .where(eq(bookings.id, bookingId));
-          }
-        };
-        confirmBookingWithRetry(3).catch(err => console.error("[payments] webhook confirm error:", err));
+        await confirmBookingFromPaymentIntent(bookingId, intent.id);
       }
     }
 
@@ -626,7 +652,6 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       const intent = event.data.object as Stripe.PaymentIntent;
       const bookingId = parseInt(intent.metadata.bookingId || "0");
       if (bookingId) {
-        // Mark booking as cancelled so passengers know to retry or contact support
         const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
         if (current && current.status === "awaiting_payment") {
           await db.update(bookings)
@@ -637,14 +662,27 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       }
     }
 
+    if (event.type === "charge.succeeded") {
+      const charge = event.data.object as Stripe.Charge;
+      console.log(`[payments] charge.succeeded: ${charge.id} PI: ${charge.payment_intent} amount: $${(charge.amount / 100).toFixed(2)}`);
+    }
+
+    if (event.type === "charge.updated") {
+      const charge = event.data.object as Stripe.Charge;
+      console.log(`[payments] charge.updated: ${charge.id} status: ${charge.status} PI: ${charge.payment_intent}`);
+    }
+
+    if (event.type === "charge.refunded") {
+      const charge = event.data.object as Stripe.Charge;
+      console.log(`[payments] charge.refunded: ${charge.id} amount_refunded: $${(charge.amount_refunded / 100).toFixed(2)}`);
+    }
+
     if (event.type === "charge.dispute.created") {
       const dispute = event.data.object as Stripe.Dispute;
       console.warn("[payments] Chargeback dispute opened:", dispute.id, "amount:", dispute.amount, "reason:", dispute.reason);
     }
-
-    res.json({ received: true });
   } catch (err: any) {
-    res.status(400).send(`Webhook Error: ${err.message}`);
+    console.error("[payments] webhook processing error:", err.message);
   }
 });
 
