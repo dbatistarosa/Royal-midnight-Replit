@@ -138,7 +138,7 @@ router.post("/auth/send-otp", authRateLimit, async (req, res): Promise<void> => 
   res.json({ message: "OTP sent successfully" });
 });
 
-router.post("/auth/verify-otp", async (req, res): Promise<void> => {
+router.post("/auth/verify-otp", authRateLimit, async (req, res): Promise<void> => {
   const parsed = VerifyOtpBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
