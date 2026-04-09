@@ -117,7 +117,7 @@ export default function Book() {
   useEffect(() => {
     const pi = searchParams.get("payment_intent");
     const status = searchParams.get("redirect_status");
-    if (!pi || status !== "succeeded") return;
+    if (!pi || !["succeeded", "requires_capture"].includes(status ?? "")) return;
 
     void (async () => {
       // Prefer sessionStorage, fall back to server lookup (in case storage was cleared)

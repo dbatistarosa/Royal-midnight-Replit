@@ -539,9 +539,14 @@ export default function AdminBookings() {
                         <span className={`px-2 py-1 border text-xs uppercase tracking-widest ${STATUS_COLORS[b.status] ?? "text-muted-foreground"}`}>
                           {b.status.replace(/_/g, " ")}
                         </span>
-                        {b.stripePaymentIntentId && (
+                        {b.stripePaymentIntentId && ["pending", "confirmed", "on_way", "on_location", "in_progress", "completed"].includes(b.status) && (
                           <span className="px-2 py-0.5 border border-green-500/30 bg-green-500/10 text-green-400 text-xs uppercase tracking-widest flex items-center gap-1">
                             <CreditCard className="w-3 h-3" /> Paid
+                          </span>
+                        )}
+                        {b.stripePaymentIntentId && b.status === "authorized" && (
+                          <span className="px-2 py-0.5 border border-amber-500/30 bg-amber-500/10 text-amber-400 text-xs uppercase tracking-widest flex items-center gap-1">
+                            <CreditCard className="w-3 h-3" /> Auth Hold
                           </span>
                         )}
                         {b.userRole === "corporate" && (
@@ -805,8 +810,11 @@ export default function AdminBookings() {
                               </div>
                               {b.stripePaymentIntentId && (
                                 <div className="col-span-2">
-                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><CreditCard className="w-3 h-3 text-green-400" /> Payment Received</p>
-                                  <p className="text-green-400 text-xs font-mono break-all">{b.stripePaymentIntentId}</p>
+                                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
+                                    <CreditCard className={`w-3 h-3 ${b.status === "awaiting_payment" ? "text-orange-400" : b.status === "authorized" ? "text-amber-400" : "text-green-400"}`} />
+                                    {b.status === "awaiting_payment" ? "Payment Intent (Unpaid)" : b.status === "authorized" ? "Card Authorization Hold" : "Payment Received"}
+                                  </p>
+                                  <p className={`text-xs font-mono break-all ${b.status === "awaiting_payment" ? "text-orange-400" : b.status === "authorized" ? "text-amber-400" : "text-green-400"}`}>{b.stripePaymentIntentId}</p>
                                 </div>
                               )}
                               <div>

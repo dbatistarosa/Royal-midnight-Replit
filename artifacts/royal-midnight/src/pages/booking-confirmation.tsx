@@ -59,7 +59,7 @@ export default function BookingConfirmation() {
     const search = new URLSearchParams(window.location.search);
     const paymentIntentId = search.get("payment_intent");
     const redirectStatus = search.get("redirect_status");
-    if (paymentIntentId && redirectStatus === "succeeded") {
+    if (paymentIntentId && ["succeeded", "requires_capture"].includes(redirectStatus ?? "")) {
       fetch(`${API_BASE}/payments/confirm/${id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
