@@ -1065,6 +1065,9 @@ export default function Book() {
                           clientSecret={paymentClientSecret}
                           publishableKey={paymentPublishableKey}
                           amount={effectiveTotal}
+                          returnUrl={pendingBookingId
+                            ? `${window.location.origin}${(import.meta.env.BASE_URL ?? "/").replace(/\/$/, "")}/booking-confirmation/${pendingBookingId}`
+                            : undefined}
                           onSuccess={handlePaymentSuccess}
                           onError={(msg) => toast({ title: "Payment failed", description: msg, variant: "destructive" })}
                         />
