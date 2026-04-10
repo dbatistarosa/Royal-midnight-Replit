@@ -289,7 +289,7 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
     const { sql: sqlFn } = await import("drizzle-orm");
 
     const [commRow] = await db.select({ value: settTbl.value }).from(settTbl).where(eqOp(settTbl.key, "driver_commission_pct"));
-    const rawPct = parseFloat(commRow?.value ?? "0.80");
+    const rawPct = parseFloat(commRow?.value ?? "70");
     const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
 
     const weekStart = new Date(now);

@@ -253,8 +253,8 @@ function RideCard({ booking, isPast }: { booking: Booking; isPast?: boolean }) {
 
 function PassengerRidesInner() {
   const { user } = useAuth();
-  const userId = user?.id ?? 0;
-  const { data: bookings, isLoading } = useGetUserBookings(userId, { query: { enabled: !!userId, queryKey: ["userBookings", userId] } });
+  const userId = user?.id;
+  const { data: bookings, isLoading } = useGetUserBookings(userId ?? 0, { query: { enabled: userId != null, queryKey: ["userBookings", userId] } });
 
   const upcomingBookings = (bookings?.filter(b => ['awaiting_payment', 'authorized', 'pending', 'confirmed', 'in_progress'].includes(b.status)) || []) as Booking[];
   const pastBookings = (bookings?.filter(b => ['completed', 'cancelled'].includes(b.status)) || []) as Booking[];

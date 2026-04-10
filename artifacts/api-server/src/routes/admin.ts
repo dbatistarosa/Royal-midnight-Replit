@@ -108,12 +108,12 @@ router.get("/admin/recent-bookings", requireAdmin, async (req, res): Promise<voi
 });
 
 router.get("/admin/revenue", requireAdmin, async (_req, res): Promise<void> => {
-  // Fetch commission rate from settings
+  // Fetch commission rate from settings (stored as whole %, e.g. "70" = 70%)
   const [commRow] = await db
     .select({ value: settingsTable.value })
     .from(settingsTable)
     .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "0.80");
+  const rawPct = parseFloat(commRow?.value ?? "70");
   const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
 
   const daily = await db
@@ -383,7 +383,9 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
     try {
       await sendWeeklyDriverPayout({ ...p, weekLabel });
       emailsSent++;
-    } catch {}
+    } catch (err) {
+      console.error("[payouts] driver email error:", err);
+    }
   }
 
   try {
@@ -394,7 +396,9 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
       totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
       commissionPct,
     });
-  } catch {}
+  } catch (err) {
+    console.error("[payouts] admin report email error:", err);
+  }
 
   res.json({ ok: true, emailsSent, driverCount: drivers.length, weekLabel });
 });

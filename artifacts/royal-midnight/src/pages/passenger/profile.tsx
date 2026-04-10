@@ -19,8 +19,8 @@ const passengerNavItems = [
 
 function PassengerProfileInner() {
   const { user: authUser, login } = useAuth();
-  const userId = authUser?.id ?? 0;
-  const { data: user, isLoading } = useGetUser(userId, { query: { enabled: !!userId, queryKey: getGetUserQueryKey(userId) } });
+  const userId = authUser?.id;
+  const { data: user, isLoading } = useGetUser(userId ?? 0, { query: { enabled: userId != null, queryKey: getGetUserQueryKey(userId ?? 0) } });
   const updateUser = useUpdateUser();
   const { toast } = useToast();
   const queryClient = useQueryClient();

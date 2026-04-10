@@ -23,22 +23,33 @@ function getStripe(): Stripe {
   return new Stripe(key, { apiVersion: "2024-06-20" as const });
 }
 
+let cachedWebhookSecret: string | null | undefined = undefined;
+
 async function getWebhookSecret(): Promise<string | null> {
+  if (cachedWebhookSecret !== undefined) return cachedWebhookSecret;
   // Prefer explicit env var (most secure)
-  if (process.env.STRIPE_WEBHOOK_SECRET) return process.env.STRIPE_WEBHOOK_SECRET;
+  if (process.env.STRIPE_WEBHOOK_SECRET) {
+    cachedWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    return cachedWebhookSecret;
+  }
   // Fall back to DB-persisted secret (set during auto-registration)
   const [row] = await db
     .select({ value: settingsTable.value })
     .from(settingsTable)
     .where(eq(settingsTable.key, "stripe_webhook_secret"))
     .limit(1);
-  return row?.value ?? null;
+  cachedWebhookSecret = row?.value ?? null;
+  return cachedWebhookSecret;
+}
+
+export function parseCommissionPct(raw: string | undefined): number {
+  const n = parseFloat(raw ?? "70");
+  return isNaN(n) ? 0.70 : n > 1 ? n / 100 : n;
 }
 
 async function getCommissionPct(): Promise<number> {
   const [row] = await db.select({ value: settingsTable.value }).from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct")).limit(1);
-  const raw = parseFloat(row?.value ?? "30");
-  return raw > 1 ? raw / 100 : raw;
+  return parseCommissionPct(row?.value);
 }
 
 async function firePostPaymentEmails(bookingId: number): Promise<void> {
