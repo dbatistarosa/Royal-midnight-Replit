@@ -101,8 +101,8 @@ export default function Login() {
     <div className="min-h-screen bg-[#050505] flex items-center justify-center px-6 pt-24">
       <div className="w-full max-w-md">
         <div className="text-center mb-12">
-          <Link href="/" className="text-2xl font-serif text-white tracking-widest block mb-8">
-            ROYAL <span className="text-primary italic">MIDNIGHT</span>
+          <Link href="/" className="block mb-8">
+            <img src="/royal-midnight-logo.png" alt="Royal Midnight" className="h-20 w-auto mx-auto" />
           </Link>
           {mode === "login" ? (
             <>

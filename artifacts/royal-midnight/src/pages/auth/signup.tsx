@@ -58,8 +58,8 @@ export default function Signup() {
     <div className="min-h-screen bg-[#050505] flex items-center justify-center px-6 pt-24 pb-16">
       <div className="w-full max-w-md">
         <div className="text-center mb-12">
-          <Link href="/" className="text-2xl font-serif text-white tracking-widest block mb-8">
-            ROYAL <span className="text-primary italic">MIDNIGHT</span>
+          <Link href="/" className="block mb-8">
+            <img src="/royal-midnight-logo.png" alt="Royal Midnight" className="h-20 w-auto mx-auto" />
           </Link>
           <h1 className="text-3xl font-serif text-white mb-2">Create Account</h1>
           <p className="text-gray-400 text-sm">Join the Royal Midnight experience</p>

@@ -68,8 +68,8 @@ export function Navbar() {
       }`}
     >
       <div className="container mx-auto px-6 flex items-center justify-between">
-        <Link href="/" className="text-2xl font-serif text-white tracking-widest">
-          ROYAL <span className="text-primary italic">MIDNIGHT</span>
+        <Link href="/" className="flex items-center">
+          <img src="/royal-midnight-logo.png" alt="Royal Midnight" className="h-12 w-auto" />
         </Link>
 
         {/* Desktop Nav */}
