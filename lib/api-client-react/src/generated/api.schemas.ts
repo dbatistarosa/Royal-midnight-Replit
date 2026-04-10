@@ -13,11 +13,6 @@ export interface ErrorResponse {
   error: string;
 }
 
-export interface ErrorEnvelope {
-  error?: string;
-  message?: string;
-}
-
 export interface MessageResponse {
   message: string;
 }
@@ -273,6 +268,8 @@ export const BookingStatus = {
   authorized: "authorized",
   pending: "pending",
   confirmed: "confirmed",
+  on_way: "on_way",
+  on_location: "on_location",
   in_progress: "in_progress",
   completed: "completed",
   cancelled: "cancelled",
@@ -370,6 +367,8 @@ export const UpdateBookingBodyStatus = {
   authorized: "authorized",
   pending: "pending",
   confirmed: "confirmed",
+  on_way: "on_way",
+  on_location: "on_location",
   in_progress: "in_progress",
   completed: "completed",
   cancelled: "cancelled",
@@ -701,6 +700,11 @@ export interface RevenueByClass {
 export interface RevenueStats {
   daily: RevenuePeriod[];
   byVehicleClass: RevenueByClass[];
+  totalRevenue: number;
+  totalCommissionPaid: number;
+  totalCompanyRevenue: number;
+  commissionPct: number;
+  completedRides: number;
 }
 
 export interface DispatchBoard {
