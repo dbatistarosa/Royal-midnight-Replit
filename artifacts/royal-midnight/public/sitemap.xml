@@ -22,19 +22,19 @@
     <loc>https://royalmidnight.com/services/airport-transfers</loc>
     <lastmod>2026-04-10</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
+    <priority>0.9</priority>
   </url>
   <url>
     <loc>https://royalmidnight.com/services/hourly-chauffeur</loc>
     <lastmod>2026-04-10</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://royalmidnight.com/services/corporate</loc>
     <lastmod>2026-04-10</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.8</priority>
   </url>
   <url>
     <loc>https://royalmidnight.com/services/events</loc>
@@ -49,7 +49,19 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://royalmidnight.com/pricing</loc>
+    <lastmod>2026-04-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://royalmidnight.com/contact</loc>
+    <lastmod>2026-04-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://royalmidnight.com/faq</loc>
     <lastmod>2026-04-10</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
@@ -61,15 +73,15 @@
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://royalmidnight.com/faq</loc>
+    <loc>https://royalmidnight.com/privacy</loc>
     <lastmod>2026-04-10</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://royalmidnight.com/driver/onboarding</loc>
+    <loc>https://royalmidnight.com/terms</loc>
     <lastmod>2026-04-10</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
   </url>
 </urlset>
