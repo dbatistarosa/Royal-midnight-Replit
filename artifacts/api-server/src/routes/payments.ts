@@ -11,7 +11,7 @@ import {
   getMailerStatus,
 } from "../lib/mailer.js";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
-import { parseCommissionPct, fetchCommissionPct } from "../lib/commission.js";
+import { fetchCommissionPct } from "../lib/commission.js";
 
 const router: IRouter = Router();
 
