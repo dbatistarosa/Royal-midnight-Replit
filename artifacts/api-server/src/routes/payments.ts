@@ -10,8 +10,7 @@ import {
   sendInvoiceToPassenger,
   getMailerStatus,
 } from "../lib/mailer.js";
-import { requireAdmin, requireAuth } from "../middleware/auth.js";
-import { fetchCommissionPct } from "../lib/commission.js";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
@@ -24,27 +23,22 @@ function getStripe(): Stripe {
   return new Stripe(key, { apiVersion: "2024-06-20" as const });
 }
 
-let cachedWebhookSecret: string | null | undefined = undefined;
-
 async function getWebhookSecret(): Promise<string | null> {
-  if (cachedWebhookSecret !== undefined) return cachedWebhookSecret;
   // Prefer explicit env var (most secure)
-  if (process.env.STRIPE_WEBHOOK_SECRET) {
-    cachedWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-    return cachedWebhookSecret;
-  }
+  if (process.env.STRIPE_WEBHOOK_SECRET) return process.env.STRIPE_WEBHOOK_SECRET;
   // Fall back to DB-persisted secret (set during auto-registration)
   const [row] = await db
     .select({ value: settingsTable.value })
     .from(settingsTable)
     .where(eq(settingsTable.key, "stripe_webhook_secret"))
     .limit(1);
-  cachedWebhookSecret = row?.value ?? null;
-  return cachedWebhookSecret;
+  return row?.value ?? null;
 }
 
 async function getCommissionPct(): Promise<number> {
-  return fetchCommissionPct();
+  const [row] = await db.select({ value: settingsTable.value }).from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct")).limit(1);
+  const raw = parseFloat(row?.value ?? "30");
+  return raw > 1 ? raw / 100 : raw;
 }
 
 async function firePostPaymentEmails(bookingId: number): Promise<void> {
@@ -130,137 +124,6 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (err: any) {
     // Surface the real Stripe error message so the frontend can show it to the user.
-    res.status(500).json({ error: err.message ?? "Stripe error — please try again." });
-  }
-});
-
-// Retrieve the client_secret for an existing PaymentIntent — used by admin
-// "Charge Card" to reuse an existing PI instead of creating a duplicate.
-router.get("/payments/intent/:intentId/client-secret", requireAdmin, async (req, res): Promise<void> => {
-  const { intentId } = req.params;
-  if (!intentId) {
-    res.status(400).json({ error: "intentId is required" });
-    return;
-  }
-  try {
-    const stripe = getStripe();
-    const intent = await stripe.paymentIntents.retrieve(intentId);
-    if (!intent.client_secret) {
-      res.status(400).json({ error: "PaymentIntent has no client secret" });
-      return;
-    }
-    res.json({ clientSecret: intent.client_secret, status: intent.status });
-  } catch (err: any) {
-    // Stripe returns a resource_missing error code when the PI doesn't exist.
-    // Surface as 404 so callers can distinguish "not found" from transient errors.
-    const isNotFound = err?.code === "resource_missing" || err?.statusCode === 404;
-    res.status(isNotFound ? 404 : 500).json({ error: err.message ?? "Stripe error" });
-  }
-});
-
-// Get or create a PaymentIntent for a booking — used by the passenger ride-detail
-// "Complete Payment" button. Requires the caller to own the booking (or be admin).
-// Reuses the existing PI if one exists and is payable, otherwise creates a fresh one.
-router.post("/payments/intent-for-booking/:bookingId", requireAuth, async (req, res): Promise<void> => {
-  const bId = parseInt(req.params["bookingId"] ?? "", 10);
-  if (!bId) {
-    res.status(400).json({ error: "Invalid booking id" });
-    return;
-  }
-  try {
-    const stripe = getStripe();
-    const caller = req.currentUser!;
-    const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
-    if (!booking) {
-      res.status(404).json({ error: "Booking not found" });
-      return;
-    }
-
-    // Ownership check — admin can access any booking; passengers/corporate must own it.
-    if (caller.role !== "admin") {
-      let ownershipConfirmed = booking.userId === caller.userId;
-      if (!ownershipConfirmed) {
-        // Cover admin-created bookings linked by email only (userId may be null)
-        const [callerUser] = await db
-          .select({ email: usersTable.email })
-          .from(usersTable)
-          .where(eq(usersTable.id, caller.userId));
-        ownershipConfirmed = !!(callerUser && booking.passengerEmail === callerUser.email);
-      }
-      if (!ownershipConfirmed) {
-        res.status(403).json({ error: "Access denied" });
-        return;
-      }
-    }
-
-    // API-level guard — this endpoint is only valid for awaiting_payment bookings
-    if (booking.status !== "awaiting_payment") {
-      res.status(400).json({
-        error: `Cannot issue payment for a booking with status "${booking.status}".`,
-        bookingStatus: booking.status,
-      });
-      return;
-    }
-
-    const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY ?? "";
-
-    // Deduplicate: check the existing PI before creating a new one.
-    if (booking.stripePaymentIntentId) {
-      try {
-        const existing = await stripe.paymentIntents.retrieve(booking.stripePaymentIntentId);
-        const payable = ["requires_payment_method", "requires_confirmation", "requires_action"];
-        const alreadyPaid = ["succeeded", "processing", "requires_capture"];
-
-        if (payable.includes(existing.status) && existing.client_secret) {
-          // Reuse — passenger can complete payment using this existing PI
-          res.json({
-            clientSecret: existing.client_secret,
-            publishableKey,
-            amount: parseFloat(String(booking.priceQuoted)),
-            reused: true,
-          });
-          return;
-        }
-
-        if (alreadyPaid.includes(existing.status)) {
-          // Payment is already received or in-flight — do NOT create a new PI.
-          // The webhook or a manual confirm call will update the booking status.
-          res.status(409).json({
-            error: "Payment already received",
-            detail: `Your payment is ${existing.status}. Your booking status will update shortly — please refresh the page in a moment.`,
-            piStatus: existing.status,
-          });
-          return;
-        }
-
-        // PI is canceled or unknown — fall through to create a replacement
-      } catch {
-        // PI no longer retrievable (deleted/expired) — create a fresh one
-      }
-    }
-
-    // Create a new PI (only reached when no existing PI, or existing one is canceled/expired)
-    const priceQuoted = parseFloat(String(booking.priceQuoted));
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(priceQuoted * 100),
-      currency: "usd",
-      payment_method_types: ["card"],
-      metadata: {
-        bookingId: String(bId),
-        passengerName: booking.passengerName,
-        pickupAddress: booking.pickupAddress,
-        dropoffAddress: booking.dropoffAddress,
-      },
-      description: `Royal Midnight — Booking #RM-${String(bId).padStart(4, "0")} (retry)`,
-    });
-
-    res.json({
-      clientSecret: paymentIntent.client_secret,
-      publishableKey,
-      amount: priceQuoted,
-      reused: false,
-    });
-  } catch (err: any) {
     res.status(500).json({ error: err.message ?? "Stripe error — please try again." });
   }
 });

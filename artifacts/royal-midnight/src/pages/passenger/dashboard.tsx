@@ -17,7 +17,7 @@ const passengerNavItems = [
 function PassengerDashboardInner() {
   const { user } = useAuth();
   const userId = user?.id;
-  const { data: bookings, isLoading } = useGetUserBookings(userId ?? 0, { query: { enabled: userId != null, queryKey: ["userBookings", userId] } });
+  const { data: bookings, isLoading } = useGetUserBookings(userId ?? 0, { query: { enabled: !!userId, queryKey: ["userBookings", userId ?? 0] } });
 
   const upcomingBookings = bookings?.filter(b => ['pending', 'confirmed'].includes(b.status)) || [];
 

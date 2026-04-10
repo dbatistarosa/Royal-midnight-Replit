@@ -3,54 +3,6 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { AIRPORTS, VEHICLE_CLASSES } from "@/lib/constants";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
-import { PageSeo } from "@/components/PageSeo";
-
-const LOCAL_BUSINESS_JSON_LD = {
-  "@context": "https://schema.org",
-  "@type": "LocalBusiness",
-  "name": "Royal Midnight",
-  "description": "South Florida's premier luxury black car and chauffeur service. Flat-rate airport transfers, executive transportation, and special events across FLL, MIA, and PBI.",
-  "url": "https://royalmidnight.com",
-  "telephone": "+1-800-555-0199",
-  "email": "concierge@royalmidnight.com",
-  "priceRange": "$$$",
-  "currenciesAccepted": "USD",
-  "paymentAccepted": "Credit Card, Invoice",
-  "address": {
-    "@type": "PostalAddress",
-    "streetAddress": "100 Biscayne Blvd, Suite 2100",
-    "addressLocality": "Miami",
-    "addressRegion": "FL",
-    "postalCode": "33132",
-    "addressCountry": "US"
-  },
-  "geo": {
-    "@type": "GeoCoordinates",
-    "latitude": 25.7767,
-    "longitude": -80.1888
-  },
-  "areaServed": [
-    { "@type": "City", "name": "Miami" },
-    { "@type": "City", "name": "Fort Lauderdale" },
-    { "@type": "City", "name": "West Palm Beach" },
-    { "@type": "City", "name": "Boca Raton" }
-  ],
-  "serviceArea": {
-    "@type": "GeoCircle",
-    "geoMidpoint": { "@type": "GeoCoordinates", "latitude": 26.1224, "longitude": -80.1373 },
-    "geoRadius": "100000"
-  },
-  "hasOfferCatalog": {
-    "@type": "OfferCatalog",
-    "name": "Luxury Transportation Services",
-    "itemListElement": [
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Airport Transfers" } },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Hourly Chauffeur Service" } },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Corporate Transportation" } },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Special Events Transportation" } }
-    ]
-  }
-};
 
 export default function Home() {
   const [, setLocation] = useLocation();
@@ -67,28 +19,16 @@ export default function Home() {
 
   return (
     <div className="w-full">
-      <PageSeo
-        title="Royal Midnight — South Florida Luxury Chauffeur Service"
-        description="South Florida's premier luxury black car service. Flat-rate airport transfers, executive chauffeur, and special events across FLL, MIA, and PBI. Book online in minutes."
-        path="/"
-      />
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(LOCAL_BUSINESS_JSON_LD) }}
-      />
-
       {/* Hero Section */}
       <section className="relative h-screen min-h-[700px] flex items-center pt-20">
         <div className="absolute inset-0 z-0">
-          <img 
-            src="/hero-bg.webp" 
-            alt="Luxury black sedan at night" 
+          <img
+            src="/hero-bg.png"
+            alt="Luxury black sedan at night"
             className="w-full h-full object-cover object-center opacity-60"
             loading="eager"
             decoding="async"
-            fetchPriority="high"
-            width={1408}
-            height={768}
+            fetchpriority="high"
           />
           <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black"></div>
         </div>
@@ -178,13 +118,12 @@ export default function Home() {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
             {VEHICLE_CLASSES.slice(0, 3).map((vehicle) => (
               <div key={vehicle.id} className="group relative overflow-hidden bg-black border border-white/5 aspect-[4/3]">
-                <img 
-                  src={vehicle.image} 
-                  alt={vehicle.name} 
+                <img
+                  src={vehicle.image}
+                  alt={vehicle.name}
                   className="w-full h-full object-cover opacity-60 group-hover:opacity-80 group-hover:scale-105 transition-all duration-700"
                   loading="lazy"
-                  width={1408}
-                  height={768}
+                  decoding="async"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
                 <div className="absolute bottom-0 left-0 p-8 text-left w-full">
@@ -211,14 +150,12 @@ export default function Home() {
       {/* Experience Image */}
       <section className="relative h-[600px] flex items-center justify-center">
         <div className="absolute inset-0 z-0">
-          <img 
-            src="/interior.webp" 
-            alt="Luxury vehicle interior" 
+          <img
+            src="/interior.png"
+            alt="Luxury interior"
             className="w-full h-full object-cover opacity-50"
             loading="lazy"
             decoding="async"
-            width={1408}
-            height={768}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black"></div>
         </div>
