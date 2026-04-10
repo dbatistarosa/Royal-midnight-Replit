@@ -36,6 +36,7 @@ function PassengerProfileInner() {
   }, [user]);
 
   const handleSave = () => {
+    if (userId == null) return;
     updateUser.mutate({
       id: userId,
       data: { name, phone }
