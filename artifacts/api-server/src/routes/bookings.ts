@@ -249,7 +249,6 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
 
   const caller = req.currentUser;
   const isCorporate = parsed.data.paymentType === "corporate_account";
-  const isInvoice = parsed.data.paymentType === "invoice";
 
   if (isCorporate) {
     if (!caller || (caller.role !== "corporate" && caller.role !== "admin")) {
@@ -264,9 +263,8 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
 
   // Determine initial booking status:
   //   - corporate → confirmed immediately (no payment step)
-  //   - invoice   → pending (admin will invoice separately)
-  //   - standard  → awaiting_payment (Stripe payment intent required)
-  const initialStatus = isCorporate ? "confirmed" : isInvoice ? "pending" : "awaiting_payment";
+  //   - all others (invoice, standard) → awaiting_payment so admin can charge or send invoice
+  const initialStatus = isCorporate ? "confirmed" : "awaiting_payment";
 
   const [booking] = await db
     .insert(bookingsTable)
@@ -323,8 +321,8 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       .catch(err => console.error("[bookings] promoCode usedCount increment failed:", err));
   }
 
-  // Corporate and invoice bookings: fire confirmation emails immediately (no payment step)
-  if (isCorporate || isInvoice) {
+  // Corporate bookings: fire confirmation emails immediately since no payment step
+  if (isCorporate) {
     (async () => {
       try {
         const parsed2 = parseBooking(booking);
