@@ -431,15 +431,18 @@ router.post("/auth/reset-password", async (req, res): Promise<void> => {
     return;
   }
 
-  await db
-    .update(usersTable)
-    .set({ passwordHash: await hashPassword(password) })
-    .where(eq(usersTable.id, resetToken.userId));
+  const newHash = await hashPassword(password);
 
-  await db
-    .update(passwordResetTokensTable)
-    .set({ usedAt: new Date() })
-    .where(eq(passwordResetTokensTable.id, resetToken.id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(usersTable)
+      .set({ passwordHash: newHash })
+      .where(eq(usersTable.id, resetToken.userId));
+    await tx
+      .update(passwordResetTokensTable)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetTokensTable.id, resetToken.id));
+  });
 
   res.json({ message: "Password updated successfully. You can now sign in." });
 });
