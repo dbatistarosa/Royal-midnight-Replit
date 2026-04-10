@@ -22,10 +22,13 @@ export default function Home() {
       {/* Hero Section */}
       <section className="relative h-screen min-h-[700px] flex items-center pt-20">
         <div className="absolute inset-0 z-0">
-          <img 
-            src="/hero-bg.png" 
-            alt="Luxury black sedan at night" 
+          <img
+            src="/hero-bg.png"
+            alt="Luxury black sedan at night"
             className="w-full h-full object-cover object-center opacity-60"
+            loading="eager"
+            decoding="async"
+            fetchpriority="high"
           />
           <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black"></div>
         </div>
@@ -115,10 +118,12 @@ export default function Home() {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
             {VEHICLE_CLASSES.slice(0, 3).map((vehicle) => (
               <div key={vehicle.id} className="group relative overflow-hidden bg-black border border-white/5 aspect-[4/3]">
-                <img 
-                  src={vehicle.image} 
-                  alt={vehicle.name} 
+                <img
+                  src={vehicle.image}
+                  alt={vehicle.name}
                   className="w-full h-full object-cover opacity-60 group-hover:opacity-80 group-hover:scale-105 transition-all duration-700"
+                  loading="lazy"
+                  decoding="async"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
                 <div className="absolute bottom-0 left-0 p-8 text-left w-full">
@@ -145,10 +150,12 @@ export default function Home() {
       {/* Experience Image */}
       <section className="relative h-[600px] flex items-center justify-center">
         <div className="absolute inset-0 z-0">
-          <img 
-            src="/interior.png" 
-            alt="Luxury interior" 
+          <img
+            src="/interior.png"
+            alt="Luxury interior"
             className="w-full h-full object-cover opacity-50"
+            loading="lazy"
+            decoding="async"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black"></div>
         </div>

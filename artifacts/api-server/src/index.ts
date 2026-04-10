@@ -318,7 +318,11 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
     });
 
     for (const p of payouts) {
-      try { await sendWeeklyDriverPayout(p); } catch {}
+      try {
+        await sendWeeklyDriverPayout(p);
+      } catch (err) {
+        logger.error({ err, driverId: p.driverId }, "Failed to send weekly payout email to driver");
+      }
     }
     await sendWeeklyPayoutAdminReport({
       weekLabel, payouts, commissionPct,

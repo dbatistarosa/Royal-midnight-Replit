@@ -1,21 +1,29 @@
-import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle } from "lucide-react";
+import { Link } from "wouter";
+import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <Card className="w-full max-w-md mx-4">
-        <CardContent className="pt-6">
-          <div className="flex mb-4 gap-2">
-            <AlertCircle className="h-8 w-8 text-red-500" />
-            <h1 className="text-2xl font-bold text-gray-900">404 Page Not Found</h1>
-          </div>
-
-          <p className="mt-4 text-sm text-gray-600">
-            Did you forget to add the page to the router?
-          </p>
-        </CardContent>
-      </Card>
+    <div className="min-h-screen w-full flex items-center justify-center bg-black">
+      <div className="text-center px-6 max-w-md">
+        <p className="text-primary uppercase tracking-widest text-xs mb-6 font-medium">404 — Page Not Found</p>
+        <h1 className="text-5xl md:text-7xl font-serif text-white mb-6">Lost?</h1>
+        <p className="text-gray-400 text-sm leading-relaxed mb-10">
+          The page you're looking for doesn't exist or has been moved.
+          Let us guide you back.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <Link href="/">
+            <Button className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-10 py-6 rounded-none w-full sm:w-auto">
+              Return Home
+            </Button>
+          </Link>
+          <Link href="/book">
+            <Button variant="outline" className="border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-10 py-6 rounded-none w-full sm:w-auto">
+              Reserve a Ride
+            </Button>
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

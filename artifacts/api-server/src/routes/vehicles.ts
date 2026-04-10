@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and } from "drizzle-orm";
 import { db, vehiclesTable, vehicleCatalogTable } from "@workspace/db";
+import { requireAdmin } from "../middleware/auth.js";
 import {
   ListVehiclesQueryParams,
   ListVehiclesResponse,
@@ -40,7 +41,7 @@ router.get("/vehicles", async (req, res): Promise<void> => {
   }))));
 });
 
-router.post("/vehicles", async (req, res): Promise<void> => {
+router.post("/vehicles", requireAdmin, async (req, res): Promise<void> => {
   const parsed = CreateVehicleBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -67,7 +68,7 @@ router.get("/vehicles/:id", async (req, res): Promise<void> => {
   res.json(GetVehicleResponse.parse({ ...vehicle, createdAt: vehicle.createdAt.toISOString() }));
 });
 
-router.patch("/vehicles/:id", async (req, res): Promise<void> => {
+router.patch("/vehicles/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = UpdateVehicleParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });

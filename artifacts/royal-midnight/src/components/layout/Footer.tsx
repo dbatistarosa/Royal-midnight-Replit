@@ -50,8 +50,8 @@ export function Footer() {
             &copy; {new Date().getFullYear()} Royal Midnight Chauffeur Service. All rights reserved.
           </p>
           <div className="flex space-x-6 mt-4 md:mt-0">
-            <span className="text-gray-500 text-xs hover:text-white cursor-pointer">Privacy Policy</span>
-            <span className="text-gray-500 text-xs hover:text-white cursor-pointer">Terms of Service</span>
+            <Link href="/privacy" className="text-gray-500 text-xs hover:text-white transition-colors">Privacy Policy</Link>
+            <Link href="/terms" className="text-gray-500 text-xs hover:text-white transition-colors">Terms of Service</Link>
           </div>
         </div>
       </div>

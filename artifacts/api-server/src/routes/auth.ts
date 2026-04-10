@@ -11,12 +11,20 @@ const router: IRouter = Router();
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-function generateToken(userId: number): string {
-  return crypto.createHash("sha256").update(`${userId}_${Date.now()}_rm_secret`).digest("hex");
+function generateToken(_userId: number): string {
+  return crypto.randomBytes(32).toString("hex");
 }
 
 // In-memory OTP store (production would use Redis)
 const otpStore = new Map<string, { otp: string; expiresAt: number }>();
+
+// Purge expired OTPs every 5 minutes to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [phone, data] of otpStore.entries()) {
+    if (now > data.expiresAt) otpStore.delete(phone);
+  }
+}, 5 * 60 * 1000);
 
 router.post("/auth/register", async (req, res): Promise<void> => {
   const parsed = RegisterBody.safeParse(req.body);
@@ -403,15 +411,16 @@ router.post("/auth/reset-password", async (req, res): Promise<void> => {
     return;
   }
 
-  await db
-    .update(usersTable)
-    .set({ passwordHash: hashPassword(password) })
-    .where(eq(usersTable.id, resetToken.userId));
-
-  await db
-    .update(passwordResetTokensTable)
-    .set({ usedAt: new Date() })
-    .where(eq(passwordResetTokensTable.id, resetToken.id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(usersTable)
+      .set({ passwordHash: hashPassword(password) })
+      .where(eq(usersTable.id, resetToken.userId));
+    await tx
+      .update(passwordResetTokensTable)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetTokensTable.id, resetToken.id));
+  });
 
   res.json({ message: "Password updated successfully. You can now sign in." });
 });
