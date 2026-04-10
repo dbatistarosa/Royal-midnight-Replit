@@ -84,6 +84,9 @@ export default function Home() {
             src="/hero-bg.webp" 
             alt="Luxury black sedan at night" 
             className="w-full h-full object-cover object-center opacity-60"
+            loading="eager"
+            decoding="async"
+            fetchPriority="high"
             width={1408}
             height={768}
           />
@@ -213,6 +216,7 @@ export default function Home() {
             alt="Luxury vehicle interior" 
             className="w-full h-full object-cover opacity-50"
             loading="lazy"
+            decoding="async"
             width={1408}
             height={768}
           />
