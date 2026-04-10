@@ -18,6 +18,8 @@ export const UpdateBookingBodyStatus = {
   authorized: "authorized",
   pending: "pending",
   confirmed: "confirmed",
+  on_way: "on_way",
+  on_location: "on_location",
   in_progress: "in_progress",
   completed: "completed",
   cancelled: "cancelled",

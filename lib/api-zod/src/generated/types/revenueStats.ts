@@ -11,4 +11,9 @@ import type { RevenuePeriod } from "./revenuePeriod";
 export interface RevenueStats {
   daily: RevenuePeriod[];
   byVehicleClass: RevenueByClass[];
+  totalRevenue: number;
+  totalCommissionPaid: number;
+  totalCompanyRevenue: number;
+  commissionPct: number;
+  completedRides: number;
 }

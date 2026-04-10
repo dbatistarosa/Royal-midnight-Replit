@@ -1891,7 +1891,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RevenueByClass"
-      required: [daily, byVehicleClass]
+        totalRevenue:
+          type: number
+        totalCommissionPaid:
+          type: number
+        totalCompanyRevenue:
+          type: number
+        commissionPct:
+          type: number
+        completedRides:
+          type: integer
+      required: [daily, byVehicleClass, totalRevenue, totalCommissionPaid, totalCompanyRevenue, commissionPct, completedRides]
 
     RevenuePeriod:
       type: object
