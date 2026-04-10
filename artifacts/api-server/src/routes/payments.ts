@@ -11,6 +11,7 @@ import {
   getMailerStatus,
 } from "../lib/mailer.js";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
+import { parseCommissionPct, fetchCommissionPct } from "../lib/commission.js";
 
 const router: IRouter = Router();
 
@@ -42,14 +43,8 @@ async function getWebhookSecret(): Promise<string | null> {
   return cachedWebhookSecret;
 }
 
-export function parseCommissionPct(raw: string | undefined): number {
-  const n = parseFloat(raw ?? "70");
-  return isNaN(n) ? 0.70 : n > 1 ? n / 100 : n;
-}
-
 async function getCommissionPct(): Promise<number> {
-  const [row] = await db.select({ value: settingsTable.value }).from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct")).limit(1);
-  return parseCommissionPct(row?.value);
+  return fetchCommissionPct();
 }
 
 async function firePostPaymentEmails(bookingId: number): Promise<void> {

@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db, driversTable, bookingsTable, settingsTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
+import { fetchCommissionPct } from "../lib/commission.js";
 import {
   ListDriversQueryParams,
   ListDriversResponse,
@@ -454,9 +455,7 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
     return;
   }
 
-  // Fetch commission rate from settings (stored as whole percent, e.g. "70" = 70%); divide by 100 for multiplier
-  const [commissionRow] = await db.select().from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct"));
-  const commissionPct = commissionRow ? parseFloat(commissionRow.value) / 100 : 0.70;
+  const commissionPct = await fetchCommissionPct();
 
   const [stats] = await db
     .select({

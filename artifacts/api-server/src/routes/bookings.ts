@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
+import { fetchCommissionPct } from "../lib/commission.js";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -116,9 +117,7 @@ function getCancellationPolicy(pickupAt: Date, priceQuoted: number, status: stri
 }
 
 async function getCommissionPct(): Promise<number> {
-  const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct"));
-  // Stored as whole percent (e.g. "70" = 70%); divide by 100 to get multiplier
-  return row ? parseFloat(row.value) / 100 : 0.70;
+  return fetchCommissionPct();
 }
 
 function getStripe(): Stripe {

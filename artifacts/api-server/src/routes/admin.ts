@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { sql, desc, eq } from "drizzle-orm";
 import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
+import { fetchCommissionPct } from "../lib/commission.js";
 import { encryptField, safeDecryptField } from "../lib/encrypt.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
@@ -108,13 +109,7 @@ router.get("/admin/recent-bookings", requireAdmin, async (req, res): Promise<voi
 });
 
 router.get("/admin/revenue", requireAdmin, async (_req, res): Promise<void> => {
-  // Fetch commission rate from settings (stored as whole %, e.g. "70" = 70%)
-  const [commRow] = await db
-    .select({ value: settingsTable.value })
-    .from(settingsTable)
-    .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "70");
-  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+  const commissionPct = await fetchCommissionPct();
 
   const daily = await db
     .select({
@@ -252,13 +247,7 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  // Get commission rate
-  const [commRow] = await db
-    .select({ value: settingsTable.value })
-    .from(settingsTable)
-    .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "0.80");
-  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+  const commissionPct = await fetchCommissionPct();
 
   // Get all approved drivers
   const drivers = await db
@@ -338,12 +327,7 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  const [commRow] = await db
-    .select({ value: settingsTable.value })
-    .from(settingsTable)
-    .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "0.80");
-  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+  const commissionPct = await fetchCommissionPct();
 
   const drivers = await db
     .select()

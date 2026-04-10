@@ -165,12 +165,11 @@ async function sendTripReminders(): Promise<void> {
     const windowStart = new Date(now.getTime() + 55 * 60 * 1000);
     const windowEnd = new Date(now.getTime() + 65 * 60 * 1000);
 
-    const { driversTable, bookingsTable: bookTbl, settingsTable: settTbl } = await import("@workspace/db");
+    const { driversTable, bookingsTable: bookTbl } = await import("@workspace/db");
     const { sendTripReminderPassenger, sendTripReminderDriver } = await import("./lib/mailer.js");
 
-    const [commRow] = await db.select({ value: settTbl.value }).from(settTbl).where(eq(settTbl.key, "driver_commission_pct"));
-    const rawPct = parseFloat(commRow?.value ?? "70");
-    const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+    const { fetchCommissionPct: fetchCommPct } = await import("./lib/commission.js");
+    const commissionPct = await fetchCommPct();
 
     // Find candidates outside the transaction first to avoid long-held locks
     const candidates = await db
@@ -285,12 +284,11 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
     }
 
     logger.info("Sending scheduled weekly payout emails...");
-    const { driversTable, bookingsTable: bookTbl, settingsTable: settTbl } = await import("@workspace/db");
+    const { driversTable, bookingsTable: bookTbl } = await import("@workspace/db");
     const { sql: sqlFn } = await import("drizzle-orm");
 
-    const [commRow] = await db.select({ value: settTbl.value }).from(settTbl).where(eqOp(settTbl.key, "driver_commission_pct"));
-    const rawPct = parseFloat(commRow?.value ?? "70");
-    const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+    const { fetchCommissionPct: fetchCommPct2 } = await import("./lib/commission.js");
+    const commissionPct = await fetchCommPct2();
 
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - 7); // Previous week
