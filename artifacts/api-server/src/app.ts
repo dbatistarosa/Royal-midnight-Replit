@@ -30,8 +30,12 @@ app.use(
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "https://royalmidnight.com",
+    origin: (process.env.ALLOWED_ORIGINS ?? "https://royalmidnight.com")
+      .split(",")
+      .map((o) => o.trim()),
     credentials: true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
 
