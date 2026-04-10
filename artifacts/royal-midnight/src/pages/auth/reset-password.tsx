@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 import { API_BASE } from "@/lib/constants";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,12 @@ export default function ResetPassword() {
 
   return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center px-6 pt-24">
+      <PageSeo
+        title="Reset Password"
+        description="Set a new password for your Royal Midnight account."
+        path="/auth/reset-password"
+        noIndex={true}
+      />
       <div className="w-full max-w-md">
         <div className="text-center mb-12">
           <Link href="/" className="block mb-8">
