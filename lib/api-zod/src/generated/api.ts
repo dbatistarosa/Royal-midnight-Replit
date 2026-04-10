@@ -174,6 +174,7 @@ export const CreateBookingBody = zod.object({
     .union([
       zod.literal("standard"),
       zod.literal("corporate_account"),
+      zod.literal("invoice"),
       zod.literal(null),
     ])
     .nullish(),

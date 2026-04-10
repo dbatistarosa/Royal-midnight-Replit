@@ -249,6 +249,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
 
   const caller = req.currentUser;
   const isCorporate = parsed.data.paymentType === "corporate_account";
+  const isInvoice = parsed.data.paymentType === "invoice";
 
   if (isCorporate) {
     if (!caller || (caller.role !== "corporate" && caller.role !== "admin")) {
@@ -261,6 +262,12 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     }
   }
 
+  // Determine initial booking status:
+  //   - corporate → confirmed immediately (no payment step)
+  //   - invoice   → pending (admin will invoice separately)
+  //   - standard  → awaiting_payment (Stripe payment intent required)
+  const initialStatus = isCorporate ? "confirmed" : isInvoice ? "pending" : "awaiting_payment";
+
   const [booking] = await db
     .insert(bookingsTable)
     .values({
@@ -269,8 +276,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       priceQuoted: String(parsed.data.priceQuoted),
       discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
       paymentType: parsed.data.paymentType ?? "standard",
-      // Corporate bookings are confirmed immediately — all others (including admin-manual) await payment
-      status: isCorporate ? "confirmed" : "awaiting_payment",
+      status: initialStatus,
     })
     .returning();
 
@@ -317,8 +323,8 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       .catch(err => console.error("[bookings] promoCode usedCount increment failed:", err));
   }
 
-  // Corporate bookings: fire emails immediately since no payment step
-  if (isCorporate) {
+  // Corporate and invoice bookings: fire confirmation emails immediately (no payment step)
+  if (isCorporate || isInvoice) {
     (async () => {
       try {
         const parsed2 = parseBooking(booking);
@@ -340,7 +346,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
         const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
         await sendNewBookingAvailableToDrivers(emailData, driverEmails);
       } catch (err) {
-        console.error("[bookings] corporate post-create email error:", err);
+        console.error("[bookings] post-create email error:", err);
       }
     })();
   }

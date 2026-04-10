@@ -16,4 +16,5 @@ export type CreateBookingBodyPaymentType =
 export const CreateBookingBodyPaymentType = {
   standard: "standard",
   corporate_account: "corporate_account",
+  invoice: "invoice",
 } as const;
