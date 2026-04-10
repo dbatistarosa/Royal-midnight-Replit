@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
-import { fetchCommissionPct } from "../lib/commission.js";
+import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -32,6 +32,59 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+// ─── Driver availability helpers ─────────────────────────────────────────────
+
+/**
+ * The statuses that mean a driver is actively committed to a trip.
+ * These are the only statuses that should block availability for new trips.
+ */
+const ACTIVE_TRIP_STATUSES = ["confirmed", "in_progress", "on_way", "on_location"] as const;
+
+/** 1-hour buffer on each side of an active trip (in milliseconds). */
+const BUFFER_MS = 60 * 60 * 1000;
+
+type BusyWindow = { start: Date; end: Date };
+
+/**
+ * Returns an array of time windows during which a driver is unavailable.
+ * Each window is:
+ *   start = pickupAt − 1 hour
+ *   end   = pickupAt + estimatedDurationMinutes + 1 hour
+ * If estimatedDurationMinutes is missing we fall back to DEFAULT_DURATION_MINUTES
+ * so the buffer is always conservative.
+ */
+async function getDriverBusyWindows(driverId: number): Promise<BusyWindow[]> {
+  const activeTrips = await db
+    .select({
+      pickupAt: bookingsTable.pickupAt,
+      estimatedDurationMinutes: bookingsTable.estimatedDurationMinutes,
+    })
+    .from(bookingsTable)
+    .where(
+      and(
+        eq(bookingsTable.driverId, driverId),
+        or(...ACTIVE_TRIP_STATUSES.map(s => eq(bookingsTable.status, s))),
+      ),
+    );
+
+  return activeTrips.map(trip => {
+    const duration = trip.estimatedDurationMinutes ?? DEFAULT_DURATION_MINUTES;
+    const pickup = trip.pickupAt.getTime();
+    return {
+      start: new Date(pickup - BUFFER_MS),
+      end: new Date(pickup + (duration * 60 * 1000) + BUFFER_MS),
+    };
+  });
+}
+
+/**
+ * Returns true if the given pickup time falls inside ANY of the busy windows.
+ */
+function hasConflict(pickupAt: Date, windows: BusyWindow[]): boolean {
+  const t = pickupAt.getTime();
+  return windows.some(w => t >= w.start.getTime() && t <= w.end.getTime());
+}
 
 function parseBooking(b: typeof bookingsTable.$inferSelect) {
   return {
@@ -119,7 +172,9 @@ function getCancellationPolicy(pickupAt: Date, priceQuoted: number, status: stri
 }
 
 async function getCommissionPct(): Promise<number> {
-  return fetchCommissionPct();
+  const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct"));
+  // Stored as whole percent (e.g. "70" = 70%); divide by 100 to get multiplier
+  return row ? parseFloat(row.value) / 100 : 0.70;
 }
 
 function getStripe(): Stripe {
@@ -160,6 +215,10 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   }
 
   // Non-admin drivers: either see their own assigned bookings, or unassigned open pool
+  // driverBusyWindows is populated here and used later to filter the open pool results.
+  let driverBusyWindows: BusyWindow[] = [];
+  let isDriverOpenPoolQuery = false;
+
   if (caller.role === "driver") {
     const [driverRow] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId));
     if (!driverRow) {
@@ -178,8 +237,11 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       }
       // Already in conditions via parsed.data.driverId above — no extra condition needed
     } else if (requestedStatus === "pending" || requestedStatus === "authorized") {
-      // Requesting the open/unassigned pool — includes both pending and authorized bookings
+      // Requesting the open/unassigned pool — includes both pending and authorized bookings.
+      // Pre-fetch this driver's busy windows so conflicting trips can be hidden below.
       conditions.push(isNull(bookingsTable.driverId));
+      isDriverOpenPoolQuery = true;
+      driverBusyWindows = await getDriverBusyWindows(driverRow.id);
     } else {
       // Default: own assigned bookings only
       conditions.push(eq(bookingsTable.driverId, driverRow.id));
@@ -230,7 +292,16 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
 
   if (caller.role === "driver") {
     const commissionPct = await getCommissionPct();
-    res.json(parsed2.map(b => toDriverView(b, commissionPct)));
+    let driverBookings = parsed2;
+
+    // For the open pool, hide trips that conflict with the driver's existing schedule.
+    // A trip conflicts if its pickupAt falls within any busy window:
+    //   [existingPickup - 1h,  existingPickup + estimatedDuration + 1h]
+    if (isDriverOpenPoolQuery && driverBusyWindows.length > 0) {
+      driverBookings = parsed2.filter(b => !hasConflict(new Date(b.pickupAt), driverBusyWindows));
+    }
+
+    res.json(driverBookings.map(b => toDriverView(b, commissionPct)));
     return;
   }
 
@@ -262,11 +333,6 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     }
   }
 
-  // Determine initial booking status:
-  //   - corporate → confirmed immediately (no payment step)
-  //   - all others (invoice, standard) → awaiting_payment so admin can charge or send invoice
-  const initialStatus = isCorporate ? "confirmed" : "awaiting_payment";
-
   const [booking] = await db
     .insert(bookingsTable)
     .values({
@@ -275,11 +341,32 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       priceQuoted: String(parsed.data.priceQuoted),
       discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
       paymentType: parsed.data.paymentType ?? "standard",
-      status: initialStatus,
+      // Corporate bookings are confirmed immediately — all others (including admin-manual) await payment
+      status: isCorporate ? "confirmed" : "awaiting_payment",
     })
     .returning();
 
   res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
+
+  // ── Route estimate (non-blocking) ────────────────────────────────────────────
+  // Fetch driving time and distance from Google Maps so the driver scheduling
+  // conflict detector can prevent impossible back-to-back trip assignments.
+  (async () => {
+    try {
+      const estimate = await getRouteEstimate(booking.pickupAddress, booking.dropoffAddress);
+      const durationMinutes = estimate?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
+      const distanceMiles = estimate?.distanceMiles ?? null;
+      await db
+        .update(bookingsTable)
+        .set({
+          estimatedDurationMinutes: durationMinutes,
+          estimatedDistanceMiles: distanceMiles != null ? String(distanceMiles) : null,
+        })
+        .where(eq(bookingsTable.id, booking.id));
+    } catch (err) {
+      console.error("[bookings] route estimate error:", err);
+    }
+  })();
 
   // ── Account linking (non-blocking, admin-created bookings) ───────────────────
   // When an admin creates a booking manually, link it to an existing user account
@@ -314,15 +401,15 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     })();
   }
 
-  // If a promo code was used, increment its usedCount (intentionally non-blocking)
+  // If a promo code was used, increment its usedCount (non-blocking)
   if (booking.promoCode) {
-    void db.update(promoCodesTable)
+    db.update(promoCodesTable)
       .set({ usedCount: sql`${promoCodesTable.usedCount} + 1` })
       .where(eq(promoCodesTable.code, booking.promoCode))
       .catch(err => console.error("[bookings] promoCode usedCount increment failed:", err));
   }
 
-  // Corporate bookings: fire confirmation emails immediately since no payment step
+  // Corporate bookings: fire emails immediately since no payment step
   if (isCorporate) {
     (async () => {
       try {
@@ -345,7 +432,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
         const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
         await sendNewBookingAvailableToDrivers(emailData, driverEmails);
       } catch (err) {
-        console.error("[bookings] post-create email error:", err);
+        console.error("[bookings] corporate post-create email error:", err);
       }
     })();
   }
@@ -600,6 +687,19 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
 
   if (isAuthorized && !booking.stripePaymentIntentId) {
     res.status(400).json({ error: "Booking has no payment intent to capture" });
+    return;
+  }
+
+  // ── Scheduling conflict check ────────────────────────────────────────────────
+  // Re-check busy windows even though the open-pool query already filtered them.
+  // This guards against race conditions where a driver accepts another trip between
+  // loading the list and tapping Accept.
+  const busyWindows = await getDriverBusyWindows(driverRow.id);
+  if (hasConflict(booking.pickupAt, busyWindows)) {
+    res.status(409).json({
+      error: "This trip conflicts with your existing schedule. You have another booking within 1 hour of this pickup time.",
+      code: "SCHEDULE_CONFLICT",
+    });
     return;
   }
 

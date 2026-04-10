@@ -26,6 +26,8 @@ export const bookingsTable = pgTable("bookings", {
   stripePaymentIntentId: text("stripe_payment_intent_id"),
   tipAmount: numeric("tip_amount", { precision: 10, scale: 2 }),
   tipPaymentIntentId: text("tip_payment_intent_id"),
+  estimatedDurationMinutes: integer("estimated_duration_minutes"),
+  estimatedDistanceMiles: numeric("estimated_distance_miles", { precision: 6, scale: 2 }),
   reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
   authorizedAt: timestamp("authorized_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
