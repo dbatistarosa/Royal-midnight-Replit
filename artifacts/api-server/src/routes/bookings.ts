@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql } from "drizzle-orm";
-import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
   sendBookingConfirmationPassenger,
@@ -16,6 +16,7 @@ import {
   sendDriverOnWay,
   sendDriverArrived,
   sendAccountInvitation,
+  sendTripCompletionEmail,
 } from "../lib/mailer.js";
 import {
   ListBookingsQueryParams,
@@ -36,6 +37,7 @@ function parseBooking(b: typeof bookingsTable.$inferSelect) {
     ...b,
     priceQuoted: parseFloat(b.priceQuoted ?? "0"),
     discountAmount: b.discountAmount != null ? parseFloat(b.discountAmount) : null,
+    tipAmount: b.tipAmount != null ? parseFloat(b.tipAmount) : null,
     pickupAt: b.pickupAt.toISOString(),
     authorizedAt: b.authorizedAt != null ? b.authorizedAt.toISOString() : null,
     createdAt: b.createdAt.toISOString(),
@@ -533,6 +535,26 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
         console.error("[bookings] status change email error:", err);
       }
     })();
+    // Send trip completion email when admin manually marks a booking completed
+    if (parsed.data.status === "completed") {
+      (async () => {
+        try {
+          await sendTripCompletionEmail({
+            id: booking.id,
+            passengerName: booking.passengerName,
+            passengerEmail: booking.passengerEmail,
+            pickupAddress: booking.pickupAddress,
+            dropoffAddress: booking.dropoffAddress,
+            pickupAt: booking.pickupAt.toISOString(),
+            vehicleClass: booking.vehicleClass ?? "standard",
+            passengers: booking.passengers ?? 1,
+            priceQuoted: parseFloat(String(booking.priceQuoted)),
+          }, booking.tipAmount != null ? parseFloat(String(booking.tipAmount)) : null);
+        } catch (err) {
+          console.error("[bookings] trip completion email error:", err);
+        }
+      })();
+    }
   }
 });
 
@@ -835,6 +857,25 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
   }
 
   res.json(parseBooking(updated));
+
+  // Fire-and-forget: send trip completion email to passenger
+  (async () => {
+    try {
+      await sendTripCompletionEmail({
+        id: updated.id,
+        passengerName: updated.passengerName,
+        passengerEmail: updated.passengerEmail,
+        pickupAddress: updated.pickupAddress,
+        dropoffAddress: updated.dropoffAddress,
+        pickupAt: updated.pickupAt.toISOString(),
+        vehicleClass: updated.vehicleClass ?? "standard",
+        passengers: updated.passengers ?? 1,
+        priceQuoted: parseFloat(String(updated.priceQuoted)),
+      }, updated.tipAmount != null ? parseFloat(String(updated.tipAmount)) : null);
+    } catch (err) {
+      console.error("[bookings] trip completion email error:", err);
+    }
+  })();
 });
 
 // Admin: unassign driver from a booking (puts it back in the open pool)
@@ -977,6 +1018,61 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
       console.error("[bookings] cancel email error:", err);
     }
   })();
+});
+
+// ─── Passenger: rate a driver after trip completion ──────────────────────────
+
+router.post("/bookings/:id/rate", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const { rating, comment } = req.body as { rating?: number; comment?: string };
+  if (!rating || rating < 1 || rating > 5) {
+    res.status(400).json({ error: "Rating must be between 1 and 5" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+
+  const [booking] = await db
+    .select({ id: bookingsTable.id, status: bookingsTable.status, userId: bookingsTable.userId, driverId: bookingsTable.driverId })
+    .from(bookingsTable)
+    .where(eq(bookingsTable.id, id));
+
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+  // Only the passenger who booked this ride can rate it
+  if (booking.userId !== caller.userId) {
+    res.status(403).json({ error: "You can only rate your own rides" });
+    return;
+  }
+
+  if (booking.status !== "completed") {
+    res.status(400).json({ error: "You can only rate a completed trip" });
+    return;
+  }
+
+  if (!booking.driverId) {
+    res.status(400).json({ error: "No driver assigned to this booking" });
+    return;
+  }
+
+  // Prevent duplicate ratings
+  const [existing] = await db
+    .select({ id: reviewsTable.id })
+    .from(reviewsTable)
+    .where(eq(reviewsTable.bookingId, id));
+  if (existing) {
+    res.status(409).json({ error: "You have already rated this trip" });
+    return;
+  }
+
+  const [review] = await db
+    .insert(reviewsTable)
+    .values({ bookingId: id, driverId: booking.driverId, userId: caller.userId, rating, comment: comment ?? null })
+    .returning();
+
+  res.json({ success: true, reviewId: review.id });
 });
 
 export default router;

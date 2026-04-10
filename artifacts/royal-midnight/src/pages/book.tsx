@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
-import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock, Plane } from "lucide-react";
+import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock, Plane, CreditCard } from "lucide-react";
 
 import { useGetQuote, QuoteRequestVehicleClass } from "@workspace/api-client-react";
 import { API_BASE } from "@/lib/constants";
@@ -108,6 +108,7 @@ export default function Book() {
   const [promoCode, setPromoCode] = useState("");
   const [promoValidating, setPromoValidating] = useState(false);
   const [promoResult, setPromoResult] = useState<{ valid: boolean; discountAmount: number | null; finalAmount: number | null; message: string } | null>(null);
+  const [savedCards, setSavedCards] = useState<Array<{ id: string; brand: string; last4: string; expMonth: number; expYear: number; isDefault: boolean }>>([]);
 
   const getQuote = useGetQuote();
 
@@ -211,6 +212,15 @@ export default function Book() {
   useEffect(() => {
     setDropoffAirline("");
   }, [dropoffAirportCode]);
+
+  // Load saved cards when reaching payment step (logged-in users only)
+  useEffect(() => {
+    if (step !== 3 || !token || !user) return;
+    fetch(`${API_BASE}/payments/saved-cards`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() as Promise<{ cards: Array<{ id: string; brand: string; last4: string; expMonth: number; expYear: number; isDefault: boolean }> }> : null)
+      .then(data => { if (data?.cards?.length) setSavedCards(data.cards); })
+      .catch(() => {});
+  }, [step, token, user]);
 
   const showBusiness = Number(passengers) <= 3;
   const selectedQuote = selectedVehicle ? quotes[selectedVehicle] : null;
@@ -1148,6 +1158,24 @@ export default function Book() {
                             ))}
                           </div>
                         </div>
+
+                        {/* Saved card info */}
+                        {user && savedCards.length > 0 && (
+                          <div className="border border-primary/20 bg-primary/5 p-4 flex items-center gap-3">
+                            <CreditCard className="w-4 h-4 text-primary flex-shrink-0" />
+                            <div>
+                              <p className="text-xs uppercase tracking-widest text-primary mb-0.5">Card on File</p>
+                              <p className="text-sm text-white capitalize">{savedCards[0].brand} ••••{savedCards[0].last4} · {savedCards[0].expMonth}/{savedCards[0].expYear}</p>
+                              <p className="text-xs text-gray-600 mt-0.5">This card can be charged for optional tips after your ride.</p>
+                            </div>
+                          </div>
+                        )}
+                        {user && !savedCards.length && (
+                          <div className="border border-white/8 bg-white/3 p-4 flex items-center gap-3">
+                            <CreditCard className="w-4 h-4 text-gray-600 flex-shrink-0" />
+                            <p className="text-xs text-gray-600">Your card will be saved after payment for future tips and charges.</p>
+                          </div>
+                        )}
 
                         <div className="bg-white/3 border border-white/8 p-4 flex gap-3 items-start">
                           <Lock className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
