@@ -33,12 +33,6 @@ export function Footer() {
             <h4 className="text-white uppercase tracking-widest text-xs font-bold mb-6">Connect</h4>
             <ul className="space-y-4">
               <li>
-                <Link href="/driver" className="text-gray-400 hover:text-primary text-sm transition-colors">Driver Portal</Link>
-              </li>
-              <li>
-                <Link href="/admin" className="text-gray-400 hover:text-primary text-sm transition-colors">Admin Dashboard</Link>
-              </li>
-              <li>
                 <a href="mailto:concierge@royalmidnight.com" className="text-gray-400 hover:text-primary text-sm transition-colors">concierge@royalmidnight.com</a>
               </li>
             </ul>
