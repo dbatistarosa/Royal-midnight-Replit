@@ -33,4 +33,3 @@ channel = "stable-25_05"
 
 [userenv.shared]
 SMTP_FROM = "Support@royalmidnight.com"
-FIELD_ENCRYPTION_KEY = "1014106668019b321bc46130863f9018cad116d5b91c91f3191cc7cd5b9d99a8"
