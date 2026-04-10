@@ -333,9 +333,15 @@ export default function DriverOnboarding() {
           <p className="text-gray-400 text-sm leading-relaxed mb-2">
             Thank you for applying to join the Royal Midnight fleet. Our team will review your credentials and vehicle details.
           </p>
-          <p className="text-gray-500 text-sm leading-relaxed mb-10">
+          <p className="text-gray-500 text-sm leading-relaxed mb-6">
             You will be notified once your application is approved. This typically takes 1–2 business days.
           </p>
+          <div className="bg-primary/5 border border-primary/20 p-4 mb-10 text-left">
+            <p className="text-xs uppercase tracking-widest text-primary mb-1">Billing &amp; Payment</p>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Once your application is approved, you will receive an email with instructions for setting up your payment and billing information.
+            </p>
+          </div>
           <Button
             onClick={() => setLocation("/driver/dashboard")}
             className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-widest text-xs px-10 h-12"

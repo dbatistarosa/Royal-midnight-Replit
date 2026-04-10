@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, Star, Building2, ShieldCheck, Eye, EyeOff, Calendar, Lock } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -17,17 +17,6 @@ type Review = {
   bookingId: number;
 };
 
-type PayoutInfo = {
-  payoutLegalName: string;
-  payoutEmail: string;
-  payoutBankName: string;
-  hasSsn: boolean;
-  ssnLast4: string | null;
-  hasRoutingNumber: boolean;
-  routingLast4: string | null;
-  hasAccountNumber: boolean;
-  accountLast4: string | null;
-};
 
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
@@ -49,21 +38,6 @@ export default function DriverProfile() {
 
   const [phone, setPhone] = useState("");
 
-  // Payout info
-  const [payout, setPayout] = useState<PayoutInfo | null>(null);
-  const [payoutForm, setPayoutForm] = useState({
-    payoutLegalName: "",
-    payoutEmail: "",
-    payoutBankName: "",
-    payoutSsn: "",
-    payoutRoutingNumber: "",
-    payoutAccountNumber: "",
-  });
-  const [showSsn, setShowSsn] = useState(false);
-  const [showRouting, setShowRouting] = useState(false);
-  const [showAccount, setShowAccount] = useState(false);
-  const [isSavingPayout, setIsSavingPayout] = useState(false);
-
   useEffect(() => {
     if (driverRecord?.phone) setPhone(driverRecord.phone);
   }, [driverRecord?.phone]);
@@ -77,26 +51,6 @@ export default function DriverProfile() {
       .catch(() => setReviews([]))
       .finally(() => setReviewsLoading(false));
   }, [driverRecord?.id]);
-
-  useEffect(() => {
-    if (!driverRecord?.id || !token) return;
-    fetch(`${API_BASE}/drivers/${driverRecord.id}/payout`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() as Promise<PayoutInfo> : Promise.resolve(null))
-      .then(data => {
-        if (data) {
-          setPayout(data);
-          setPayoutForm(f => ({
-            ...f,
-            payoutLegalName: data.payoutLegalName,
-            payoutEmail: data.payoutEmail,
-            payoutBankName: data.payoutBankName,
-          }));
-        }
-      })
-      .catch(() => {});
-  }, [driverRecord?.id, token]);
 
   const handleSave = async () => {
     if (!driverRecord?.id || !token) return;
@@ -118,40 +72,6 @@ export default function DriverProfile() {
       toast({ title: "Error", description: "Could not save profile.", variant: "destructive" });
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleSavePayout = async () => {
-    if (!driverRecord?.id || !token) return;
-    setIsSavingPayout(true);
-    try {
-      const body: Record<string, string> = {
-        payoutLegalName: payoutForm.payoutLegalName,
-        payoutEmail: payoutForm.payoutEmail,
-        payoutBankName: payoutForm.payoutBankName,
-      };
-      if (payoutForm.payoutSsn) body.payoutSsn = payoutForm.payoutSsn;
-      if (payoutForm.payoutRoutingNumber) body.payoutRoutingNumber = payoutForm.payoutRoutingNumber;
-      if (payoutForm.payoutAccountNumber) body.payoutAccountNumber = payoutForm.payoutAccountNumber;
-
-      const res = await fetch(`${API_BASE}/drivers/${driverRecord.id}/payout`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        toast({ title: "Save failed", description: err.error ?? "Could not save payout info.", variant: "destructive" });
-        return;
-      }
-      const updated = await res.json() as PayoutInfo;
-      setPayout(updated);
-      setPayoutForm(f => ({ ...f, payoutSsn: "", payoutRoutingNumber: "", payoutAccountNumber: "" }));
-      toast({ title: "Payout info saved", description: "Your banking information has been updated." });
-    } catch {
-      toast({ title: "Error", description: "Could not save payout info.", variant: "destructive" });
-    } finally {
-      setIsSavingPayout(false);
     }
   };
 
@@ -299,172 +219,6 @@ export default function DriverProfile() {
           ) : (
             <p className="text-muted-foreground text-sm">No reviews yet. Complete your first ride to receive feedback.</p>
           )}
-        </div>
-
-        {/* Payout Information Section */}
-        <div className="bg-card border border-border rounded-none p-8">
-          <div className="flex items-center gap-3 mb-2">
-            <Building2 className="w-5 h-5 text-primary" />
-            <h2 className="font-serif text-lg text-muted-foreground uppercase tracking-widest text-sm">Payout Information</h2>
-          </div>
-
-          {/* Weekly payout notice */}
-          <div className="flex items-start gap-3 bg-primary/5 border border-primary/20 rounded-none p-4 mb-6">
-            <Calendar className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-            <p className="text-sm text-foreground/80">
-              Payments are processed every <strong>Monday</strong>. Ensure your banking details are accurate
-              and up to date to avoid any delays in receiving your earnings.
-            </p>
-          </div>
-
-          {/* Security notice */}
-          <div className="flex items-start gap-3 bg-muted/30 border border-border rounded-none p-4 mb-6">
-            <ShieldCheck className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-            <p className="text-xs text-muted-foreground">
-              Your banking information is stored securely and used only for processing your weekly payouts.
-              Sensitive fields are masked after saving and are never displayed in full.
-            </p>
-          </div>
-
-          <div className="space-y-5">
-            <div>
-              <label className={labelClass}>Legal Full Name</label>
-              <Input
-                value={payoutForm.payoutLegalName}
-                onChange={e => setPayoutForm(f => ({ ...f, payoutLegalName: e.target.value }))}
-                placeholder="As it appears on your bank account"
-                className={inputClass}
-              />
-            </div>
-
-            <div>
-              <label className={labelClass}>Payment Email</label>
-              <Input
-                type="email"
-                value={payoutForm.payoutEmail}
-                onChange={e => setPayoutForm(f => ({ ...f, payoutEmail: e.target.value }))}
-                placeholder="Email address for payout notifications"
-                className={inputClass}
-              />
-            </div>
-
-            <div>
-              <label className={labelClass}>Bank Name</label>
-              <Input
-                value={payoutForm.payoutBankName}
-                onChange={e => setPayoutForm(f => ({ ...f, payoutBankName: e.target.value }))}
-                placeholder="e.g. Chase, Bank of America, Wells Fargo"
-                className={inputClass}
-              />
-            </div>
-
-            <div>
-              <label className={labelClass}>
-                Social Security Number
-                {payout?.hasSsn && (
-                  <span className="ml-2 text-green-600 text-xs font-normal normal-case">
-                    On file (ending ···{payout.ssnLast4})
-                  </span>
-                )}
-              </label>
-              <div className="relative">
-                <Input
-                  type={showSsn ? "text" : "password"}
-                  value={payoutForm.payoutSsn}
-                  onChange={e => setPayoutForm(f => ({ ...f, payoutSsn: e.target.value }))}
-                  placeholder={payout?.hasSsn ? "Enter new SSN to update" : "XXX-XX-XXXX"}
-                  className={inputClass + " pr-10"}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowSsn(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  tabIndex={-1}
-                >
-                  {showSsn ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {payout?.hasSsn && !payoutForm.payoutSsn && (
-                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                  <Lock className="w-3 h-3" /> Leave blank to keep existing SSN on file.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className={labelClass}>
-                Bank Routing Number
-                {payout?.hasRoutingNumber && (
-                  <span className="ml-2 text-green-600 text-xs font-normal normal-case">
-                    On file (ending ···{payout.routingLast4})
-                  </span>
-                )}
-              </label>
-              <div className="relative">
-                <Input
-                  type={showRouting ? "text" : "password"}
-                  value={payoutForm.payoutRoutingNumber}
-                  onChange={e => setPayoutForm(f => ({ ...f, payoutRoutingNumber: e.target.value }))}
-                  placeholder={payout?.hasRoutingNumber ? "Enter new routing number to update" : "9-digit routing number"}
-                  className={inputClass + " pr-10"}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowRouting(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  tabIndex={-1}
-                >
-                  {showRouting ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {payout?.hasRoutingNumber && !payoutForm.payoutRoutingNumber && (
-                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                  <Lock className="w-3 h-3" /> Leave blank to keep existing routing number on file.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className={labelClass}>
-                Bank Account Number
-                {payout?.hasAccountNumber && (
-                  <span className="ml-2 text-green-600 text-xs font-normal normal-case">
-                    On file (ending ···{payout.accountLast4})
-                  </span>
-                )}
-              </label>
-              <div className="relative">
-                <Input
-                  type={showAccount ? "text" : "password"}
-                  value={payoutForm.payoutAccountNumber}
-                  onChange={e => setPayoutForm(f => ({ ...f, payoutAccountNumber: e.target.value }))}
-                  placeholder={payout?.hasAccountNumber ? "Enter new account number to update" : "Checking or savings account number"}
-                  className={inputClass + " pr-10"}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowAccount(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  tabIndex={-1}
-                >
-                  {showAccount ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {payout?.hasAccountNumber && !payoutForm.payoutAccountNumber && (
-                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                  <Lock className="w-3 h-3" /> Leave blank to keep existing account number on file.
-                </p>
-              )}
-            </div>
-
-            <Button
-              onClick={handleSavePayout}
-              disabled={isSavingPayout}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-none"
-            >
-              {isSavingPayout ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving…</> : "Save Payout Information"}
-            </Button>
-          </div>
         </div>
 
       </div>
