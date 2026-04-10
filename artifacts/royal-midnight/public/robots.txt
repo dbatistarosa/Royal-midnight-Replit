@@ -1,4 +1,15 @@
 User-agent: *
 Allow: /
+Disallow: /admin/
+Disallow: /admin
+Disallow: /passenger/
+Disallow: /passenger
+Disallow: /driver/
+Disallow: /driver
+Disallow: /corporate/
+Disallow: /corporate
+Disallow: /auth/
+Disallow: /auth
+Disallow: /booking-confirmation/
 
 Sitemap: https://royalmidnight.com/sitemap.xml
