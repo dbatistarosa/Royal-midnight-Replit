@@ -9,6 +9,8 @@ export const usersTable = pgTable("users", {
   phone: text("phone"),
   role: text("role").notNull().default("passenger"),
   passwordHash: text("password_hash"),
+  stripeCustomerId: text("stripe_customer_id"),
+  defaultPaymentMethodId: text("default_payment_method_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

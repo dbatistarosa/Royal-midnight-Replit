@@ -333,6 +333,34 @@ export async function sendDriverArrived(b: BookingEmailData) {
   await send(b.passengerEmail, `Your Driver Has Arrived — Royal Midnight ${bookingRef}`, html, "driver_arrived_passenger");
 }
 
+export async function sendTripCompletionEmail(b: BookingEmailData, tipAmount?: number | null) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
+  const total = tipAmount != null && tipAmount > 0
+    ? b.priceQuoted + tipAmount
+    : b.priceQuoted;
+  const html = wrap(`
+<h2 style="color:#22c55e;font-size:20px;margin:0 0 8px">Trip Completed</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, thank you for riding with Royal Midnight. We hope you enjoyed your journey.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking", bookingRef)}
+  ${row("Route", `${b.pickupAddress} → ${b.dropoffAddress}`)}
+  ${row("Date", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+  ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : b.vehicleClass === "suv" ? "Premium SUV" : b.vehicleClass)}
+  ${row("Base Fare", `$${b.priceQuoted.toFixed(2)}`)}
+  ${tipAmount != null && tipAmount > 0 ? row("Gratuity", `<span style="color:#22c55e">$${tipAmount.toFixed(2)}</span>`) : ""}
+  ${row("Total Charged", `<span style="color:#c9a84c;font-weight:bold">$${total.toFixed(2)}</span>`)}
+</table>
+<p style="margin-top:28px">
+  <a href="${appUrl}/passenger/rides/${b.id}" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">RATE YOUR RIDE</a>
+</p>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  We value your feedback. Please take a moment to rate your driver.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(b.passengerEmail, `Trip Completed — Royal Midnight ${bookingRef}`, html, "trip_completion_passenger");
+}
+
 export async function sendAccountInvitation({
   passengerName,
   passengerEmail,

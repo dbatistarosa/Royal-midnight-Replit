@@ -1,16 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
-import { PageSeo } from "@/components/PageSeo";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
-import { CalendarIcon, Loader2, CheckCircle2, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock, Plane, Mail, Lock } from "lucide-react";
+import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock, Plane, CreditCard } from "lucide-react";
 
 import { useGetQuote, QuoteRequestVehicleClass } from "@workspace/api-client-react";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
+import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 import { AIRLINES_BY_AIRPORT } from "@/data/airlines";
 
 import { Button } from "@/components/ui/button";
@@ -73,7 +73,7 @@ const VEHICLE_INFO = {
 const STEPS = [
   { num: 1, label: "Trip Details" },
   { num: 2, label: "Select Vehicle" },
-  { num: 3, label: "Review & Confirm" },
+  { num: 3, label: "Review & Pay" },
 ];
 
 type StepKey = 1 | 2 | 3;
@@ -91,20 +91,76 @@ function detectAirportCode(address: string): AirportCode | null {
 export default function Book() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { user, login } = useAuth();
+  const { user, login, token } = useAuth();
   const [step, setStep] = useState<StepKey>(1);
   const [quotes, setQuotes] = useState<{ business: QuoteResult | null; suv: QuoteResult | null }>({ business: null, suv: null });
   const [selectedVehicle, setSelectedVehicle] = useState<"business" | "suv" | null>(null);
   const [isGettingQuotes, setIsGettingQuotes] = useState(false);
+  const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null);
+  const [paymentPublishableKey, setPaymentPublishableKey] = useState<string | null>(null);
+  const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
+  const pendingBookingIdRef = useRef<number | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
   const [minBookingHours, setMinBookingHours] = useState(2);
   const [pickupAirline, setPickupAirline] = useState("");
   const [dropoffAirline, setDropoffAirline] = useState("");
+  const [promoCode, setPromoCode] = useState("");
+  const [promoValidating, setPromoValidating] = useState(false);
+  const [promoResult, setPromoResult] = useState<{ valid: boolean; discountAmount: number | null; finalAmount: number | null; message: string } | null>(null);
+  const [savedCards, setSavedCards] = useState<Array<{ id: string; brand: string; last4: string; expMonth: number; expYear: number; isDefault: boolean }>>([]);
 
   const getQuote = useGetQuote();
 
   const searchParams = new URLSearchParams(window.location.search);
 
+  // On mount: handle 3DS redirect return (payment_intent + redirect_status in URL)
+  useEffect(() => {
+    const pi = searchParams.get("payment_intent");
+    const status = searchParams.get("redirect_status");
+    if (!pi || !["succeeded", "requires_capture"].includes(status ?? "")) return;
+
+    void (async () => {
+      // Prefer sessionStorage, fall back to server lookup (in case storage was cleared)
+      const savedId = sessionStorage.getItem("rm_pending_booking_id");
+      sessionStorage.removeItem("rm_pending_booking_id");
+      let bookingId = savedId ? parseInt(savedId, 10) : 0;
+
+      if (!bookingId) {
+        // Ask the server which booking this PI belongs to
+        try {
+          const lookupRes = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`);
+          if (lookupRes.ok) {
+            const lookup = await lookupRes.json() as { bookingId?: number };
+            if (lookup.bookingId) bookingId = lookup.bookingId;
+          }
+        } catch {
+          console.warn("[book] 3DS find-booking lookup failed");
+        }
+      }
+
+      if (!bookingId) {
+        console.warn("[book] 3DS redirect: could not determine booking — webhook will finalise");
+        return;
+      }
+
+      // Confirm server-side then redirect — webhook is also a safety net.
+      try {
+        const res = await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentIntentId: pi }),
+        });
+        if (!res.ok) {
+          console.warn("[book] 3DS confirm responded", res.status, "— webhook will finalise booking");
+        }
+      } catch {
+        console.warn("[book] 3DS confirm network error — webhook will finalise booking");
+      }
+      setLocation(`/booking-confirmation/${bookingId}`);
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const form = useForm<BookingFormValues>({
     resolver: zodResolver(bookingSchema),
@@ -156,6 +212,15 @@ export default function Book() {
   useEffect(() => {
     setDropoffAirline("");
   }, [dropoffAirportCode]);
+
+  // Load saved cards when reaching payment step (logged-in users only)
+  useEffect(() => {
+    if (step !== 3 || !token || !user) return;
+    fetch(`${API_BASE}/payments/saved-cards`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() as Promise<{ cards: Array<{ id: string; brand: string; last4: string; expMonth: number; expYear: number; isDefault: boolean }> }> : null)
+      .then(data => { if (data?.cards?.length) setSavedCards(data.cards); })
+      .catch(() => {});
+  }, [step, token, user]);
 
   const showBusiness = Number(passengers) <= 3;
   const selectedQuote = selectedVehicle ? quotes[selectedVehicle] : null;
@@ -276,63 +341,205 @@ export default function Book() {
     return null;
   }, [user, login, toast]);
 
-  const handleConfirmReservation = async () => {
+  const handleConfirmAndPay = async () => {
     if (!selectedQuote || !selectedVehicle) return;
     const values = form.getValues();
 
-    if (!user && (!values.password || values.password.length < 6)) {
+    // If there is already a booking from a prior failed payment attempt, validate
+    // it before reusing — stale IDs from previous sessions must not be reused.
+    const rawExistingId = pendingBookingIdRef.current ?? pendingBookingId ?? (() => {
+      const s = sessionStorage.getItem("rm_pending_booking_id");
+      return s ? parseInt(s, 10) : null;
+    })();
+
+    // Validate the stale booking ID: check it still exists, is awaiting_payment,
+    // and has a priceQuoted that matches the current effectiveTotal within $0.01.
+    let existingBookingId: number | null = rawExistingId;
+    if (rawExistingId) {
+      try {
+        const authHeader = token ? { "Authorization": `Bearer ${token}` } : {};
+        const checkRes = await fetch(`${API_BASE}/bookings/${rawExistingId}`, {
+          headers: { ...authHeader },
+        });
+        if (checkRes.ok) {
+          const bk = await checkRes.json() as { status: string; priceQuoted: number };
+          const priceMatch = Math.abs((bk.priceQuoted ?? 0) - effectiveTotal) <= 0.01;
+          if (bk.status !== "awaiting_payment" || !priceMatch) {
+            // Stale or mismatched — discard and create a fresh booking
+            existingBookingId = null;
+            setPendingBookingId(null);
+            pendingBookingIdRef.current = null;
+            sessionStorage.removeItem("rm_pending_booking_id");
+          }
+        } else {
+          // Booking not found or access denied — discard stale ID
+          existingBookingId = null;
+          setPendingBookingId(null);
+          pendingBookingIdRef.current = null;
+          sessionStorage.removeItem("rm_pending_booking_id");
+        }
+      } catch {
+        // Network error — discard stale ID to be safe
+        existingBookingId = null;
+        setPendingBookingId(null);
+        pendingBookingIdRef.current = null;
+        sessionStorage.removeItem("rm_pending_booking_id");
+      }
+    }
+
+    if (!existingBookingId && !user && (!values.password || values.password.length < 6)) {
       toast({ title: "Password required", description: "Please create a password (min 6 characters) to track your booking.", variant: "destructive" });
       return;
     }
 
     setIsConfirming(true);
+    setPaymentError("");
     try {
-      const userId = await ensureAccount(values.passengerName, values.passengerEmail, values.passengerPhone, values.password || "");
-      if (userId === null) { setIsConfirming(false); return; }
+      let bookingId: number;
 
-      const isoDate = new Date(`${format(values.pickupDate, "yyyy-MM-dd")}T${values.pickupTime}:00`).toISOString();
-      const bookingRes = await fetch(`${API_BASE}/bookings`, {
+      if (existingBookingId) {
+        // Retry path — booking already exists and is valid, just create a fresh Payment Intent.
+        bookingId = existingBookingId;
+        // Keep state/ref in sync so handlePaymentSuccess can read without sessionStorage fallback
+        if (!pendingBookingIdRef.current) pendingBookingIdRef.current = existingBookingId;
+        if (!pendingBookingId) setPendingBookingId(existingBookingId);
+      } else {
+        // Step 1: Ensure the user has an account
+        const userId = await ensureAccount(values.passengerName, values.passengerEmail, values.passengerPhone, values.password || "");
+        if (userId === null) { setIsConfirming(false); return; }
+
+        // Step 2: Create the booking in awaiting_payment state FIRST so it's always in the database
+        const isoDate = new Date(`${format(values.pickupDate, "yyyy-MM-dd")}T${values.pickupTime}:00`).toISOString();
+        const bookingRes = await fetch(`${API_BASE}/bookings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            passengerName: values.passengerName,
+            passengerEmail: values.passengerEmail,
+            passengerPhone: values.passengerPhone,
+            pickupAddress: values.pickupAddress,
+            dropoffAddress: values.dropoffAddress,
+            vehicleClass: selectedVehicle,
+            passengers: Number(values.passengers),
+            luggageCount: Number(values.luggage),
+            pickupAt: isoDate,
+            flightNumber: values.flightNumber || null,
+            specialRequests: values.specialRequests || null,
+            priceQuoted: effectiveTotal,
+            promoCode: promoResult?.valid && promoCode ? promoCode.toUpperCase() : null,
+            discountAmount: promoResult?.valid && promoResult.discountAmount != null ? promoResult.discountAmount : null,
+            userId: userId,
+            paymentType: "standard",
+          }),
+        });
+        if (!bookingRes.ok) {
+          const err = await bookingRes.json() as { error?: string };
+          throw new Error(err.error || "Could not create reservation. Please try again.");
+        }
+        const booking = await bookingRes.json() as { id: number };
+        bookingId = booking.id;
+        setPendingBookingId(bookingId);
+        pendingBookingIdRef.current = bookingId;
+        // Persist for 3DS redirect recovery (page reload wipes React state)
+        sessionStorage.setItem("rm_pending_booking_id", String(bookingId));
+      }
+
+      // Step 3: Get Stripe publishable key
+      const configRes = await fetch(`${API_BASE}/payments/config`);
+      if (!configRes.ok) throw new Error("Payment configuration failed.");
+      const { publishableKey } = await configRes.json() as { publishableKey: string };
+
+      // Step 4: Create a payment intent tied to this booking
+      const intentRes = await fetch(`${API_BASE}/payments/create-intent`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          passengerName: values.passengerName,
-          passengerEmail: values.passengerEmail,
-          passengerPhone: values.passengerPhone,
-          pickupAddress: values.pickupAddress,
-          dropoffAddress: values.dropoffAddress,
-          vehicleClass: selectedVehicle,
-          passengers: Number(values.passengers),
-          luggageCount: Number(values.luggage),
-          pickupAt: isoDate,
-          flightNumber: values.flightNumber || null,
-          specialRequests: values.specialRequests || null,
-          priceQuoted: selectedQuote.totalWithTax,
-          userId: userId,
-          paymentType: "invoice",
-        }),
+        body: JSON.stringify({ amount: effectiveTotal, bookingId }),
       });
-      if (!bookingRes.ok) {
-        const err = await bookingRes.json() as { error?: string };
-        throw new Error(err.error || "Could not create reservation. Please try again.");
+      if (!intentRes.ok) {
+        const errData = await intentRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(errData.error || "Could not initiate payment. Please try again.");
       }
-      const booking = await bookingRes.json() as { id: number };
-      setLocation(`/booking-confirmation/${booking.id}`);
+      const { clientSecret } = await intentRes.json() as { clientSecret: string };
+
+      setPaymentClientSecret(clientSecret);
+      setPaymentPublishableKey(publishableKey);
     } catch (err: any) {
-      toast({ title: "Error", description: err?.message || "Could not create reservation.", variant: "destructive" });
+      setPaymentError(err?.message || "Could not initiate payment. Please try again.");
+      toast({ title: "Error", description: err?.message, variant: "destructive" });
     }
     setIsConfirming(false);
+  };
+
+  const effectiveTotal = promoResult?.valid && promoResult.finalAmount != null
+    ? promoResult.finalAmount
+    : selectedQuote?.totalWithTax ?? 0;
+
+  const handlePromoValidate = async () => {
+    if (!promoCode.trim() || !selectedQuote) return;
+    setPromoValidating(true);
+    try {
+      const res = await fetch(`${API_BASE}/promos/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: promoCode.trim(), bookingAmount: selectedQuote.totalWithTax }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        setPromoResult({ valid: false, discountAmount: null, finalAmount: null, message: err.error || "Invalid promo code." });
+        return;
+      }
+      const data = await res.json() as { valid: boolean; discountAmount: number | null; finalAmount: number | null; message: string };
+      setPromoResult(data);
+    } catch {
+      setPromoResult({ valid: false, discountAmount: null, finalAmount: null, message: "Could not validate promo code." });
+    } finally {
+      setPromoValidating(false);
+    }
+  };
+
+  const handlePaymentSuccess = async (paymentIntentId: string) => {
+    // Read from ref first (always current), then state, then sessionStorage
+    const bookingId = pendingBookingIdRef.current ?? pendingBookingId ?? (() => {
+      const s = sessionStorage.getItem("rm_pending_booking_id");
+      return s ? parseInt(s, 10) : null;
+    })();
+    if (!bookingId) return;
+
+    // Clean up sessionStorage — payment completed without redirect
+    sessionStorage.removeItem("rm_pending_booking_id");
+
+    // Confirm server-side using the same flow as admin Charge Card:
+    // call /payments/confirm, check res.ok, then navigate.
+    // The payment_intent.succeeded webhook also fires as a safety net.
+    try {
+      const res = await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentIntentId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Booking confirmation failed");
+      }
+    } catch (err: any) {
+      // Log and continue — the webhook will update the booking if the direct call failed.
+      // The confirmation page polls until status changes.
+      console.warn("[book] confirm failed, falling back to webhook:", err?.message);
+    }
+
+    setLocation(`/booking-confirmation/${bookingId}`);
+  };
+
+  const handlePaymentError = (message: string) => {
+    setPaymentError(message);
+    setPaymentClientSecret(null);
+    setPaymentPublishableKey(null);
   };
 
   const inputClass = "w-full bg-white/4 border border-white/12 text-white rounded-none h-12 px-4 text-sm focus:outline-none focus:border-primary/60 transition-colors placeholder:text-gray-600";
 
   return (
     <div className="min-h-screen bg-[#050505]">
-      <PageSeo
-        title="Reserve a Luxury Ride — Book Online"
-        description="Book your South Florida luxury chauffeur online. Instant flat-rate quotes for airport transfers, corporate rides, and special events at FLL, MIA, and PBI. No surge pricing."
-        path="/book"
-        noIndex={false}
-      />
       {/* Hero banner */}
       <div className="relative pt-28 pb-12 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-black via-[#050505] to-[#050505]" />
@@ -776,7 +983,7 @@ export default function Book() {
               </div>
             )}
 
-            {/* ─── STEP 3: REVIEW & CONFIRM ─── */}
+            {/* ─── STEP 3: REVIEW & PAY ─── */}
             {step === 3 && selectedQuote && selectedVehicle && (
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
                 {/* Summary */}
@@ -837,63 +1044,170 @@ export default function Book() {
                       </div>
                     )}
 
-                    {/* Estimated Total */}
+                    {/* Total */}
                     <div className="border-t border-white/8 pt-5">
                       <div className="flex justify-between items-baseline">
-                        <span className="text-base text-white font-serif">Estimated Total</span>
-                        <span className="text-3xl font-serif text-primary">${selectedQuote.totalWithTax.toFixed(2)}</span>
+                        <span className="text-base text-white font-serif">Total Due</span>
+                        <div className="text-right">
+                          {promoResult?.valid && promoResult.discountAmount != null && (
+                            <div className="text-xs text-green-400 line-through text-right">${selectedQuote.totalWithTax.toFixed(2)}</div>
+                          )}
+                          <span className="text-3xl font-serif text-primary">${effectiveTotal.toFixed(2)}</span>
+                          {promoResult?.valid && promoResult.discountAmount != null && (
+                            <div className="text-xs text-green-400">−${promoResult.discountAmount.toFixed(2)} discount</div>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-xs text-gray-600 mt-1">All inclusive — no hidden fees</p>
                     </div>
                   </div>
                 </div>
 
-                {/* Invoice Notice */}
+                {/* Payment */}
                 <div className="lg:col-span-2 bg-[#0a0a0a] border border-white/8">
                   <div className="h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
                   <div className="p-8 space-y-6">
                     <div>
-                      <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-1">Confirm Reservation</p>
-                      <h2 className="text-xl font-serif text-white">No Payment Required Now</h2>
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-1">Secure Payment</p>
+                      <h2 className="text-xl font-serif text-white">Complete Your Reservation</h2>
                     </div>
 
-                    <div className="bg-primary/5 border border-primary/20 p-5 flex gap-4 items-start">
-                      <Mail className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-sm text-white font-medium mb-1">Invoice Will Be Sent</p>
-                        <p className="text-xs text-gray-400 leading-relaxed">
-                          Once your reservation is confirmed, our team will send an invoice to{" "}
-                          <span className="text-white">{form.getValues("passengerEmail") || "your email"}</span>{" "}
-                          with payment instructions.
-                        </p>
+                    {paymentClientSecret && paymentPublishableKey ? (
+                      <div className="space-y-4">
+                        <p className="text-xs text-gray-600 uppercase tracking-widest">Powered by Stripe</p>
+                        <StripePaymentForm
+                          clientSecret={paymentClientSecret}
+                          publishableKey={paymentPublishableKey}
+                          amount={effectiveTotal}
+                          returnUrl={pendingBookingId
+                            ? `${window.location.origin}${(import.meta.env.BASE_URL ?? "/").replace(/\/$/, "")}/booking-confirmation/${pendingBookingId}`
+                            : undefined}
+                          onSuccess={handlePaymentSuccess}
+                          onProcessing={handlePaymentSuccess}
+                          onError={(msg) => {
+                            setPaymentError(msg);
+                            if (msg) toast({ title: "Payment failed", description: msg, variant: "destructive" });
+                          }}
+                        />
+                        {paymentError && <p className="text-red-400 text-sm p-3 border border-red-900/40 bg-red-900/8">{paymentError}</p>}
+                        <button type="button" onClick={() => { setPaymentClientSecret(null); setPaymentPublishableKey(null); setPaymentError(""); }} className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
+                          Cancel
+                        </button>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="space-y-5">
+                        {/* Amount callout */}
+                        <div className="bg-primary/5 border border-primary/15 p-5 text-center">
+                          <p className="text-[10px] uppercase tracking-[0.3em] text-gray-600 mb-1">You will be charged</p>
+                          {promoResult?.valid && promoResult.discountAmount != null && (
+                            <p className="text-sm text-gray-500 line-through">${selectedQuote.totalWithTax.toFixed(2)}</p>
+                          )}
+                          <p className="text-4xl font-serif text-primary">${effectiveTotal.toFixed(2)}</p>
+                          {promoResult?.valid && promoResult.discountAmount != null
+                            ? <p className="text-xs text-green-400 mt-1">Promo applied — saving ${promoResult.discountAmount.toFixed(2)}</p>
+                            : <p className="text-xs text-gray-700 mt-1">All inclusive — no hidden fees</p>
+                          }
+                        </div>
 
-                    <div className="space-y-3 text-xs text-gray-500 border-t border-white/8 pt-4">
-                      <p className="flex items-start gap-2"><span className="text-primary mt-0.5">—</span> No card required to complete this reservation.</p>
-                      <p className="flex items-start gap-2"><span className="text-primary mt-0.5">—</span> Our team will review and confirm your booking.</p>
-                      <p className="flex items-start gap-2"><span className="text-primary mt-0.5">—</span> Payment instructions will be emailed to you shortly.</p>
-                    </div>
+                        {/* Promo code */}
+                        <div>
+                          <p className="text-[10px] uppercase tracking-[0.3em] text-gray-600 mb-2">Promo Code</p>
+                          <div className="flex gap-2">
+                            <Input
+                              value={promoCode}
+                              onChange={e => { setPromoCode(e.target.value.toUpperCase()); setPromoResult(null); }}
+                              placeholder="Enter code"
+                              className="flex-1 bg-transparent border-white/12 text-white placeholder:text-gray-600 rounded-none text-xs h-10 uppercase"
+                              onKeyDown={e => e.key === "Enter" && void handlePromoValidate()}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => void handlePromoValidate()}
+                              disabled={promoValidating || !promoCode.trim()}
+                              className="border-white/20 text-white/70 hover:text-white hover:bg-white/5 rounded-none text-xs px-4 h-10"
+                            >
+                              {promoValidating ? <Loader2 className="w-3 h-3 animate-spin" /> : "Apply"}
+                            </Button>
+                          </div>
+                          {promoResult && (
+                            <p className={`text-xs mt-1.5 ${promoResult.valid ? "text-green-400" : "text-red-400"}`}>
+                              {promoResult.message}
+                            </p>
+                          )}
+                        </div>
 
-                    <Button
-                      type="button"
-                      onClick={() => void handleConfirmReservation()}
-                      disabled={isConfirming}
-                      className="w-full bg-primary text-black hover:bg-primary/90 font-semibold uppercase tracking-[0.2em] text-xs h-[52px] rounded-none shadow-[0_0_30px_rgba(201,168,76,0.2)]"
-                    >
-                      {isConfirming
-                        ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Confirming...</>
-                        : "Confirm Reservation"}
-                    </Button>
+                        {/* Cancellation Policy */}
+                        <div className="border border-amber-900/30 bg-amber-950/10 p-4">
+                          <p className="text-[10px] uppercase tracking-[0.3em] text-amber-500/70 mb-3 flex items-center gap-1.5">
+                            <span className="inline-block w-3.5 h-3.5 rounded-full border border-amber-500/50 text-center leading-[13px] text-[9px]">!</span>
+                            Cancellation Policy
+                          </p>
+                          <div className="space-y-2">
+                            {[
+                              { time: "0–2 hours before", fee: "100%", desc: "No refund" },
+                              { time: "2–12 hours before", fee: "50%", desc: "50% refund" },
+                              { time: "12–24 hours before", fee: "25%", desc: "75% refund" },
+                              { time: "1+ day before", fee: "0%", desc: "Full refund" },
+                            ].map(tier => (
+                              <div key={tier.time} className="flex items-center justify-between text-xs">
+                                <span className="text-gray-500">{tier.time}</span>
+                                <span className={`font-medium ${tier.fee === "0%" ? "text-green-400" : tier.fee === "100%" ? "text-red-400/80" : "text-amber-400/80"}`}>
+                                  {tier.fee} fee &middot; {tier.desc}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
 
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setStep(2)}
-                      className="w-full border-white/12 text-white/50 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs h-10"
-                    >
-                      <ChevronLeft className="w-4 h-4 mr-1" /> Change Vehicle
-                    </Button>
+                        {/* Saved card info */}
+                        {user && savedCards.length > 0 && (
+                          <div className="border border-primary/20 bg-primary/5 p-4 flex items-center gap-3">
+                            <CreditCard className="w-4 h-4 text-primary flex-shrink-0" />
+                            <div>
+                              <p className="text-xs uppercase tracking-widest text-primary mb-0.5">Card on File</p>
+                              <p className="text-sm text-white capitalize">{savedCards[0].brand} ••••{savedCards[0].last4} · {savedCards[0].expMonth}/{savedCards[0].expYear}</p>
+                              <p className="text-xs text-gray-600 mt-0.5">This card can be charged for optional tips after your ride.</p>
+                            </div>
+                          </div>
+                        )}
+                        {user && !savedCards.length && (
+                          <div className="border border-white/8 bg-white/3 p-4 flex items-center gap-3">
+                            <CreditCard className="w-4 h-4 text-gray-600 flex-shrink-0" />
+                            <p className="text-xs text-gray-600">Your card will be saved after payment for future tips and charges.</p>
+                          </div>
+                        )}
+
+                        <div className="bg-white/3 border border-white/8 p-4 flex gap-3 items-start">
+                          <Lock className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-xs text-white font-medium">256-bit SSL Encryption</p>
+                            <p className="text-xs text-gray-600 mt-0.5">Payment secured by Stripe. Your card information is never stored on our servers.</p>
+                          </div>
+                        </div>
+
+                        {paymentError && <p className="text-red-400 text-sm p-3 border border-red-900/40 bg-red-900/8">{paymentError}</p>}
+
+                        <Button
+                          type="button"
+                          onClick={handleConfirmAndPay}
+                          disabled={isConfirming}
+                          className="w-full bg-primary text-black hover:bg-primary/90 font-semibold uppercase tracking-[0.2em] text-xs h-[52px] rounded-none shadow-[0_0_30px_rgba(201,168,76,0.2)]"
+                        >
+                          {isConfirming
+                            ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Preparing...</>
+                            : `Pay $${effectiveTotal.toFixed(2)}`}
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => { sessionStorage.removeItem("rm_pending_booking_id"); setPendingBookingId(null); pendingBookingIdRef.current = null; setStep(2); }}
+                          className="w-full border-white/12 text-white/50 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs h-10"
+                        >
+                          <ChevronLeft className="w-4 h-4 mr-1" /> Change Vehicle
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

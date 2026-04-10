@@ -10,7 +10,7 @@ import {
   sendInvoiceToPassenger,
   getMailerStatus,
 } from "../lib/mailer.js";
-import { requireAdmin } from "../middleware/auth.js";
+import { requireAdmin, requireAuth } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
@@ -97,6 +97,7 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
     const stripe = getStripe();
     let metadata: Record<string, string> = {};
     let description = "Royal Midnight — Reservation";
+    let customerId: string | undefined;
 
     if (bookingId) {
       const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
@@ -108,18 +109,42 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
           dropoffAddress: booking.dropoffAddress,
         };
         description = `Royal Midnight — Booking #RM-${String(bookingId).padStart(4, "0")}`;
+
+        // Find or create a Stripe customer so the card can be saved for future use
+        if (booking.userId) {
+          const [user] = await db
+            .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, stripeCustomerId: usersTable.stripeCustomerId })
+            .from(usersTable)
+            .where(eq(usersTable.id, booking.userId));
+          if (user) {
+            if (user.stripeCustomerId) {
+              customerId = user.stripeCustomerId;
+            } else {
+              // Create a new Stripe customer and persist it
+              const customer = await stripe.customers.create({
+                email: user.email,
+                name: user.name,
+                metadata: { userId: String(user.id) },
+              });
+              customerId = customer.id;
+              await db.update(usersTable)
+                .set({ stripeCustomerId: customer.id })
+                .where(eq(usersTable.id, user.id));
+            }
+          }
+        }
       }
     }
 
     // Always use automatic capture — charge the card immediately when the passenger pays.
-    // No idempotency key: allows fresh PI creation on every attempt (prevents stale PI
-    // errors if the user retries after a network failure or leaves and comes back).
+    // setup_future_usage: "off_session" saves the card to the customer for future charges.
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
       currency: "usd",
       payment_method_types: ["card"],
       metadata,
       description,
+      ...(customerId ? { customer: customerId, setup_future_usage: "off_session" } : {}),
     });
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (err: any) {
@@ -745,6 +770,20 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       if (bookingId) {
         await confirmBookingFromPaymentIntent(bookingId, intent.id);
       }
+      // Save the payment method to the customer's user record for future off-session charges
+      if (intent.customer && intent.payment_method) {
+        const customerId = typeof intent.customer === "string" ? intent.customer : intent.customer.id;
+        const pmId = typeof intent.payment_method === "string" ? intent.payment_method : intent.payment_method.id;
+        const [user] = await db
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(eq(usersTable.stripeCustomerId, customerId));
+        if (user) {
+          await db.update(usersTable)
+            .set({ defaultPaymentMethodId: pmId })
+            .where(eq(usersTable.id, user.id));
+        }
+      }
     }
 
     if (event.type === "payment_intent.payment_failed") {
@@ -778,6 +817,151 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
     }
   } catch (err: any) {
     console.error("[payments] webhook processing error:", err.message);
+  }
+});
+
+// ─── Passenger: list saved payment methods ───────────────────────────────────
+
+router.get("/payments/saved-cards", requireAuth, async (req, res): Promise<void> => {
+  const caller = req.currentUser!;
+  const [user] = await db
+    .select({ stripeCustomerId: usersTable.stripeCustomerId, defaultPaymentMethodId: usersTable.defaultPaymentMethodId })
+    .from(usersTable)
+    .where(eq(usersTable.id, caller.userId));
+
+  if (!user?.stripeCustomerId) {
+    res.json({ cards: [] });
+    return;
+  }
+
+  try {
+    const stripe = getStripe();
+    const pms = await stripe.paymentMethods.list({ customer: user.stripeCustomerId, type: "card" });
+    res.json({
+      cards: pms.data.map(pm => ({
+        id: pm.id,
+        brand: pm.card?.brand ?? "card",
+        last4: pm.card?.last4 ?? "••••",
+        expMonth: pm.card?.exp_month,
+        expYear: pm.card?.exp_year,
+        isDefault: pm.id === user.defaultPaymentMethodId,
+      })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Passenger: delete a saved payment method ────────────────────────────────
+
+router.delete("/payments/saved-cards/:pmId", requireAuth, async (req, res): Promise<void> => {
+  const { pmId } = req.params;
+  const caller = req.currentUser!;
+
+  const [user] = await db
+    .select({ stripeCustomerId: usersTable.stripeCustomerId, defaultPaymentMethodId: usersTable.defaultPaymentMethodId })
+    .from(usersTable)
+    .where(eq(usersTable.id, caller.userId));
+
+  if (!user?.stripeCustomerId) {
+    res.status(404).json({ error: "No saved cards found" });
+    return;
+  }
+
+  try {
+    const stripe = getStripe();
+    // Verify the PM belongs to this customer before detaching
+    const pm = await stripe.paymentMethods.retrieve(pmId);
+    const pmCustomer = typeof pm.customer === "string" ? pm.customer : pm.customer?.id;
+    if (pmCustomer !== user.stripeCustomerId) {
+      res.status(403).json({ error: "Payment method does not belong to your account" });
+      return;
+    }
+    await stripe.paymentMethods.detach(pmId);
+
+    // Clear default if this was the default card
+    if (user.defaultPaymentMethodId === pmId) {
+      await db.update(usersTable)
+        .set({ defaultPaymentMethodId: null })
+        .where(eq(usersTable.id, caller.userId));
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Passenger: charge a tip off-session ─────────────────────────────────────
+
+router.post("/payments/tip/:bookingId", requireAuth, async (req, res): Promise<void> => {
+  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const { tipAmount } = req.body as { tipAmount?: number };
+  if (!tipAmount || tipAmount <= 0 || tipAmount > 500) {
+    res.status(400).json({ error: "Tip amount must be between $1 and $500" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+
+  const [booking] = await db
+    .select()
+    .from(bookings)
+    .where(eq(bookings.id, bId));
+
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+  if (booking.userId !== caller.userId) {
+    res.status(403).json({ error: "You can only tip on your own bookings" });
+    return;
+  }
+
+  if (booking.status !== "completed") {
+    res.status(400).json({ error: "Tips can only be added to completed trips" });
+    return;
+  }
+
+  if (booking.tipAmount != null) {
+    res.status(409).json({ error: "A tip has already been added to this booking" });
+    return;
+  }
+
+  const [user] = await db
+    .select({ stripeCustomerId: usersTable.stripeCustomerId, defaultPaymentMethodId: usersTable.defaultPaymentMethodId })
+    .from(usersTable)
+    .where(eq(usersTable.id, caller.userId));
+
+  if (!user?.stripeCustomerId || !user.defaultPaymentMethodId) {
+    res.status(400).json({ error: "No saved payment method on file. Please contact support to add a tip." });
+    return;
+  }
+
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.create({
+      amount: Math.round(tipAmount * 100),
+      currency: "usd",
+      customer: user.stripeCustomerId,
+      payment_method: user.defaultPaymentMethodId,
+      confirm: true,
+      off_session: true,
+      description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
+      metadata: { bookingId: String(bId), type: "tip" },
+    });
+
+    if (intent.status !== "succeeded") {
+      res.status(402).json({ error: `Tip charge did not succeed (status: ${intent.status}). Please contact support.` });
+      return;
+    }
+
+    await db.update(bookings)
+      .set({ tipAmount: String(tipAmount), tipPaymentIntentId: intent.id, updatedAt: new Date() })
+      .where(eq(bookings.id, bId));
+
+    res.json({ success: true, tipAmount, paymentIntentId: intent.id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? "Tip charge failed — please try again." });
   }
 });
 

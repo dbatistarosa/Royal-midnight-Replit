@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle, Navigation } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle, Navigation, Star } from "lucide-react";
 import { Link, useParams, useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/contexts/auth";
@@ -9,7 +9,6 @@ import { API_BASE } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
-import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -35,6 +34,8 @@ type BookingDetail = {
   priceQuoted?: number | null;
   discountAmount?: number | null;
   driverId?: number | null;
+  tipAmount?: number | null;
+  tipPaymentIntentId?: string | null;
 };
 
 type DriverLocation = {
@@ -254,11 +255,18 @@ function PassengerRideDetailInner() {
   const [cancelPreview, setCancelPreview] = useState<CancelPreview | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelConfirming, setCancelConfirming] = useState(false);
-  const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null);
-  const [paymentPublishableKey, setPaymentPublishableKey] = useState<string | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState<number>(0);
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [paymentError, setPaymentError] = useState<string | null>(null);
+
+  // Tip state
+  const [tipAmount, setTipAmount] = useState("");
+  const [tipSubmitting, setTipSubmitting] = useState(false);
+  const [tipSubmitted, setTipSubmitted] = useState(false);
+
+  // Rating state
+  const [ratingValue, setRatingValue] = useState(0);
+  const [ratingHover, setRatingHover] = useState(0);
+  const [ratingComment, setRatingComment] = useState("");
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
 
   const loadBooking = useCallback(() => {
     if (!id || !token) return;
@@ -329,60 +337,50 @@ function PassengerRideDetailInner() {
     }
   };
 
-  const handleCompletePayment = async () => {
-    if (!token || !id) return;
-    setPaymentLoading(true);
-    setPaymentError(null);
+  const handleTipSubmit = async () => {
+    const amount = parseFloat(tipAmount);
+    if (!token || isNaN(amount) || amount <= 0) return;
+    setTipSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE}/payments/intent-for-booking/${id}`, {
+      const res = await fetch(`${API_BASE}/payments/tip/${id}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ tipAmount: amount }),
       });
-      const data = await res.json().catch(() => ({})) as {
-        clientSecret?: string;
-        publishableKey?: string;
-        amount?: number;
-        error?: string;
-        detail?: string;
-        piStatus?: string;
-      };
       if (!res.ok) {
-        if (res.status === 409) {
-          // Payment already received / in-flight — inform user and reload to reflect latest status
-          toast({
-            title: "Payment already received",
-            description: data.detail ?? "Your payment was already processed. Refreshing your booking status...",
-          });
-          loadBooking();
-          return;
-        }
-        throw new Error(data.error || "Could not open payment form.");
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Could not process tip.");
       }
-      setPaymentClientSecret(data.clientSecret ?? null);
-      setPaymentPublishableKey(data.publishableKey ?? null);
-      setPaymentAmount(data.amount ?? 0);
+      setTipSubmitted(true);
+      setBooking(prev => prev ? { ...prev, tipAmount: amount } : prev);
+      toast({ title: "Tip sent", description: `$${amount.toFixed(2)} gratuity has been added. Thank you!` });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Could not open payment form.";
-      setPaymentError(msg);
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not process tip.", variant: "destructive" });
     } finally {
-      setPaymentLoading(false);
+      setTipSubmitting(false);
     }
   };
 
-  const handlePaymentDone = async (paymentIntentId: string) => {
-    if (!token) return;
+  const handleRatingSubmit = async () => {
+    if (!token || ratingValue < 1) return;
+    setRatingSubmitting(true);
     try {
-      await fetch(`${API_BASE}/payments/confirm/${id}`, {
+      const res = await fetch(`${API_BASE}/bookings/${id}/rate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ paymentIntentId }),
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: ratingValue, comment: ratingComment || undefined }),
       });
-    } catch { /* webhook will handle it */ }
-    setPaymentClientSecret(null);
-    setPaymentPublishableKey(null);
-    toast({ title: "Payment complete", description: "Your booking is being confirmed." });
-    loadBooking();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Could not submit rating.");
+      }
+      setRatingSubmitted(true);
+      toast({ title: "Rating submitted", description: "Thank you for your feedback!" });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not submit rating.", variant: "destructive" });
+    } finally {
+      setRatingSubmitting(false);
+    }
   };
 
   const statusLabel = booking?.status?.replace(/_/g, " ") ?? "";
@@ -487,47 +485,11 @@ function PassengerRideDetailInner() {
               </div>
             </div>
 
-            {/* Awaiting Payment notice — with self-service "Complete Payment" option */}
+            {/* Awaiting Payment notice */}
             {booking.status === "awaiting_payment" && (
-              <div className="border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-400 space-y-4">
-                <div>
-                  <p className="font-medium mb-1">Payment Pending</p>
-                  <p className="text-amber-400/70">Your reservation is confirmed but awaiting payment. Complete your payment below to secure your ride.</p>
-                </div>
-
-                {paymentError && (
-                  <p className="text-red-400 text-xs">{paymentError}</p>
-                )}
-
-                {paymentClientSecret && paymentPublishableKey ? (
-                  <div className="border-t border-amber-500/20 pt-4 space-y-3">
-                    <p className="text-xs text-amber-400/60 uppercase tracking-widest">Secure Payment</p>
-                    <StripePaymentForm
-                      clientSecret={paymentClientSecret}
-                      publishableKey={paymentPublishableKey}
-                      amount={paymentAmount}
-                      returnUrl={`${window.location.origin}${(import.meta.env.BASE_URL ?? "/").replace(/\/$/, "")}/booking-confirmation/${id}`}
-                      onSuccess={(intentId) => void handlePaymentDone(intentId)}
-                      onProcessing={(intentId) => void handlePaymentDone(intentId)}
-                      onError={(msg) => setPaymentError(msg || null)}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => { setPaymentClientSecret(null); setPaymentPublishableKey(null); setPaymentError(null); }}
-                      className="text-xs text-amber-400/40 hover:text-amber-400/70 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <Button
-                    onClick={() => void handleCompletePayment()}
-                    disabled={paymentLoading}
-                    className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-6 py-2 rounded-none"
-                  >
-                    {paymentLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Loading...</> : <><CreditCard className="w-3.5 h-3.5 mr-2" />Complete Payment</>}
-                  </Button>
-                )}
+              <div className="border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-400">
+                <p className="font-medium mb-1">Payment Pending</p>
+                <p className="text-amber-400/70">Your reservation is confirmed but awaiting payment. Our team will be in touch to complete the process.</p>
               </div>
             )}
           </div>
@@ -555,14 +517,119 @@ function PassengerRideDetailInner() {
                       <span>-${booking.discountAmount.toFixed(2)}</span>
                     </div>
                   )}
+                  {booking.tipAmount != null && booking.tipAmount > 0 && (
+                    <div className="flex justify-between text-green-400">
+                      <span>Gratuity</span>
+                      <span>+${Number(booking.tipAmount).toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-medium text-base pt-3 border-t border-border">
                     <span>Total</span>
-                    <span className="text-primary">${booking.priceQuoted.toFixed(2)}</span>
+                    <span className="text-primary">
+                      ${(booking.priceQuoted + (booking.tipAmount != null ? Number(booking.tipAmount) : 0)).toFixed(2)}
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background p-3">
                   <Download className="w-3.5 h-3.5" />
                   <span>Billed via {booking.status === "awaiting_payment" ? "pending payment" : "card on file"}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Add a Tip (completed trips with no tip yet and card on file) */}
+            {booking?.status === "completed" && !booking.tipAmount && !tipSubmitted && (
+              <div className="bg-card border border-border p-5 sm:p-6">
+                <h2 className="font-serif text-xl mb-2 flex items-center gap-2">
+                  <Star className="w-4 h-4 text-primary" /> Add Gratuity
+                </h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Show your appreciation — a tip is charged to your card on file.
+                </p>
+                <div className="flex gap-2 mb-3">
+                  {[5, 10, 20].map(preset => (
+                    <button
+                      key={preset}
+                      onClick={() => setTipAmount(String(preset))}
+                      className={`flex-1 py-2 text-sm border rounded-none transition-colors ${tipAmount === String(preset) ? "border-primary bg-primary/10 text-primary" : "border-white/10 text-muted-foreground hover:border-primary/50"}`}
+                    >
+                      ${preset}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  min="1"
+                  max="500"
+                  step="1"
+                  placeholder="Custom amount"
+                  value={tipAmount}
+                  onChange={e => setTipAmount(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 text-white h-10 px-3 text-sm focus:outline-none focus:border-primary mb-3"
+                />
+                <Button
+                  onClick={() => void handleTipSubmit()}
+                  disabled={tipSubmitting || !tipAmount || parseFloat(tipAmount) <= 0}
+                  className="w-full bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest"
+                >
+                  {tipSubmitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Processing...</> : "Send Tip"}
+                </Button>
+              </div>
+            )}
+
+            {/* Tip already added confirmation */}
+            {booking?.status === "completed" && (booking.tipAmount || tipSubmitted) && (
+              <div className="bg-card border border-green-500/20 p-5">
+                <div className="flex items-center gap-2 text-green-400 text-sm">
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Gratuity of ${(booking.tipAmount ?? parseFloat(tipAmount || "0")).toFixed(2)} added</span>
+                </div>
+              </div>
+            )}
+
+            {/* Rate Your Driver (completed trips, not yet rated) */}
+            {booking?.status === "completed" && !ratingSubmitted && (
+              <div className="bg-card border border-border p-5 sm:p-6">
+                <h2 className="font-serif text-xl mb-2">Rate Your Driver</h2>
+                <p className="text-sm text-muted-foreground mb-4">How was your experience?</p>
+                <div className="flex gap-1 mb-4">
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <button
+                      key={star}
+                      onClick={() => setRatingValue(star)}
+                      onMouseEnter={() => setRatingHover(star)}
+                      onMouseLeave={() => setRatingHover(0)}
+                      className="p-1"
+                    >
+                      <Star
+                        className={`w-7 h-7 transition-colors ${star <= (ratingHover || ratingValue) ? "text-primary fill-primary" : "text-muted-foreground"}`}
+                      />
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  placeholder="Optional comment..."
+                  value={ratingComment}
+                  onChange={e => setRatingComment(e.target.value)}
+                  rows={2}
+                  className="w-full bg-white/5 border border-white/10 text-white px-3 py-2 text-sm focus:outline-none focus:border-primary mb-3 resize-none"
+                />
+                <Button
+                  onClick={() => void handleRatingSubmit()}
+                  disabled={ratingSubmitting || ratingValue < 1}
+                  className="w-full bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest"
+                >
+                  {ratingSubmitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Submitting...</> : "Submit Rating"}
+                </Button>
+              </div>
+            )}
+
+            {/* Rating submitted confirmation */}
+            {ratingSubmitted && (
+              <div className="bg-card border border-primary/20 p-5">
+                <div className="flex items-center gap-2 text-primary text-sm">
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Thank you for your {ratingValue}-star rating!</span>
                 </div>
               </div>
             )}
