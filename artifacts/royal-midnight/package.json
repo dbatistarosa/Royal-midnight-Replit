@@ -79,6 +79,7 @@
     "@googlemaps/js-api-loader": "^2.0.2",
     "@stripe/react-stripe-js": "^6.1.0",
     "@stripe/stripe-js": "^9.0.1",
-    "@workspace/object-storage-web": "workspace:*"
+    "@workspace/object-storage-web": "workspace:*",
+    "react-helmet-async": "^3.0.0"
   }
 }

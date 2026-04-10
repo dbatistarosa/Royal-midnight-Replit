@@ -7,8 +7,8 @@ export const AIRPORTS = [
 ];
 
 export const VEHICLE_CLASSES = [
-  { id: "business", name: "Business Class Sedan", passengers: 3, bags: 3, image: "/business.png", description: "Elevated amenities for the discerning professional. Immaculate leather interior, climate control, and complimentary water service." },
-  { id: "suv", name: "Premium SUV", passengers: 6, bags: 6, image: "/suv.png", description: "The 2026 Chevrolet Suburban — commanding presence, expansive cabin, and superior comfort for groups and families traveling in style." },
+  { id: "business", name: "Business Class Sedan", passengers: 3, bags: 3, image: "/business.webp", description: "Elevated amenities for the discerning professional. Immaculate leather interior, climate control, and complimentary water service." },
+  { id: "suv", name: "Premium SUV", passengers: 6, bags: 6, image: "/suv.webp", description: "The 2026 Chevrolet Suburban — commanding presence, expansive cabin, and superior comfort for groups and families traveling in style." },
 ];
 
 export const STATUS_COLORS: Record<string, string> = {

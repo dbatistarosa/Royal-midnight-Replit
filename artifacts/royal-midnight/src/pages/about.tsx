@@ -1,8 +1,14 @@
 import { Building2, Shield, Star, Clock } from "lucide-react";
+import { PageSeo } from "@/components/PageSeo";
 
 export default function About() {
   return (
     <div className="py-24">
+      <PageSeo
+        title="About Royal Midnight"
+        description="Learn about Royal Midnight — South Florida's premier luxury chauffeur service. Founded on discretion, punctuality, and uncompromising quality for Miami, Fort Lauderdale, and Palm Beach clients."
+        path="/about"
+      />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="text-center mb-16">
           <h1 className="font-serif text-3xl sm:text-4xl md:text-6xl mb-6">About Royal Midnight</h1>

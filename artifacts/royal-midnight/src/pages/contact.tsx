@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Mail, Phone, MapPin } from "lucide-react";
+import { PageSeo } from "@/components/PageSeo";
 
 const formSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -66,6 +67,11 @@ export default function Contact() {
 
   return (
     <div className="py-24">
+      <PageSeo
+        title="Contact Us — 24/7 Concierge"
+        description="Reach Royal Midnight's concierge team 24/7. Call, email, or send a message — we're here to assist with reservations, corporate accounts, and any questions about our South Florida luxury service."
+        path="/contact"
+      />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="text-center mb-16">
           <h1 className="font-serif text-3xl sm:text-4xl md:text-6xl mb-6">Contact Us</h1>

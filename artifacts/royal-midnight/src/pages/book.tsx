@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -326,6 +327,12 @@ export default function Book() {
 
   return (
     <div className="min-h-screen bg-[#050505]">
+      <PageSeo
+        title="Reserve a Luxury Ride — Book Online"
+        description="Book your South Florida luxury chauffeur online. Instant flat-rate quotes for airport transfers, corporate rides, and special events at FLL, MIA, and PBI. No surge pricing."
+        path="/book"
+        noIndex={false}
+      />
       {/* Hero banner */}
       <div className="relative pt-28 pb-12 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-black via-[#050505] to-[#050505]" />

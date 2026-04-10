@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -99,6 +100,12 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center px-6 pt-24">
+      <PageSeo
+        title="Sign In"
+        description="Sign in to your Royal Midnight account to view bookings, manage your profile, and access your reservation history."
+        path="/auth/login"
+        noIndex={true}
+      />
       <div className="w-full max-w-md">
         <div className="text-center mb-12">
           <Link href="/" className="block mb-8">
