@@ -83,7 +83,7 @@ function wrap(body: string) {
   return `<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#e8e0d0;margin:0;padding:0">
 <div style="max-width:600px;margin:0 auto;padding:32px 24px">
 <div style="border-bottom:1px solid #c9a84c;padding-bottom:20px;margin-bottom:24px;text-align:center">
-  <img src="https://royalmidnight.com/royal-midnight-logo.png" alt="Royal Midnight" style="height:60px;width:auto;display:inline-block" />
+  <img src="https://royalmidnight.com/royal-midnight-logo-original.png" alt="Royal Midnight" style="height:90px;width:auto;display:inline-block;max-width:300px" />
 </div>
 ${body}
 <div style="border-top:1px solid #333;margin-top:32px;padding-top:16px;font-size:11px;color:#666;text-align:center">

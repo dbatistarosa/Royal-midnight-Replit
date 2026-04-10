@@ -69,7 +69,7 @@ export function Navbar() {
     >
       <div className="container mx-auto px-6 flex items-center justify-between">
         <Link href="/" className="flex items-center">
-          <img src="/royal-midnight-logo.png" alt="Royal Midnight" className="h-12 w-auto" />
+          <img src="/royal-midnight-logo-original.png" alt="Royal Midnight" className="h-20 w-auto max-w-[220px] object-contain object-left" />
         </Link>
 
         {/* Desktop Nav */}
