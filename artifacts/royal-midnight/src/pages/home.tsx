@@ -28,7 +28,7 @@ export default function Home() {
             className="w-full h-full object-cover object-center opacity-60"
             loading="eager"
             decoding="async"
-            fetchpriority="high"
+            fetchPriority="high"
           />
           <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black"></div>
         </div>
