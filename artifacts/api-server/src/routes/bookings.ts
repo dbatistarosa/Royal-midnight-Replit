@@ -1205,6 +1205,20 @@ router.post("/bookings/:id/rate", requireAuth, async (req, res): Promise<void> =
     .values({ bookingId: id, driverId: booking.driverId, userId: caller.userId, rating, comment: comment ?? null })
     .returning();
 
+  // Recalculate driver avg rating (fire-and-forget)
+  db.select({ avg: sql<number>`coalesce(avg(rating::numeric), 0)::float` })
+    .from(reviewsTable)
+    .where(eq(reviewsTable.driverId, booking.driverId))
+    .then(([row]) => {
+      if (row != null) {
+        const newRating = String(Math.round((row.avg ?? 0) * 10) / 10);
+        return db.update(driversTable)
+          .set({ rating: newRating })
+          .where(eq(driversTable.id, booking.driverId!));
+      }
+    })
+    .catch(err => console.error("[bookings/rate] failed to update driver rating:", err));
+
   res.json({ success: true, reviewId: review.id });
 });
 
