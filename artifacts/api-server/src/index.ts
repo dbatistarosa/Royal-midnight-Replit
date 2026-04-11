@@ -26,10 +26,32 @@ if (Number.isNaN(port) || port <= 0) {
 async function runStartupMigrations(): Promise<void> {
   const client = await pool.connect();
   try {
+    // bookings: scheduling / auth columns
     await client.query(`
       ALTER TABLE bookings
         ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS authorized_at TIMESTAMPTZ
+    `);
+
+    // users: Stripe customer + saved payment method (passenger features)
+    await client.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT,
+        ADD COLUMN IF NOT EXISTS default_payment_method_id TEXT
+    `);
+
+    // bookings: tip support (passenger features)
+    await client.query(`
+      ALTER TABLE bookings
+        ADD COLUMN IF NOT EXISTS tip_amount NUMERIC(10, 2),
+        ADD COLUMN IF NOT EXISTS tip_payment_intent_id TEXT
+    `);
+
+    // bookings: route estimates for driver conflict detection
+    await client.query(`
+      ALTER TABLE bookings
+        ADD COLUMN IF NOT EXISTS estimated_duration_minutes INTEGER,
+        ADD COLUMN IF NOT EXISTS estimated_distance_miles NUMERIC(6, 2)
     `);
   } finally {
     client.release();

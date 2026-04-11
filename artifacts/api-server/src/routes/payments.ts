@@ -110,27 +110,36 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
         };
         description = `Royal Midnight — Booking #RM-${String(bookingId).padStart(4, "0")}`;
 
-        // Find or create a Stripe customer so the card can be saved for future use
+        // Find or create a Stripe customer so the card can be saved for future use.
+        // Wrapped in its own try-catch: if the DB column is missing or Stripe fails,
+        // we degrade gracefully and skip setup_future_usage rather than blocking payment.
         if (booking.userId) {
-          const [user] = await db
-            .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, stripeCustomerId: usersTable.stripeCustomerId })
-            .from(usersTable)
-            .where(eq(usersTable.id, booking.userId));
-          if (user) {
-            if (user.stripeCustomerId) {
-              customerId = user.stripeCustomerId;
-            } else {
-              // Create a new Stripe customer and persist it
-              const customer = await stripe.customers.create({
-                email: user.email,
-                name: user.name,
-                metadata: { userId: String(user.id) },
-              });
-              customerId = customer.id;
-              await db.update(usersTable)
-                .set({ stripeCustomerId: customer.id })
-                .where(eq(usersTable.id, user.id));
+          try {
+            const [user] = await db
+              .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, stripeCustomerId: usersTable.stripeCustomerId })
+              .from(usersTable)
+              .where(eq(usersTable.id, booking.userId));
+            if (user) {
+              if (user.stripeCustomerId) {
+                customerId = user.stripeCustomerId;
+              } else {
+                // Create a new Stripe customer and persist it
+                const customer = await stripe.customers.create({
+                  email: user.email,
+                  name: user.name,
+                  metadata: { userId: String(user.id) },
+                });
+                customerId = customer.id;
+                await db.update(usersTable)
+                  .set({ stripeCustomerId: customer.id })
+                  .where(eq(usersTable.id, user.id));
+              }
             }
+          } catch (customerErr: any) {
+            // Non-fatal: log and continue without customer/setup_future_usage.
+            // The payment still works; saved-card feature is unavailable for this booking.
+            console.warn("[payments] customer setup skipped:", customerErr?.message);
+            customerId = undefined;
           }
         }
       }
@@ -772,16 +781,20 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       }
       // Save the payment method to the customer's user record for future off-session charges
       if (intent.customer && intent.payment_method) {
-        const customerId = typeof intent.customer === "string" ? intent.customer : intent.customer.id;
-        const pmId = typeof intent.payment_method === "string" ? intent.payment_method : intent.payment_method.id;
-        const [user] = await db
-          .select({ id: usersTable.id })
-          .from(usersTable)
-          .where(eq(usersTable.stripeCustomerId, customerId));
-        if (user) {
-          await db.update(usersTable)
-            .set({ defaultPaymentMethodId: pmId })
-            .where(eq(usersTable.id, user.id));
+        try {
+          const customerId = typeof intent.customer === "string" ? intent.customer : intent.customer.id;
+          const pmId = typeof intent.payment_method === "string" ? intent.payment_method : intent.payment_method.id;
+          const [user] = await db
+            .select({ id: usersTable.id })
+            .from(usersTable)
+            .where(eq(usersTable.stripeCustomerId, customerId));
+          if (user) {
+            await db.update(usersTable)
+              .set({ defaultPaymentMethodId: pmId })
+              .where(eq(usersTable.id, user.id));
+          }
+        } catch (pmErr: any) {
+          console.warn("[payments] webhook: could not save payment method to user record:", pmErr?.message);
         }
       }
     }
