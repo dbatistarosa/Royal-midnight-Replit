@@ -535,6 +535,15 @@ export default function Book() {
       console.warn("[book] confirm failed, falling back to webhook:", err?.message);
     }
 
+    // Save the card for future tips / off-session charges (non-fatal)
+    if (token) {
+      fetch(`${API_BASE}/payments/save-payment-method`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ paymentIntentId }),
+      }).catch(() => {});
+    }
+
     setLocation(`/booking-confirmation/${bookingId}`);
   };
 

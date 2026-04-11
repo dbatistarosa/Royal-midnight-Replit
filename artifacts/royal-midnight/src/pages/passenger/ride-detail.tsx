@@ -270,6 +270,9 @@ function PassengerRideDetailInner() {
   const [tipCheckoutPubKey, setTipCheckoutPubKey] = useState<string | null>(null);
   const [tipCheckoutLoading, setTipCheckoutLoading] = useState(false);
   const [tipCardError, setTipCardError] = useState<string | null>(null);
+  // Saved card for off-session tip charge
+  type SavedCard = { id: string; brand: string; last4: string; expMonth: number; expYear: number };
+  const [savedCard, setSavedCard] = useState<SavedCard | null>(null);
 
   // Rating state — initialized from API once booking loads
   const [ratingValue, setRatingValue] = useState(0);
@@ -305,6 +308,17 @@ function PassengerRideDetailInner() {
     setIsLoading(true);
     loadBooking();
   }, [loadBooking]);
+
+  // Fetch saved card for tip off-session charging
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${API_BASE}/payments/saved-cards`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() as Promise<{ cards: SavedCard[] }> : Promise.resolve({ cards: [] }))
+      .then(data => setSavedCard(data.cards?.[0] ?? null))
+      .catch(() => {});
+  }, [token]);
 
   // Poll booking status every 15 seconds so the map appears automatically when driver departs
   useEffect(() => {
@@ -668,13 +682,47 @@ function PassengerRideDetailInner() {
                   onChange={e => setTipAmount(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 text-white h-10 px-3 text-sm focus:outline-none focus:border-primary mb-3"
                 />
-                <Button
-                  onClick={() => void handleTipSubmit()}
-                  disabled={tipSubmitting || tipCheckoutLoading || !tipAmount || parseFloat(tipAmount) <= 0}
-                  className="w-full bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest"
-                >
-                  {(tipSubmitting || tipCheckoutLoading) ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Processing...</> : "Send Tip"}
-                </Button>
+                {savedCard ? (
+                  <>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3 px-0.5">
+                      <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="capitalize">{savedCard.brand}</span>
+                      <span>•••• {savedCard.last4}</span>
+                      <span className="opacity-60">exp {savedCard.expMonth}/{String(savedCard.expYear).slice(-2)}</span>
+                      <button
+                        onClick={() => {
+                          const amt = parseFloat(tipAmount);
+                          if (amt > 0) void handleTipCheckout(amt);
+                        }}
+                        className="ml-auto text-primary hover:underline text-xs"
+                      >
+                        Use different card
+                      </button>
+                    </div>
+                    <Button
+                      onClick={() => void handleTipSubmit()}
+                      disabled={tipSubmitting || !tipAmount || parseFloat(tipAmount) <= 0}
+                      className="w-full bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest"
+                    >
+                      {tipSubmitting
+                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Processing...</>
+                        : `Charge ${tipAmount ? `$${parseFloat(tipAmount).toFixed(2)}` : "Tip"} to Card`}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    onClick={() => {
+                      const amt = parseFloat(tipAmount);
+                      if (amt > 0) void handleTipCheckout(amt);
+                    }}
+                    disabled={tipCheckoutLoading || !tipAmount || parseFloat(tipAmount) <= 0}
+                    className="w-full bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest"
+                  >
+                    {tipCheckoutLoading
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Processing...</>
+                      : "Enter Card & Send Tip"}
+                  </Button>
+                )}
               </div>
             )}
 

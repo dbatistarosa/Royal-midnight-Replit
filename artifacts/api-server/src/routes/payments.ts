@@ -1071,8 +1071,83 @@ router.post("/payments/tip-confirm/:bookingId", requireAuth, async (req, res): P
       .where(eq(bookings.id, bId));
 
     res.json({ success: true, tipAmount: confirmedAmount, paymentIntentId: intent.id });
+
+    // Save the payment method used for this tip as the default for future off-session charges
+    const pm = intent.payment_method;
+    if (pm) {
+      const pmId = typeof pm === "string" ? pm : pm.id;
+      db.update(usersTable)
+        .set({ defaultPaymentMethodId: pmId })
+        .where(eq(usersTable.id, caller.userId))
+        .catch((e: any) => console.warn("[payments] tip-confirm: could not save PM:", e?.message));
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message ?? "Could not confirm tip payment." });
+  }
+});
+
+// ─── Save a payment method from a succeeded PaymentIntent ────────────────────
+// Called by the frontend after a successful booking payment to reliably persist
+// the card without depending on the webhook (which may not fire in all envs).
+
+router.post("/payments/save-payment-method", requireAuth, async (req, res): Promise<void> => {
+  const { paymentIntentId } = req.body as { paymentIntentId?: string };
+  if (!paymentIntentId) {
+    res.status(400).json({ error: "paymentIntentId is required" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+
+  const [user] = await db
+    .select({ id: usersTable.id, stripeCustomerId: usersTable.stripeCustomerId })
+    .from(usersTable)
+    .where(eq(usersTable.id, caller.userId));
+
+  if (!user?.stripeCustomerId) {
+    res.json({ saved: false, reason: "No Stripe customer on file" });
+    return;
+  }
+
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["payment_method"],
+    });
+
+    if (intent.status !== "succeeded") {
+      res.json({ saved: false, reason: "Payment not yet succeeded" });
+      return;
+    }
+
+    const pm = intent.payment_method as Stripe.PaymentMethod | null;
+    if (!pm?.id) {
+      res.json({ saved: false, reason: "No payment method on intent" });
+      return;
+    }
+
+    // Attach to customer if not already attached
+    const pmCustomer = typeof pm.customer === "string" ? pm.customer : pm.customer?.id;
+    if (pmCustomer !== user.stripeCustomerId) {
+      await stripe.paymentMethods.attach(pm.id, { customer: user.stripeCustomerId });
+    }
+
+    await db.update(usersTable)
+      .set({ defaultPaymentMethodId: pm.id })
+      .where(eq(usersTable.id, user.id));
+
+    res.json({
+      saved: true,
+      card: {
+        id: pm.id,
+        brand: pm.card?.brand ?? "card",
+        last4: pm.card?.last4 ?? "••••",
+        expMonth: pm.card?.exp_month,
+        expYear: pm.card?.exp_year,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
