@@ -412,22 +412,22 @@ function PassengerRideDetailInner() {
   };
 
   const handleTipCardSuccess = async (paymentIntentId: string) => {
-    const amount = parseFloat(tipAmount);
-    if (!token || isNaN(amount) || amount <= 0) return;
+    if (!token) return;
     try {
       const res = await fetch(`${API_BASE}/payments/tip-confirm/${id}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentIntentId, tipAmount: amount }),
+        body: JSON.stringify({ paymentIntentId }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(data.error || "Could not record tip.");
       }
+      const { tipAmount: confirmedAmount } = await res.json() as { tipAmount: number };
       setTipSubmitted(true);
       setShowTipCardEntry(false);
-      setBooking(prev => prev ? { ...prev, tipAmount: amount } : prev);
-      toast({ title: "Tip sent!", description: `$${amount.toFixed(2)} gratuity has been recorded. Thank you!` });
+      setBooking(prev => prev ? { ...prev, tipAmount: confirmedAmount } : prev);
+      toast({ title: "Tip sent!", description: `$${confirmedAmount.toFixed(2)} gratuity has been recorded. Thank you!` });
     } catch (err: unknown) {
       setTipCardError(err instanceof Error ? err.message : "Could not record tip.");
     }

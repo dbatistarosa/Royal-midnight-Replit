@@ -1024,9 +1024,9 @@ router.post("/payments/tip-confirm/:bookingId", requireAuth, async (req, res): P
   const bId = parseInt(req.params["bookingId"] ?? "", 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
-  const { paymentIntentId, tipAmount } = req.body as { paymentIntentId?: string; tipAmount?: number };
-  if (!paymentIntentId || !tipAmount || tipAmount <= 0) {
-    res.status(400).json({ error: "paymentIntentId and tipAmount are required" });
+  const { paymentIntentId } = req.body as { paymentIntentId?: string };
+  if (!paymentIntentId) {
+    res.status(400).json({ error: "paymentIntentId is required" });
     return;
   }
 
@@ -1040,21 +1040,37 @@ router.post("/payments/tip-confirm/:bookingId", requireAuth, async (req, res): P
   try {
     const stripe = getStripe();
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    // Verify intent succeeded
     if (intent.status !== "succeeded") {
       res.status(402).json({ error: `Payment has not succeeded (status: ${intent.status})` });
       return;
     }
+
+    // Validate all metadata to prevent cross-booking and cross-user attacks
     const meta = intent.metadata as Record<string, string>;
-    if (meta["bookingId"] !== String(bId) || meta["type"] !== "tip") {
+    if (
+      meta["bookingId"] !== String(bId) ||
+      meta["type"] !== "tip" ||
+      meta["userId"] !== String(caller.userId)
+    ) {
       res.status(400).json({ error: "Payment intent does not match this booking" });
       return;
     }
 
+    // Derive canonical amount from Stripe — never trust the client
+    const confirmedCents = intent.amount_received ?? intent.amount;
+    const confirmedAmount = confirmedCents / 100;
+    if (confirmedAmount <= 0 || confirmedAmount > 500) {
+      res.status(400).json({ error: "Confirmed tip amount is out of valid range" });
+      return;
+    }
+
     await db.update(bookings)
-      .set({ tipAmount: String(tipAmount), tipPaymentIntentId: intent.id, updatedAt: new Date() })
+      .set({ tipAmount: String(confirmedAmount), tipPaymentIntentId: intent.id, updatedAt: new Date() })
       .where(eq(bookings.id, bId));
 
-    res.json({ success: true, tipAmount, paymentIntentId: intent.id });
+    res.json({ success: true, tipAmount: confirmedAmount, paymentIntentId: intent.id });
   } catch (err: any) {
     res.status(500).json({ error: err.message ?? "Could not confirm tip payment." });
   }
