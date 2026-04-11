@@ -755,15 +755,13 @@ function TabEarnings({ driverId, authHeader }: { driverId: number; authHeader: s
           </div>
         ))}
       </div>
-      {(earnings?.thisWeekTips ?? 0) > 0 && (
-        <div className="bg-card border border-border p-5 flex items-center justify-between">
-          <div>
-            <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-1">Tips This Week</h3>
-            <div className="text-2xl font-serif text-amber-400">{fmt$(earnings?.thisWeekTips ?? 0)}</div>
-          </div>
-          <Star className="w-5 h-5 text-amber-400/40" />
+      <div className="bg-card border border-border p-5 flex items-center justify-between">
+        <div>
+          <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-1">Tips This Week</h3>
+          <div className="text-2xl font-serif text-amber-400">{fmt$(earnings?.thisWeekTips ?? 0)}</div>
         </div>
-      )}
+        <Star className="w-5 h-5 text-amber-400/40" />
+      </div>
       <div className="bg-card border border-border p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="font-serif text-lg">Last 30 Days</h2>
@@ -831,12 +829,22 @@ function TabStats({ driverId, authHeader, rating, totalRides }: { driverId: numb
 
 function TabFinished({ driverId, authHeader }: { driverId: number; authHeader: string }) {
   const [bookings, setBookings] = useState<BookingRow[]>([]);
+  const [ratingMap, setRatingMap] = useState<Record<number, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
-      .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
-      .then(data => setBookings(Array.isArray(data) ? data.filter(b => b.status === "completed") : []))
+    Promise.all([
+      fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
+        .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([])),
+      fetch(`${API_BASE}/reviews?driverId=${driverId}`)
+        .then(r => r.ok ? r.json() as Promise<{ bookingId: number; rating: number }[]> : Promise.resolve([])),
+    ])
+      .then(([bks, reviews]) => {
+        setBookings(Array.isArray(bks) ? bks.filter(b => b.status === "completed") : []);
+        const map: Record<number, number> = {};
+        if (Array.isArray(reviews)) reviews.forEach(r => { map[r.bookingId] = r.rating; });
+        setRatingMap(map);
+      })
       .catch(() => setBookings([]))
       .finally(() => setLoading(false));
   }, [driverId, authHeader]);
@@ -854,25 +862,45 @@ function TabFinished({ driverId, authHeader }: { driverId: number; authHeader: s
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Route</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Earnings</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Tip</th>
+              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Rating</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {bookings.map(b => (
-              <tr key={b.id} className="hover:bg-background/50 transition-colors">
-                <td className="px-5 py-3">{format(new Date(b.pickupAt), "MMM d, HH:mm")}</td>
-                <td className="px-5 py-3">{b.passengerName}</td>
-                <td className="px-5 py-3 max-w-[180px] truncate text-muted-foreground" title={`${b.pickupAddress} to ${b.dropoffAddress}`}>
-                  {b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}
-                </td>
-                <td className="px-5 py-3 text-right font-medium text-primary">{fmt$(b.driverEarnings ?? 0)}</td>
-                <td className="px-5 py-3 text-right">
-                  {b.tipAmount != null && b.tipAmount > 0
-                    ? <span className="text-amber-400 font-medium">{fmt$(b.tipAmount)}</span>
-                    : <span className="text-muted-foreground/40">—</span>
-                  }
-                </td>
-              </tr>
-            ))}
+            {bookings.map(b => {
+              const rating = ratingMap[b.id] ?? null;
+              return (
+                <tr key={b.id} className="hover:bg-background/50 transition-colors">
+                  <td className="px-5 py-3">{format(new Date(b.pickupAt), "MMM d, HH:mm")}</td>
+                  <td className="px-5 py-3">{b.passengerName}</td>
+                  <td className="px-5 py-3 max-w-[180px] truncate text-muted-foreground" title={`${b.pickupAddress} to ${b.dropoffAddress}`}>
+                    {b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}
+                  </td>
+                  <td className="px-5 py-3 text-right font-medium text-primary">
+                    {fmt$(b.driverEarnings ?? 0)}
+                    {b.tipAmount != null && b.tipAmount > 0 && (
+                      <span className="block text-xs text-amber-400">+{fmt$(b.tipAmount)} tip</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    {b.tipAmount != null && b.tipAmount > 0
+                      ? <span className="text-amber-400 font-medium">{fmt$(b.tipAmount)}</span>
+                      : <span className="text-muted-foreground/40">—</span>
+                    }
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    {rating != null ? (
+                      <span className="flex items-center justify-end gap-0.5">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star key={i} className={`w-3 h-3 ${i < rating ? "text-amber-400 fill-amber-400" : "text-gray-600"}`} />
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
