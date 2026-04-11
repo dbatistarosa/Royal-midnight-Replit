@@ -981,4 +981,83 @@ router.post("/payments/tip/:bookingId", requireAuth, async (req, res): Promise<v
   }
 });
 
+// ─── Passenger: create an on-session tip PaymentIntent (no saved card required) ──
+
+router.post("/payments/tip-checkout/:bookingId", requireAuth, async (req, res): Promise<void> => {
+  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const { tipAmount } = req.body as { tipAmount?: number };
+  if (!tipAmount || tipAmount <= 0 || tipAmount > 500) {
+    res.status(400).json({ error: "Tip amount must be between $1 and $500" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+
+  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+  if (booking.userId !== caller.userId) { res.status(403).json({ error: "You can only tip on your own bookings" }); return; }
+  if (booking.status !== "completed") { res.status(400).json({ error: "Tips can only be added to completed trips" }); return; }
+  if (booking.tipAmount != null) { res.status(409).json({ error: "A tip has already been added to this booking" }); return; }
+
+  const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
+  if (!publishableKey) { res.status(503).json({ error: "Stripe not configured" }); return; }
+
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.create({
+      amount: Math.round(tipAmount * 100),
+      currency: "usd",
+      description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
+      metadata: { bookingId: String(bId), type: "tip", userId: String(caller.userId) },
+    });
+    res.json({ clientSecret: intent.client_secret, publishableKey });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? "Could not initiate tip payment." });
+  }
+});
+
+// ─── Passenger: confirm a tip paid via on-session PaymentIntent ───────────────
+
+router.post("/payments/tip-confirm/:bookingId", requireAuth, async (req, res): Promise<void> => {
+  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const { paymentIntentId, tipAmount } = req.body as { paymentIntentId?: string; tipAmount?: number };
+  if (!paymentIntentId || !tipAmount || tipAmount <= 0) {
+    res.status(400).json({ error: "paymentIntentId and tipAmount are required" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+
+  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+  if (booking.userId !== caller.userId) { res.status(403).json({ error: "You can only tip on your own bookings" }); return; }
+  if (booking.tipAmount != null) { res.status(409).json({ error: "A tip has already been added to this booking" }); return; }
+
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (intent.status !== "succeeded") {
+      res.status(402).json({ error: `Payment has not succeeded (status: ${intent.status})` });
+      return;
+    }
+    const meta = intent.metadata as Record<string, string>;
+    if (meta["bookingId"] !== String(bId) || meta["type"] !== "tip") {
+      res.status(400).json({ error: "Payment intent does not match this booking" });
+      return;
+    }
+
+    await db.update(bookings)
+      .set({ tipAmount: String(tipAmount), tipPaymentIntentId: intent.id, updatedAt: new Date() })
+      .where(eq(bookings.id, bId));
+
+    res.json({ success: true, tipAmount, paymentIntentId: intent.id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? "Could not confirm tip payment." });
+  }
+});
+
 export default router;

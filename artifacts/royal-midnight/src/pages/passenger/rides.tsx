@@ -202,6 +202,7 @@ function BookingDetailPanel({ booking }: { booking: Booking }) {
 function RideCard({ booking, isPast }: { booking: Booking; isPast?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const showDriverCard = !isPast && booking.driverId != null && ["confirmed", "in_progress", "on_way", "on_location"].includes(booking.status);
+  const isCompleted = booking.status === "completed";
 
   return (
     <div className={`bg-card border border-border rounded-none p-6 transition-opacity ${isPast ? "opacity-75 hover:opacity-100" : ""}`}>
@@ -232,6 +233,20 @@ function RideCard({ booking, isPast }: { booking: Booking; isPast?: boolean }) {
 
       {/* Driver card for confirmed/in_progress bookings */}
       {showDriverCard && <DriverInfoCard driverId={booking.driverId!} />}
+
+      {/* Rate & Tip CTA for completed rides */}
+      {isCompleted && (
+        <Link
+          href={`/passenger/rides/${booking.id}`}
+          className="mt-4 flex items-center justify-between gap-2 px-4 py-3 border border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors group"
+        >
+          <div className="flex items-center gap-2 text-sm text-primary">
+            <Star className="w-4 h-4 fill-primary/30" />
+            <span className="font-medium">Rate your driver &amp; add a tip</span>
+          </div>
+          <span className="text-xs text-primary/60 group-hover:text-primary transition-colors uppercase tracking-widest">View →</span>
+        </Link>
+      )}
 
       {/* Expanded detail panel */}
       {expanded && <BookingDetailPanel booking={booking} />}

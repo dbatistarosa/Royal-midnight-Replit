@@ -519,6 +519,21 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     }
   }
 
+  // For passengers/corporate: include existing rating if any
+  if (caller.role === "passenger" || caller.role === "corporate" || caller.role === "admin") {
+    const [existingReview] = await db
+      .select({ rating: reviewsTable.rating, comment: reviewsTable.comment })
+      .from(reviewsTable)
+      .where(eq(reviewsTable.bookingId, params.data.id));
+    const base = parseBooking(booking);
+    return res.json({
+      ...base,
+      hasRating: existingReview != null,
+      existingRating: existingReview?.rating ?? null,
+      existingComment: existingReview?.comment ?? null,
+    });
+  }
+
   res.json(parseBooking(booking));
 });
 
