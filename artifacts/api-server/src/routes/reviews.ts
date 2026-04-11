@@ -55,7 +55,7 @@ router.post("/reviews", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const [review] = await db.insert(reviewsTable).values(parsed.data).returning();
+  const [review] = await db.insert(reviewsTable).values({ ...parsed.data, userId: req.currentUser!.userId }).returning();
   res.status(201).json({ ...review, createdAt: review.createdAt.toISOString() });
 });
 
