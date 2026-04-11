@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, asc } from "drizzle-orm";
 import { db, supportTicketsTable, ticketMessagesTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
   ListTicketsQueryParams,
   ListTicketsResponse,
@@ -48,14 +48,20 @@ router.get("/support", requireAuth, async (req, res): Promise<void> => {
   res.json(ListTicketsResponse.parse(tickets.map(parseTicket)));
 });
 
-router.post("/support", async (req, res): Promise<void> => {
+// optionalAuth: logged-in users get their ticket auto-linked; guests can still submit
+router.post("/support", optionalAuth, async (req, res): Promise<void> => {
   const parsed = CreateTicketBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
-  const [ticket] = await db.insert(supportTicketsTable).values(parsed.data).returning();
+  // If the caller is authenticated, always use their real userId (ignore body value)
+  const insertData = req.currentUser
+    ? { ...parsed.data, userId: req.currentUser.userId }
+    : parsed.data;
+
+  const [ticket] = await db.insert(supportTicketsTable).values(insertData).returning();
   res.status(201).json(parseTicket(ticket));
 });
 
