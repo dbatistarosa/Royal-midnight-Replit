@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { PageSeo } from "@/components/PageSeo";
 import { useForm } from "react-hook-form";
@@ -34,9 +34,19 @@ type ForgotResponse = {
 
 export default function Login() {
   const [, setLocation] = useLocation();
-  const { login } = useAuth();
+  const { login, user } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Redirect already-logged-in users straight to their dashboard
+  useEffect(() => {
+    if (!user) return;
+    if (user.role === "admin") setLocation("/admin");
+    else if (user.role === "driver") setLocation("/driver/dashboard");
+    else if (user.role === "corporate") setLocation("/corporate/dashboard");
+    else setLocation("/passenger/dashboard");
+  }, [user, setLocation]);
+
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSubmitting, setForgotSubmitting] = useState(false);
