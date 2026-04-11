@@ -575,3 +575,25 @@ export async function sendWeeklyPayoutAdminReport(params: {
 
   await send(ADMIN_EMAIL, `Royal Midnight — Weekly Payout Report (${weekLabel})`, html, "weekly_payout_admin_report");
 }
+
+export async function sendPasswordResetEmail(to: string, passengerName: string, resetLink: string) {
+  const html = wrap(`
+<h2 style="color:#ffffff;margin:0 0 8px;font-size:22px;font-weight:600">Reset Your Password</h2>
+<p style="color:#9ca3af;margin:0 0 20px;font-size:14px">Royal Midnight — Secure Account Recovery</p>
+<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${passengerName},</p>
+<p style="color:#9ca3af;font-size:14px;margin:0 0 24px">
+  We received a request to reset your Royal Midnight password. Click the button below to choose a new password.
+  This link expires in <strong style="color:#e5e7eb">30 minutes</strong>.
+</p>
+<p style="text-align:center;margin:0 0 24px;">
+  <a href="${resetLink}" style="background:#c9a84c;color:#050505;padding:12px 32px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px;display:inline-block">RESET PASSWORD</a>
+</p>
+<p style="color:#6b7280;font-size:12px;margin:0 0 8px">
+  If you did not request a password reset, you can safely ignore this email — your password will not change.
+</p>
+<p style="color:#4b5563;font-size:11px;word-break:break-all">
+  If the button above doesn't work, copy and paste this link into your browser:<br>${resetLink}
+</p>`);
+
+  await send(to, "Reset Your Royal Midnight Password", html, "password_reset");
+}

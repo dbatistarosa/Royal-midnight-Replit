@@ -14,7 +14,7 @@ import {
 
 const router: IRouter = Router();
 
-router.get("/promos", async (_req, res): Promise<void> => {
+router.get("/promos", requireAdmin, async (_req, res): Promise<void> => {
   const promos = await db.select().from(promoCodesTable);
   res.json(
     ListPromosResponse.parse(

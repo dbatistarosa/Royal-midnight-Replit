@@ -1,13 +1,13 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, notificationsTable } from "@workspace/db";
+import { requireAuth } from "../middleware/auth.js";
 import {
   ListNotificationsQueryParams,
   ListNotificationsResponse,
   MarkNotificationReadParams,
   MarkNotificationReadResponse,
 } from "@workspace/api-zod";
-import { requireAuth } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
@@ -18,9 +18,9 @@ router.get("/notifications", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const caller = req.currentUser!;
-  if (caller.role !== "admin" && caller.userId !== parsed.data.userId) {
-    res.status(403).json({ error: "Access denied" });
+  // Users may only fetch their own notifications; admins may fetch any
+  if (req.currentUser!.role !== "admin" && parsed.data.userId !== req.currentUser!.userId) {
+    res.status(403).json({ error: "Forbidden" });
     return;
   }
 
@@ -43,19 +43,15 @@ router.patch("/notifications/:id/read", requireAuth, async (req, res): Promise<v
     return;
   }
 
-  const [existing] = await db
-    .select()
-    .from(notificationsTable)
-    .where(eq(notificationsTable.id, params.data.id));
-
+  // Fetch first to verify ownership before updating
+  const [existing] = await db.select().from(notificationsTable).where(eq(notificationsTable.id, params.data.id));
   if (!existing) {
     res.status(404).json({ error: "Notification not found" });
     return;
   }
 
-  const caller = req.currentUser!;
-  if (caller.role !== "admin" && existing.userId !== caller.userId) {
-    res.status(403).json({ error: "Access denied" });
+  if (req.currentUser!.role !== "admin" && existing.userId !== req.currentUser!.userId) {
+    res.status(403).json({ error: "Forbidden" });
     return;
   }
 
@@ -64,11 +60,6 @@ router.patch("/notifications/:id/read", requireAuth, async (req, res): Promise<v
     .set({ isRead: true })
     .where(eq(notificationsTable.id, params.data.id))
     .returning();
-
-  if (!notification) {
-    res.status(404).json({ error: "Notification not found" });
-    return;
-  }
 
   res.json(
     MarkNotificationReadResponse.parse({ ...notification, createdAt: notification.createdAt.toISOString() })

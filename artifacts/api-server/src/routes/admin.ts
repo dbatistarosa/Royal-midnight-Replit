@@ -2,8 +2,6 @@ import { Router, type IRouter } from "express";
 import { sql, desc, eq } from "drizzle-orm";
 import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
-import { fetchCommissionPct } from "../lib/commission.js";
-import { encryptField, safeDecryptField } from "../lib/encrypt.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
 import {
@@ -109,7 +107,13 @@ router.get("/admin/recent-bookings", requireAdmin, async (req, res): Promise<voi
 });
 
 router.get("/admin/revenue", requireAdmin, async (_req, res): Promise<void> => {
-  const commissionPct = await fetchCommissionPct();
+  // Fetch commission rate from settings
+  const [commRow] = await db
+    .select({ value: settingsTable.value })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, "driver_commission_pct"));
+  const rawPct = parseFloat(commRow?.value ?? "70");
+  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
 
   const daily = await db
     .select({
@@ -247,7 +251,13 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  const commissionPct = await fetchCommissionPct();
+  // Get commission rate
+  const [commRow] = await db
+    .select({ value: settingsTable.value })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, "driver_commission_pct"));
+  const rawPct = parseFloat(commRow?.value ?? "70");
+  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
 
   // Get all approved drivers
   const drivers = await db
@@ -291,8 +301,8 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
       commissionPct,
       driverNet,
       bankName: d.payoutBankName ?? null,
-      routingNumber: safeDecryptField(d.payoutRoutingNumber),
-      accountNumber: safeDecryptField(d.payoutAccountNumber),
+      routingNumber: d.payoutRoutingNumber ?? null,
+      accountNumber: d.payoutAccountNumber ?? null,
       legalName: d.payoutLegalName ?? null,
       payoutEmail: d.payoutEmail ?? d.email,
       hasBankDetails: !!(d.payoutBankName && d.payoutRoutingNumber && d.payoutAccountNumber),
@@ -327,7 +337,12 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
-  const commissionPct = await fetchCommissionPct();
+  const [commRow] = await db
+    .select({ value: settingsTable.value })
+    .from(settingsTable)
+    .where(eq(settingsTable.key, "driver_commission_pct"));
+  const rawPct = parseFloat(commRow?.value ?? "70");
+  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
 
   const drivers = await db
     .select()
@@ -357,8 +372,8 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
       driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
       rides: earnings.rides, grossEarnings: Math.round(earnings.gross * 100) / 100,
       commissionPct, driverNet,
-      bankName: d.payoutBankName ?? null, routingNumber: safeDecryptField(d.payoutRoutingNumber),
-      accountNumber: safeDecryptField(d.payoutAccountNumber), legalName: d.payoutLegalName ?? null,
+      bankName: d.payoutBankName ?? null, routingNumber: d.payoutRoutingNumber ?? null,
+      accountNumber: d.payoutAccountNumber ?? null, legalName: d.payoutLegalName ?? null,
     };
   });
 
@@ -367,9 +382,7 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
     try {
       await sendWeeklyDriverPayout({ ...p, weekLabel });
       emailsSent++;
-    } catch (err) {
-      console.error("[payouts] driver email error:", err);
-    }
+    } catch {}
   }
 
   try {
@@ -380,9 +393,7 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
       totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
       commissionPct,
     });
-  } catch (err) {
-    console.error("[payouts] admin report email error:", err);
-  }
+  } catch {}
 
   res.json({ ok: true, emailsSent, driverCount: drivers.length, weekLabel });
 });
@@ -398,8 +409,8 @@ router.patch("/admin/drivers/:id/bank", requireAdmin, async (req, res): Promise<
     .update(driversTable)
     .set({
       payoutBankName: bankName ?? null,
-      payoutRoutingNumber: routingNumber ? encryptField(routingNumber) : null,
-      payoutAccountNumber: accountNumber ? encryptField(accountNumber) : null,
+      payoutRoutingNumber: routingNumber ?? null,
+      payoutAccountNumber: accountNumber ?? null,
       payoutLegalName: legalName ?? null,
       payoutEmail: payoutEmail ?? null,
     })

@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, or, and, isNull } from "drizzle-orm";
 import { db, usersTable, bookingsTable } from "@workspace/db";
+import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import {
   ListUsersQueryParams,
   ListUsersResponse,
@@ -20,7 +21,8 @@ function parseUser(u: typeof usersTable.$inferSelect) {
   return { ...u, createdAt: u.createdAt.toISOString() };
 }
 
-router.get("/users", async (req, res): Promise<void> => {
+// Admin-only: list all users (used by admin passengers/drivers pages)
+router.get("/users", requireAdmin, async (req, res): Promise<void> => {
   const parsed = ListUsersQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -35,7 +37,8 @@ router.get("/users", async (req, res): Promise<void> => {
   res.json(ListUsersResponse.parse(users.map(parseUser)));
 });
 
-router.post("/users", async (req, res): Promise<void> => {
+// Admin-only: create a user directly (prefer /auth/register for self-signup)
+router.post("/users", requireAdmin, async (req, res): Promise<void> => {
   const parsed = CreateUserBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -46,10 +49,17 @@ router.post("/users", async (req, res): Promise<void> => {
   res.status(201).json(GetUserResponse.parse(parseUser(user)));
 });
 
-router.get("/users/:id", async (req, res): Promise<void> => {
+// Auth: self or admin
+router.get("/users/:id", requireAuth, async (req, res): Promise<void> => {
   const params = GetUserParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== params.data.id) {
+    res.status(403).json({ error: "Access denied" });
     return;
   }
 
@@ -62,10 +72,17 @@ router.get("/users/:id", async (req, res): Promise<void> => {
   res.json(GetUserResponse.parse(parseUser(user)));
 });
 
-router.patch("/users/:id", async (req, res): Promise<void> => {
+// Auth: self or admin; only name and phone can be updated (email is identity)
+router.patch("/users/:id", requireAuth, async (req, res): Promise<void> => {
   const params = UpdateUserParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== params.data.id) {
+    res.status(403).json({ error: "Access denied" });
     return;
   }
 
@@ -93,10 +110,17 @@ router.patch("/users/:id", async (req, res): Promise<void> => {
   res.json(UpdateUserResponse.parse(parseUser(user)));
 });
 
-router.get("/users/:id/bookings", async (req, res): Promise<void> => {
+// Auth: self or admin
+router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> => {
   const params = GetUserBookingsParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== params.data.id) {
+    res.status(403).json({ error: "Access denied" });
     return;
   }
 
