@@ -641,22 +641,29 @@ function PassengerRideDetailInner() {
                   Show your appreciation — add a gratuity for your driver.
                 </p>
                 <div className="flex gap-2 mb-3">
-                  {[5, 10, 20].map(preset => (
-                    <button
-                      key={preset}
-                      onClick={() => setTipAmount(String(preset))}
-                      className={`flex-1 py-2 text-sm border rounded-none transition-colors ${tipAmount === String(preset) ? "border-primary bg-primary/10 text-primary" : "border-white/10 text-muted-foreground hover:border-primary/50"}`}
-                    >
-                      ${preset}
-                    </button>
-                  ))}
+                  {[15, 18, 20, 25].map(pct => {
+                    const base = booking.priceQuoted ?? 0;
+                    const computed = base > 0 ? Math.round(base * pct) / 100 : null;
+                    const label = computed != null ? `$${computed.toFixed(2)}` : "";
+                    const val = computed != null ? String(computed.toFixed(2)) : "";
+                    return (
+                      <button
+                        key={pct}
+                        onClick={() => val && setTipAmount(val)}
+                        className={`flex-1 py-2.5 text-sm border rounded-none transition-colors flex flex-col items-center gap-0.5 ${tipAmount === val && val ? "border-primary bg-primary/10 text-primary" : "border-white/10 text-muted-foreground hover:border-primary/50"}`}
+                      >
+                        <span className="font-medium">{pct}%</span>
+                        {label && <span className="text-xs opacity-70">{label}</span>}
+                      </button>
+                    );
+                  })}
                 </div>
                 <input
                   type="number"
                   min="1"
                   max="500"
-                  step="1"
-                  placeholder="Custom amount"
+                  step="0.01"
+                  placeholder="Custom amount ($)"
                   value={tipAmount}
                   onChange={e => setTipAmount(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 text-white h-10 px-3 text-sm focus:outline-none focus:border-primary mb-3"
