@@ -14,8 +14,9 @@ const LOCATION_LS_KEY = "rm_driver_location_sharing";
 
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "History", href: "/driver/history", icon: History },
+  { label: "Finished", href: "/driver/history", icon: History },
   { label: "Earnings", href: "/driver/earnings", icon: DollarSign },
+  { label: "Stats", href: "/driver/stats", icon: Star },
   { label: "Profile", href: "/driver/profile", icon: User },
 ];
 
@@ -65,16 +66,12 @@ type Review = {
   createdAt: string;
 };
 
-type DashboardTab = "available" | "active_rides" | "in_progress" | "finished" | "earnings" | "stats" | "profile";
+type DashboardTab = "available" | "active_rides" | "in_progress";
 
 const TABS: { key: DashboardTab; label: string }[] = [
   { key: "available",    label: "Available" },
   { key: "active_rides", label: "Active Rides" },
   { key: "in_progress",  label: "In Progress" },
-  { key: "finished",     label: "Finished" },
-  { key: "earnings",     label: "Earnings" },
-  { key: "stats",        label: "Stats" },
-  { key: "profile",      label: "Profile" },
 ];
 
 const fmt$ = (n: number) => `$${n.toFixed(2)}`;
@@ -1045,6 +1042,7 @@ export default function DriverDashboard() {
   const { driverRecord, isLoading } = useDriverStatus();
   const { user, token } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>("available");
+
   const [earnings, setEarnings] = useState<EarningsData | null>(null);
   const [upcomingCount, setUpcomingCount] = useState<number | null>(null);
   const [myRidesRefreshKey, setMyRidesRefreshKey] = useState(0);
@@ -1189,10 +1187,6 @@ export default function DriverDashboard() {
           )}
           {activeTab === "active_rides" && <TabActiveRides driverId={driverRecord.id} authHeader={authHeader} refreshKey={myRidesRefreshKey} />}
           {activeTab === "in_progress" && <TabInProgress driverId={driverRecord.id} authHeader={authHeader} refreshKey={myRidesRefreshKey} />}
-          {activeTab === "finished" && <TabFinished driverId={driverRecord.id} authHeader={authHeader} />}
-          {activeTab === "earnings" && <TabEarnings driverId={driverRecord.id} authHeader={authHeader} />}
-          {activeTab === "stats" && <TabStats driverId={driverRecord.id} authHeader={authHeader} rating={driverRecord.rating ?? null} totalRides={driverRecord.totalRides ?? 0} />}
-          {activeTab === "profile" && <TabProfile driverId={driverRecord.id} authHeader={authHeader} />}
         </>
       )}
     </PortalLayout>

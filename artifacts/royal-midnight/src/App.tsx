@@ -45,6 +45,7 @@ import DriverOnboarding from "@/pages/driver/onboarding";
 import DriverDashboard from "@/pages/driver/dashboard";
 import DriverHistory from "@/pages/driver/history";
 import DriverEarnings from "@/pages/driver/earnings";
+import DriverStats from "@/pages/driver/stats";
 import DriverProfile from "@/pages/driver/profile";
 
 // Corporate Portal
@@ -256,6 +257,9 @@ function Router() {
       </Route>
       <Route path="/driver/profile">
         <DriverRoute component={DriverProfile} />
+      </Route>
+      <Route path="/driver/stats">
+        <DriverRoute component={DriverStats} />
       </Route>
       <Route path="/driver/dashboard">
         <DriverRoute component={DriverDashboard} />
