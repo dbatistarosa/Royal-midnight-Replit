@@ -5,7 +5,7 @@ import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/
 import crypto from "crypto";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/auth.js";
-import { hashPassword } from "../lib/hash.js";
+import { hashPassword, verifyPassword } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
 
 const router: IRouter = Router();
@@ -84,8 +84,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
-  const hashed = hashPassword(password);
-  if (user.passwordHash && user.passwordHash !== hashed) {
+  if (!user.passwordHash || !verifyPassword(password, user.passwordHash)) {
     res.status(401).json({ error: "Invalid credentials" });
     return;
   }
