@@ -71,7 +71,6 @@ router.post("/reviews", requireAuth, async (req, res): Promise<void> => {
       .update(driversTable)
       .set({
         rating: agg ? Math.round(agg.avgRating * 10) / 10 : null,
-        totalRides: agg?.totalCount ?? 0,
       })
       .where(eq(driversTable.id, booking.driverId));
   }

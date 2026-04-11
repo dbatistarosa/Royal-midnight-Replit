@@ -421,15 +421,37 @@ function PassengerRideDetailInner() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(data.error || "Could not record tip.");
+        // Payment went through on Stripe but server failed to record it — reset card form
+        // so user is not stuck, and prompt them to contact support
+        setShowTipCardEntry(false);
+        setTipCheckoutSecret(null);
+        setTipCheckoutPubKey(null);
+        setTipCardError(null);
+        toast({
+          title: "Payment processed but not recorded",
+          description: `${data.error ?? "An error occurred."} Your card was charged — please contact support with your booking reference.`,
+          variant: "destructive",
+        });
+        return;
       }
       const { tipAmount: confirmedAmount } = await res.json() as { tipAmount: number };
       setTipSubmitted(true);
       setShowTipCardEntry(false);
+      setTipCheckoutSecret(null);
+      setTipCheckoutPubKey(null);
       setBooking(prev => prev ? { ...prev, tipAmount: confirmedAmount } : prev);
       toast({ title: "Tip sent!", description: `$${confirmedAmount.toFixed(2)} gratuity has been recorded. Thank you!` });
     } catch (err: unknown) {
-      setTipCardError(err instanceof Error ? err.message : "Could not record tip.");
+      // Network or parse error — reset card form, allow user to try again from amount entry
+      setShowTipCardEntry(false);
+      setTipCheckoutSecret(null);
+      setTipCheckoutPubKey(null);
+      setTipCardError(null);
+      toast({
+        title: "Connection error",
+        description: "Could not confirm your tip. If your card was charged, please contact support.",
+        variant: "destructive",
+      });
     }
   };
 
