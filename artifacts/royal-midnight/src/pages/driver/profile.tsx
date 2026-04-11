@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, Star } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, Star, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -8,6 +8,7 @@ import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
 import { format } from "date-fns";
+import { useUpload } from "@workspace/object-storage-web";
 
 type Review = {
   id: number;
@@ -28,6 +29,77 @@ const driverNavItems = [
 const labelClass = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const inputClass = "bg-white/5 border-white/10 text-white rounded-none h-11";
 
+function ProfilePhotoUpload({
+  currentUrl,
+  onUploaded,
+}: {
+  currentUrl: string | null | undefined;
+  onUploaded: (objectPath: string) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { uploadFile, isUploading, progress } = useUpload({
+    requestUploadUrl: `${API_BASE}/storage/uploads/request-url`,
+    onSuccess: (res) => {
+      onUploaded(res.objectPath);
+    },
+  });
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    void uploadFile(file);
+  };
+
+  const photoSrc = currentUrl
+    ? currentUrl.startsWith("http")
+      ? currentUrl
+      : `${API_BASE}/storage/public-objects${currentUrl}`
+    : null;
+
+  return (
+    <div className="flex items-center gap-6">
+      <div className="relative w-20 h-20 flex-shrink-0">
+        {photoSrc ? (
+          <img
+            src={photoSrc}
+            alt="Profile photo"
+            className="w-20 h-20 rounded-full object-cover border border-border"
+          />
+        ) : (
+          <div className="w-20 h-20 rounded-full bg-white/10 border border-border flex items-center justify-center">
+            <User className="w-8 h-8 text-muted-foreground" />
+          </div>
+        )}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+          className="absolute -bottom-1 -right-1 bg-primary text-black rounded-full w-7 h-7 flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-50"
+          title="Upload photo"
+        >
+          {isUploading ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Camera className="w-3.5 h-3.5" />
+          )}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+      </div>
+      <div className="text-sm">
+        <p className="text-foreground font-medium mb-0.5">Profile Photo</p>
+        <p className="text-muted-foreground text-xs">
+          {isUploading ? `Uploading… ${progress}%` : "Click the camera icon to upload a photo."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function DriverProfile() {
   const { driverRecord, isLoading: driverLoading, refetch } = useDriverStatus();
   const { user, token } = useAuth();
@@ -37,6 +109,7 @@ export default function DriverProfile() {
   const [reviewsLoading, setReviewsLoading] = useState(false);
 
   const [phone, setPhone] = useState("");
+  const [pendingPhotoPath, setPendingPhotoPath] = useState<string | null>(null);
 
   useEffect(() => {
     if (driverRecord?.phone) setPhone(driverRecord.phone);
@@ -52,14 +125,41 @@ export default function DriverProfile() {
       .finally(() => setReviewsLoading(false));
   }, [driverRecord?.id]);
 
-  const handleSave = async () => {
-    if (!driverRecord?.id || !token) return;
-    setIsSaving(true);
+  const handlePhotoUploaded = async (objectPath: string) => {
+    if (!driverRecord?.id || !token) {
+      setPendingPhotoPath(objectPath);
+      return;
+    }
     try {
       const res = await fetch(`${API_BASE}/drivers/${driverRecord.id}/contact`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ profilePicture: objectPath }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        toast({ title: "Photo save failed", description: err.error ?? "Could not save photo.", variant: "destructive" });
+        return;
+      }
+      toast({ title: "Photo updated", description: "Your profile photo has been saved." });
+      setPendingPhotoPath(null);
+      refetch();
+    } catch {
+      toast({ title: "Error", description: "Could not save photo.", variant: "destructive" });
+    }
+  };
+
+  const handleSave = async () => {
+    if (!driverRecord?.id || !token) return;
+    setIsSaving(true);
+    try {
+      const body: Record<string, string> = { phone };
+      if (pendingPhotoPath) body.profilePicture = pendingPhotoPath;
+
+      const res = await fetch(`${API_BASE}/drivers/${driverRecord.id}/contact`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const err = await res.json() as { error?: string };
@@ -67,6 +167,7 @@ export default function DriverProfile() {
         return;
       }
       toast({ title: "Profile updated", description: "Your changes have been saved." });
+      setPendingPhotoPath(null);
       refetch();
     } catch {
       toast({ title: "Error", description: "Could not save profile.", variant: "destructive" });
@@ -93,7 +194,14 @@ export default function DriverProfile() {
         <div className="bg-card border border-border rounded-none p-8">
           <h2 className="font-serif text-lg mb-6 text-muted-foreground uppercase tracking-widest text-sm">Account Information</h2>
           <div className="space-y-5">
-            <div>
+
+            {/* Profile Photo */}
+            <ProfilePhotoUpload
+              currentUrl={pendingPhotoPath ?? driverRecord?.profilePicture}
+              onUploaded={(path) => void handlePhotoUploaded(path)}
+            />
+
+            <div className="border-t border-border pt-5">
               <label className={labelClass}>Email Address</label>
               <Input value={user?.email ?? ""} disabled className={inputClass + " opacity-50"} />
               <p className="text-xs text-muted-foreground mt-1">Email cannot be changed.</p>
@@ -171,7 +279,7 @@ export default function DriverProfile() {
             <div className="text-center">
               <div className="flex items-center justify-center gap-1 mb-1">
                 <Star className="w-4 h-4 text-primary fill-primary" />
-                <span className="text-2xl font-serif">{driverRecord?.rating?.toFixed(1) ?? "—"}</span>
+                <span className="text-2xl font-serif">{driverRecord?.rating != null ? driverRecord.rating.toFixed(1) : "—"}</span>
               </div>
               <div className="text-xs text-muted-foreground uppercase tracking-widest">Rating</div>
             </div>

@@ -224,14 +224,34 @@ router.patch("/drivers/:id/contact", requireAuth, async (req, res): Promise<void
   }
 
   const phone = req.body?.phone as string | undefined;
-  if (typeof phone !== "string" || phone.trim().length < 7) {
-    res.status(400).json({ error: "Invalid phone number" });
+  const profilePicture = req.body?.profilePicture as string | undefined;
+
+  const updates: Partial<typeof driversTable.$inferInsert> = {};
+
+  if (phone !== undefined) {
+    if (typeof phone !== "string" || phone.trim().length < 7) {
+      res.status(400).json({ error: "Invalid phone number" });
+      return;
+    }
+    updates.phone = phone.trim();
+  }
+
+  if (profilePicture !== undefined) {
+    if (typeof profilePicture !== "string" || !profilePicture.startsWith("/")) {
+      res.status(400).json({ error: "Invalid profile picture path" });
+      return;
+    }
+    updates.profilePicture = profilePicture;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ error: "No fields to update" });
     return;
   }
 
   const [updated] = await db
     .update(driversTable)
-    .set({ phone: phone.trim() })
+    .set(updates)
     .where(eq(driversTable.id, id))
     .returning();
 
@@ -459,10 +479,10 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
 
   const [stats] = await db
     .select({
-      totalEarnings: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
-      thisMonth: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
-      thisWeek: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
-      today: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
+      totalEarnings: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed'), 0)::float`,
+      thisMonth: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
+      thisWeek: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
+      today: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
       totalRides: sql<number>`count(*) filter (where status = 'completed')::int`,
     })
     .from(bookingsTable)
@@ -471,7 +491,7 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
   const dailyRaw = await db
     .select({
       date: sql<string>`date(created_at)::text`,
-      amount: sql<number>`coalesce(sum(price_quoted::numeric), 0)::float`,
+      amount: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric), 0)::float`,
       rides: sql<number>`count(*)::int`,
     })
     .from(bookingsTable)
