@@ -59,6 +59,7 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [stripeReady, setStripeReady] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,7 +122,13 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
           {" "}— use card number <span className="font-mono font-semibold">4242 4242 4242 4242</span>, any future expiry, any CVC.
         </div>
       )}
-      <PaymentElement />
+      {!stripeReady && (
+        <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-500">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Loading payment form…
+        </div>
+      )}
+      <PaymentElement onReady={() => setStripeReady(true)} />
       <div className="flex items-center justify-between pt-4 border-t border-white/10">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Lock className="w-3.5 h-3.5" />
@@ -129,11 +136,13 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
         </div>
         <Button
           type="submit"
-          disabled={!stripe || isProcessing}
+          disabled={!stripe || !stripeReady || isProcessing}
           className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm px-10 py-6 rounded-none"
         >
           {isProcessing ? (
             <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Processing...</>
+          ) : !stripeReady ? (
+            <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading…</>
           ) : (
             `Pay $${amount.toFixed(2)}`
           )}

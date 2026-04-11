@@ -6,6 +6,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/auth.js";
 import { hashPassword } from "../lib/hash.js";
+import { sendPasswordResetEmail } from "../lib/mailer.js";
 
 const router: IRouter = Router();
 
@@ -372,13 +373,14 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
 
   await db.insert(passwordResetTokensTable).values({ userId: user.id, token, expiresAt });
 
-  const resetLink = `/auth/reset-password?token=${token}`;
+  const APP_URL = process.env.APP_URL ?? "https://royalmidnight.com";
+  const resetLink = `${APP_URL}/auth/reset-password?token=${token}`;
 
-  res.json({
-    message: "Reset link generated. In production this would be emailed.",
-    resetLink,
-    token,
-  });
+  // Fire email non-blocking — do not expose whether the email exists in the response
+  sendPasswordResetEmail(user.email, user.name, resetLink)
+    .catch(err => console.error("[auth] password reset email failed:", err));
+
+  res.json({ message: "If that email is registered, a password reset link has been sent." });
 });
 
 // POST /auth/reset-password — validate token and set new password

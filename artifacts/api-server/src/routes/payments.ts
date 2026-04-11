@@ -146,14 +146,17 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
     }
 
     // Always use automatic capture — charge the card immediately when the passenger pays.
-    // setup_future_usage: "off_session" saves the card to the customer for future charges.
+    // Do NOT use setup_future_usage on the PaymentIntent: it triggers stronger 3DS
+    // requirements on real cards and can break the payment flow. Cards are saved to the
+    // customer record via the webhook after payment succeeds instead.
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
       currency: "usd",
+      capture_method: "automatic",
       payment_method_types: ["card"],
       metadata,
       description,
-      ...(customerId ? { customer: customerId, setup_future_usage: "off_session" } : {}),
+      ...(customerId ? { customer: customerId } : {}),
     });
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (err: any) {

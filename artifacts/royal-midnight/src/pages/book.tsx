@@ -98,6 +98,7 @@ export default function Book() {
   const [isGettingQuotes, setIsGettingQuotes] = useState(false);
   const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null);
   const [paymentPublishableKey, setPaymentPublishableKey] = useState<string | null>(null);
+  const [stripeReturnUrl, setStripeReturnUrl] = useState<string | null>(null);
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
   const pendingBookingIdRef = useRef<number | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -443,6 +444,13 @@ export default function Book() {
         // Persist for 3DS redirect recovery (page reload wipes React state)
         sessionStorage.setItem("rm_pending_booking_id", String(bookingId));
       }
+
+      // Build the 3DS return URL now, while bookingId is known — do this BEFORE loading
+      // Stripe so that the URL is always set when the payment form renders.
+      // The confirmation page handles the payment_intent + redirect_status params from Stripe.
+      const baseUrl = `${window.location.origin}${(import.meta.env.BASE_URL ?? "/").replace(/\/$/, "")}`;
+      const confirmationReturnUrl = `${baseUrl}/booking-confirmation/${bookingId}`;
+      setStripeReturnUrl(confirmationReturnUrl);
 
       // Step 3: Get Stripe publishable key
       const configRes = await fetch(`${API_BASE}/payments/config`);
@@ -1078,9 +1086,7 @@ export default function Book() {
                           clientSecret={paymentClientSecret}
                           publishableKey={paymentPublishableKey}
                           amount={effectiveTotal}
-                          returnUrl={pendingBookingId
-                            ? `${window.location.origin}${(import.meta.env.BASE_URL ?? "/").replace(/\/$/, "")}/booking-confirmation/${pendingBookingId}`
-                            : undefined}
+                          returnUrl={stripeReturnUrl ?? undefined}
                           onSuccess={handlePaymentSuccess}
                           onProcessing={handlePaymentSuccess}
                           onError={(msg) => {
@@ -1089,7 +1095,7 @@ export default function Book() {
                           }}
                         />
                         {paymentError && <p className="text-red-400 text-sm p-3 border border-red-900/40 bg-red-900/8">{paymentError}</p>}
-                        <button type="button" onClick={() => { setPaymentClientSecret(null); setPaymentPublishableKey(null); setPaymentError(""); }} className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
+                        <button type="button" onClick={() => { setPaymentClientSecret(null); setPaymentPublishableKey(null); setStripeReturnUrl(null); setPaymentError(""); }} className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
                           Cancel
                         </button>
                       </div>
