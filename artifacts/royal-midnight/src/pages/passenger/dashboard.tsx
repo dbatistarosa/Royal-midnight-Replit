@@ -19,7 +19,7 @@ function PassengerDashboardInner() {
   const userId = user?.id;
   const { data: bookings, isLoading } = useGetUserBookings(userId ?? 0, { query: { enabled: !!userId, queryKey: ["userBookings", userId ?? 0] } });
 
-  const upcomingBookings = bookings?.filter(b => ['pending', 'confirmed'].includes(b.status)) || [];
+  const upcomingBookings = bookings?.filter(b => ['awaiting_payment', 'authorized', 'pending', 'confirmed', 'in_progress', 'on_way', 'on_location'].includes(b.status)) || [];
 
   return (
     <PortalLayout title="Passenger Portal" navItems={passengerNavItems}>

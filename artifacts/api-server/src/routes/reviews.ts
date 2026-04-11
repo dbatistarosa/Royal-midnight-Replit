@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and } from "drizzle-orm";
-import { db, reviewsTable } from "@workspace/db";
+import { db, reviewsTable, bookingsTable } from "@workspace/db";
 import { requireAuth } from "../middleware/auth.js";
 import {
   ListReviewsQueryParams,
@@ -37,6 +37,21 @@ router.post("/reviews", requireAuth, async (req, res): Promise<void> => {
   const parsed = CreateReviewBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  // Verify the booking belongs to the caller and is completed
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, parsed.data.bookingId));
+  if (!booking) {
+    res.status(404).json({ error: "Booking not found" });
+    return;
+  }
+  if (req.currentUser!.role !== "admin" && booking.userId !== req.currentUser!.userId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  if (booking.status !== "completed") {
+    res.status(400).json({ error: "Reviews can only be submitted for completed rides" });
     return;
   }
 

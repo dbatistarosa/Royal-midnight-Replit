@@ -201,7 +201,7 @@ function BookingDetailPanel({ booking }: { booking: Booking }) {
 
 function RideCard({ booking, isPast }: { booking: Booking; isPast?: boolean }) {
   const [expanded, setExpanded] = useState(false);
-  const showDriverCard = !isPast && booking.driverId != null && ["confirmed", "in_progress"].includes(booking.status);
+  const showDriverCard = !isPast && booking.driverId != null && ["confirmed", "in_progress", "on_way", "on_location"].includes(booking.status);
 
   return (
     <div className={`bg-card border border-border rounded-none p-6 transition-opacity ${isPast ? "opacity-75 hover:opacity-100" : ""}`}>
@@ -256,7 +256,7 @@ function PassengerRidesInner() {
   const userId = user?.id ?? 0;
   const { data: bookings, isLoading } = useGetUserBookings(userId, { query: { enabled: !!userId, queryKey: ["userBookings", userId] } });
 
-  const upcomingBookings = (bookings?.filter(b => ['awaiting_payment', 'authorized', 'pending', 'confirmed', 'in_progress'].includes(b.status)) || []) as Booking[];
+  const upcomingBookings = (bookings?.filter(b => ['awaiting_payment', 'authorized', 'pending', 'confirmed', 'in_progress', 'on_way', 'on_location'].includes(b.status)) || []) as Booking[];
   const pastBookings = (bookings?.filter(b => ['completed', 'cancelled'].includes(b.status)) || []) as Booking[];
 
   return (

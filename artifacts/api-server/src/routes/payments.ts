@@ -37,7 +37,7 @@ async function getWebhookSecret(): Promise<string | null> {
 
 async function getCommissionPct(): Promise<number> {
   const [row] = await db.select({ value: settingsTable.value }).from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct")).limit(1);
-  const raw = parseFloat(row?.value ?? "30");
+  const raw = parseFloat(row?.value ?? "70");
   return raw > 1 ? raw / 100 : raw;
 }
 

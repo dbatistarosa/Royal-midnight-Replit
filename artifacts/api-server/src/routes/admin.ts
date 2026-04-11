@@ -112,7 +112,7 @@ router.get("/admin/revenue", requireAdmin, async (_req, res): Promise<void> => {
     .select({ value: settingsTable.value })
     .from(settingsTable)
     .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "0.80");
+  const rawPct = parseFloat(commRow?.value ?? "70");
   const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
 
   const daily = await db
@@ -256,7 +256,7 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
     .select({ value: settingsTable.value })
     .from(settingsTable)
     .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "0.80");
+  const rawPct = parseFloat(commRow?.value ?? "70");
   const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
 
   // Get all approved drivers
@@ -341,7 +341,7 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
     .select({ value: settingsTable.value })
     .from(settingsTable)
     .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "0.80");
+  const rawPct = parseFloat(commRow?.value ?? "70");
   const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
 
   const drivers = await db
