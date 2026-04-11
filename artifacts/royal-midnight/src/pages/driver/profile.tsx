@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, Star, Camera } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, Star, Camera, BarChart2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -21,8 +21,9 @@ type Review = {
 
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "History", href: "/driver/history", icon: History },
+  { label: "Finished", href: "/driver/history", icon: History },
   { label: "Earnings", href: "/driver/earnings", icon: DollarSign },
+  { label: "Stats", href: "/driver/stats", icon: BarChart2 },
   { label: "Profile", href: "/driver/profile", icon: User },
 ];
 

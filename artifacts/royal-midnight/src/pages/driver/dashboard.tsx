@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock, BarChart2 } from "lucide-react";
 import { format } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useDriverStatus } from "@/contexts/driverStatus";
@@ -14,8 +14,9 @@ const LOCATION_LS_KEY = "rm_driver_location_sharing";
 
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "History", href: "/driver/history", icon: History },
+  { label: "Finished", href: "/driver/history", icon: History },
   { label: "Earnings", href: "/driver/earnings", icon: DollarSign },
+  { label: "Stats", href: "/driver/stats", icon: BarChart2 },
   { label: "Profile", href: "/driver/profile", icon: User },
 ];
 
@@ -52,8 +53,9 @@ type EarningsData = {
   totalEarnings: number;
   totalRides: number;
   avgPerRide: number;
-  totalTips: number;
-  thisWeekTips: number;
+  tipsTotal?: number;
+  tipsThisWeek?: number;
+  tipsToday?: number;
   recentPayouts: { date: string; amount: number; rides: number }[];
 };
 
@@ -64,16 +66,12 @@ type Review = {
   createdAt: string;
 };
 
-type DashboardTab = "available" | "active_rides" | "in_progress" | "finished" | "earnings" | "stats" | "profile";
+type DashboardTab = "available" | "active_rides" | "in_progress";
 
 const TABS: { key: DashboardTab; label: string }[] = [
   { key: "available",    label: "Available" },
   { key: "active_rides", label: "Active Rides" },
   { key: "in_progress",  label: "In Progress" },
-  { key: "finished",     label: "Finished" },
-  { key: "earnings",     label: "Earnings" },
-  { key: "stats",        label: "Stats" },
-  { key: "profile",      label: "Profile" },
 ];
 
 const fmt$ = (n: number) => `$${n.toFixed(2)}`;
@@ -755,13 +753,18 @@ function TabEarnings({ driverId, authHeader }: { driverId: number; authHeader: s
           </div>
         ))}
       </div>
-      <div className="bg-card border border-border p-5 flex items-center justify-between">
-        <div>
-          <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-1">Tips This Week</h3>
-          <div className="text-2xl font-serif text-amber-400">{fmt$(earnings?.thisWeekTips ?? 0)}</div>
+      {((earnings?.tipsThisWeek ?? 0) > 0 || (earnings?.tipsTotal ?? 0) > 0) && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-card border border-primary/20 p-5">
+            <h3 className="text-primary/70 text-xs uppercase tracking-widest mb-2">Tips This Week</h3>
+            <div className="text-2xl font-serif text-primary">{fmt$(earnings?.tipsThisWeek ?? 0)}</div>
+          </div>
+          <div className="bg-card border border-primary/20 p-5">
+            <h3 className="text-primary/70 text-xs uppercase tracking-widest mb-2">Total Tips</h3>
+            <div className="text-2xl font-serif text-primary">{fmt$(earnings?.tipsTotal ?? 0)}</div>
+          </div>
         </div>
-        <Star className="w-5 h-5 text-amber-400/40" />
-      </div>
+      )}
       <div className="bg-card border border-border p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="font-serif text-lg">Last 30 Days</h2>
@@ -808,18 +811,19 @@ function TabStats({ driverId, authHeader, rating, totalRides }: { driverId: numb
     { label: "Avg Rating", value: rating != null ? `${rating.toFixed(2)} / 5` : "—", sub: "Overall score" },
     { label: "Total Rides", value: String(totalRides), sub: "Completed trips" },
     { label: "Total Earnings", value: fmt$(earnings?.totalEarnings ?? 0), sub: "Driver share (all time)" },
+    { label: "Total Tips", value: fmt$(earnings?.tipsTotal ?? 0), sub: "All-time tip income", accent: true },
     { label: "Avg / Ride", value: fmt$(earnings?.avgPerRide ?? 0), sub: "Commission-based avg" },
     { label: "This Month", value: fmt$(earnings?.thisMonth ?? 0), sub: "Current month" },
     { label: "This Week", value: fmt$(earnings?.thisWeek ?? 0), sub: "Current week" },
-    { label: "Total Tips", value: fmt$(earnings?.totalTips ?? 0), sub: "All-time gratuities" },
+    { label: "Tips This Week", value: fmt$(earnings?.tipsThisWeek ?? 0), sub: "Tip income this week", accent: true },
   ];
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
       {stats.map(s => (
-        <div key={s.label} className="bg-card border border-border p-6">
+        <div key={s.label} className={`bg-card border p-6 ${s.accent ? "border-primary/20" : "border-border"}`}>
           <div className="text-xs text-muted-foreground uppercase tracking-widest mb-1">{s.label}</div>
-          <div className="text-2xl font-serif mb-1">{s.value}</div>
+          <div className={`text-2xl font-serif mb-1 ${s.accent ? "text-primary" : ""}`}>{s.value}</div>
           <div className="text-xs text-muted-foreground">{s.sub}</div>
         </div>
       ))}
@@ -1183,10 +1187,6 @@ export default function DriverDashboard() {
           )}
           {activeTab === "active_rides" && <TabActiveRides driverId={driverRecord.id} authHeader={authHeader} refreshKey={myRidesRefreshKey} />}
           {activeTab === "in_progress" && <TabInProgress driverId={driverRecord.id} authHeader={authHeader} refreshKey={myRidesRefreshKey} />}
-          {activeTab === "finished" && <TabFinished driverId={driverRecord.id} authHeader={authHeader} />}
-          {activeTab === "earnings" && <TabEarnings driverId={driverRecord.id} authHeader={authHeader} />}
-          {activeTab === "stats" && <TabStats driverId={driverRecord.id} authHeader={authHeader} rating={driverRecord.rating ?? null} totalRides={driverRecord.totalRides ?? 0} />}
-          {activeTab === "profile" && <TabProfile driverId={driverRecord.id} authHeader={authHeader} />}
         </>
       )}
     </PortalLayout>
