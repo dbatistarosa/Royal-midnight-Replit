@@ -20,6 +20,9 @@ type EarningsData = {
   totalEarnings: number;
   totalRides: number;
   avgPerRide: number;
+  tipsTotal?: number;
+  tipsThisWeek?: number;
+  tipsToday?: number;
   recentPayouts: { date: string; amount: number; rides: number }[];
 };
 
@@ -71,6 +74,22 @@ export default function DriverEarnings() {
               <div className="text-3xl font-serif text-foreground">{fmt$(earnings?.avgPerRide ?? 0)}</div>
             </div>
           </div>
+          {((earnings?.tipsThisWeek ?? 0) > 0 || (earnings?.tipsTotal ?? 0) > 0) && (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6">
+              <div className="bg-card border border-primary/20 rounded-none p-6">
+                <h3 className="text-primary/70 text-xs uppercase tracking-widest font-medium mb-2">Tips Today</h3>
+                <div className="text-3xl font-serif text-primary">{fmt$(earnings?.tipsToday ?? 0)}</div>
+              </div>
+              <div className="bg-card border border-primary/20 rounded-none p-6">
+                <h3 className="text-primary/70 text-xs uppercase tracking-widest font-medium mb-2">Tips This Week</h3>
+                <div className="text-3xl font-serif text-primary">{fmt$(earnings?.tipsThisWeek ?? 0)}</div>
+              </div>
+              <div className="bg-card border border-primary/20 rounded-none p-6">
+                <h3 className="text-primary/70 text-xs uppercase tracking-widest font-medium mb-2">Total Tips</h3>
+                <div className="text-3xl font-serif text-primary">{fmt$(earnings?.tipsTotal ?? 0)}</div>
+              </div>
+            </div>
+          )}
 
           <div className="bg-card border border-border rounded-none p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 sm:mb-6 gap-1">

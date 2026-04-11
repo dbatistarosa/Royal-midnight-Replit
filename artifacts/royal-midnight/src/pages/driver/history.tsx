@@ -21,6 +21,7 @@ type BookingRow = {
   status: string;
   pickupAt: string;
   priceQuoted: number;
+  tipAmount?: number | null;
   driverEarnings?: number;
 };
 
@@ -67,7 +68,9 @@ export default function DriverHistory() {
                   <th className="px-6 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Passenger</th>
                   <th className="px-6 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Route</th>
                   <th className="px-6 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Status</th>
-                  <th className="px-6 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Your Earnings</th>
+                  <th className="px-6 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Fare</th>
+                  <th className="px-6 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Tip</th>
+                  <th className="px-6 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Your Share</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -85,9 +88,17 @@ export default function DriverHistory() {
                         {booking.status}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right font-medium text-primary">
+                    <td className="px-6 py-4 text-right tabular-nums">
+                      {booking.status === "completed" ? `$${booking.priceQuoted.toFixed(2)}` : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-6 py-4 text-right tabular-nums">
+                      {booking.status === "completed" && (booking.tipAmount ?? 0) > 0
+                        ? <span className="text-primary font-medium">+${(booking.tipAmount!).toFixed(2)}</span>
+                        : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-6 py-4 text-right font-semibold text-primary tabular-nums">
                       {booking.status === "completed"
-                        ? `$${(booking.driverEarnings ?? booking.priceQuoted * 0.70).toFixed(2)}`
+                        ? `$${((booking.driverEarnings ?? booking.priceQuoted * 0.70) + (booking.tipAmount ?? 0)).toFixed(2)}`
                         : <span className="text-muted-foreground">—</span>
                       }
                     </td>

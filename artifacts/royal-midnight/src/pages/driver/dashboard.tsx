@@ -39,6 +39,7 @@ type BookingRow = {
   flightNumber?: string | null;
   specialRequests?: string | null;
   priceQuoted?: number | null;
+  tipAmount?: number | null;
   status: string;
   pickupAt: string;
   driverEarnings?: number;
@@ -51,6 +52,9 @@ type EarningsData = {
   totalEarnings: number;
   totalRides: number;
   avgPerRide: number;
+  tipsTotal?: number;
+  tipsThisWeek?: number;
+  tipsToday?: number;
   recentPayouts: { date: string; amount: number; rides: number }[];
 };
 
@@ -752,6 +756,18 @@ function TabEarnings({ driverId, authHeader }: { driverId: number; authHeader: s
           </div>
         ))}
       </div>
+      {((earnings?.tipsThisWeek ?? 0) > 0 || (earnings?.tipsTotal ?? 0) > 0) && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-card border border-primary/20 p-5">
+            <h3 className="text-primary/70 text-xs uppercase tracking-widest mb-2">Tips This Week</h3>
+            <div className="text-2xl font-serif text-primary">{fmt$(earnings?.tipsThisWeek ?? 0)}</div>
+          </div>
+          <div className="bg-card border border-primary/20 p-5">
+            <h3 className="text-primary/70 text-xs uppercase tracking-widest mb-2">Total Tips</h3>
+            <div className="text-2xl font-serif text-primary">{fmt$(earnings?.tipsTotal ?? 0)}</div>
+          </div>
+        </div>
+      )}
       <div className="bg-card border border-border p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="font-serif text-lg">Last 30 Days</h2>
@@ -798,17 +814,19 @@ function TabStats({ driverId, authHeader, rating, totalRides }: { driverId: numb
     { label: "Avg Rating", value: rating != null ? `${rating.toFixed(2)} / 5` : "—", sub: "Overall score" },
     { label: "Total Rides", value: String(totalRides), sub: "Completed trips" },
     { label: "Total Earnings", value: fmt$(earnings?.totalEarnings ?? 0), sub: "Driver share (all time)" },
+    { label: "Total Tips", value: fmt$(earnings?.tipsTotal ?? 0), sub: "All-time tip income", accent: true },
     { label: "Avg / Ride", value: fmt$(earnings?.avgPerRide ?? 0), sub: "Commission-based avg" },
     { label: "This Month", value: fmt$(earnings?.thisMonth ?? 0), sub: "Current month" },
     { label: "This Week", value: fmt$(earnings?.thisWeek ?? 0), sub: "Current week" },
+    { label: "Tips This Week", value: fmt$(earnings?.tipsThisWeek ?? 0), sub: "Tip income this week", accent: true },
   ];
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
       {stats.map(s => (
-        <div key={s.label} className="bg-card border border-border p-6">
+        <div key={s.label} className={`bg-card border p-6 ${s.accent ? "border-primary/20" : "border-border"}`}>
           <div className="text-xs text-muted-foreground uppercase tracking-widest mb-1">{s.label}</div>
-          <div className="text-2xl font-serif mb-1">{s.value}</div>
+          <div className={`text-2xl font-serif mb-1 ${s.accent ? "text-primary" : ""}`}>{s.value}</div>
           <div className="text-xs text-muted-foreground">{s.sub}</div>
         </div>
       ))}
@@ -816,43 +834,81 @@ function TabStats({ driverId, authHeader, rating, totalRides }: { driverId: numb
   );
 }
 
+type TripReview = { bookingId: number; rating: number; comment: string | null };
+
+function StarRating({ rating }: { rating: number }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {[1,2,3,4,5].map(s => (
+        <Star key={s} className={`w-3 h-3 ${s <= rating ? "text-primary fill-primary" : "text-muted-foreground/30"}`} />
+      ))}
+      <span className="text-xs text-muted-foreground ml-1">{rating}/5</span>
+    </div>
+  );
+}
+
 function TabFinished({ driverId, authHeader }: { driverId: number; authHeader: string }) {
   const [bookings, setBookings] = useState<BookingRow[]>([]);
+  const [reviews, setReviews] = useState<TripReview[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
-      .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
-      .then(data => setBookings(Array.isArray(data) ? data.filter(b => b.status === "completed") : []))
-      .catch(() => setBookings([]))
+    Promise.all([
+      fetch(`${API_BASE}/bookings?driverId=${driverId}`, { headers: { Authorization: authHeader } })
+        .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
+        .then(data => Array.isArray(data) ? data.filter(b => b.status === "completed") : []),
+      fetch(`${API_BASE}/reviews?driverId=${driverId}`)
+        .then(r => r.ok ? r.json() as Promise<TripReview[]> : Promise.resolve([]))
+        .then(data => Array.isArray(data) ? data : []),
+    ])
+      .then(([trips, revs]) => { setBookings(trips); setReviews(revs); })
+      .catch(() => { setBookings([]); setReviews([]); })
       .finally(() => setLoading(false));
   }, [driverId, authHeader]);
 
   if (loading) return <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
 
+  const reviewMap = new Map(reviews.map(r => [r.bookingId, r]));
+
   return bookings.length > 0 ? (
     <div className="bg-card border border-border rounded-none overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left">
+        <table className="w-full text-sm text-left min-w-[700px]">
           <thead className="bg-background/50 border-b border-border">
             <tr>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Date</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Passenger</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Route</th>
-              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Your Earnings</th>
+              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Fare Paid</th>
+              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Tip</th>
+              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Your Share</th>
+              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Rating</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {bookings.map(b => (
-              <tr key={b.id} className="hover:bg-background/50 transition-colors">
-                <td className="px-5 py-3">{format(new Date(b.pickupAt), "MMM d, HH:mm")}</td>
-                <td className="px-5 py-3">{b.passengerName}</td>
-                <td className="px-5 py-3 max-w-[180px] truncate text-muted-foreground" title={`${b.pickupAddress} to ${b.dropoffAddress}`}>
-                  {b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}
-                </td>
-                <td className="px-5 py-3 text-right font-medium text-primary">{fmt$(b.driverEarnings ?? 0)}</td>
-              </tr>
-            ))}
+            {bookings.map(b => {
+              const review = reviewMap.get(b.id);
+              const tip = b.tipAmount != null ? b.tipAmount : 0;
+              return (
+                <tr key={b.id} className="hover:bg-background/50 transition-colors">
+                  <td className="px-5 py-3 whitespace-nowrap">{format(new Date(b.pickupAt), "MMM d, HH:mm")}</td>
+                  <td className="px-5 py-3">{b.passengerName}</td>
+                  <td className="px-5 py-3 max-w-[160px] truncate text-muted-foreground" title={`${b.pickupAddress} to ${b.dropoffAddress}`}>
+                    {b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}
+                  </td>
+                  <td className="px-5 py-3 text-right tabular-nums">{fmt$(b.priceQuoted ?? 0)}</td>
+                  <td className="px-5 py-3 text-right tabular-nums">
+                    {tip > 0 ? <span className="text-primary font-medium">+{fmt$(tip)}</span> : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-5 py-3 text-right font-semibold text-primary tabular-nums">
+                    {fmt$((b.driverEarnings ?? 0) + tip)}
+                  </td>
+                  <td className="px-5 py-3">
+                    {review ? <StarRating rating={review.rating} /> : <span className="text-muted-foreground text-xs">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1053,11 +1109,9 @@ export default function DriverDashboard() {
           )}
           <div>
             <h1 className="font-serif text-xl sm:text-2xl leading-tight">{user?.name ?? "Driver"}</h1>
-            {driverRecord?.rating != null && (
-              <div className="text-xs sm:text-sm text-muted-foreground">
-                {driverRecord.rating.toFixed(1)} rating · {driverRecord.totalRides} rides
-              </div>
-            )}
+            <div className="text-xs sm:text-sm text-muted-foreground">
+              {driverRecord?.rating != null ? `${driverRecord.rating.toFixed(1)} ★ · ` : ""}{driverRecord?.totalRides ?? 0} rides completed
+            </div>
           </div>
         </div>
         {driverRecord && (

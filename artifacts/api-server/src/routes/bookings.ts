@@ -961,6 +961,14 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
 
   res.json(parseBooking(updated));
 
+  // Increment driver's completed ride count (fire-and-forget)
+  if (updated.driverId) {
+    db.update(driversTable)
+      .set({ totalRides: sql`${driversTable.totalRides} + 1` })
+      .where(eq(driversTable.id, updated.driverId))
+      .catch(err => console.error("[bookings] failed to increment totalRides:", err));
+  }
+
   // Fire-and-forget: send trip completion email to passenger
   (async () => {
     try {
@@ -1176,6 +1184,20 @@ router.post("/bookings/:id/rate", requireAuth, async (req, res): Promise<void> =
     .returning();
 
   res.json({ success: true, reviewId: review.id });
+
+  // Recompute and persist driver's average rating (fire-and-forget)
+  const driverId = booking.driverId;
+  db.select({ avg: sql<string>`avg(rating)::numeric(3,2)` })
+    .from(reviewsTable)
+    .where(eq(reviewsTable.driverId, driverId))
+    .then(([row]) => {
+      if (row?.avg != null) {
+        return db.update(driversTable)
+          .set({ rating: row.avg })
+          .where(eq(driversTable.id, driverId));
+      }
+    })
+    .catch(err => console.error("[bookings] failed to update driver rating:", err));
 });
 
 export default router;

@@ -632,6 +632,9 @@ export const GetDriverEarningsResponse = zod.object({
   today: zod.number(),
   totalRides: zod.number(),
   avgPerRide: zod.number(),
+  tipsTotal: zod.number().optional().default(0),
+  tipsThisWeek: zod.number().optional().default(0),
+  tipsToday: zod.number().optional().default(0),
   recentPayouts: zod.array(
     zod.object({
       date: zod.string(),
