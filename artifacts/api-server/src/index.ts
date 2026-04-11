@@ -54,18 +54,18 @@ async function runStartupMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS estimated_distance_miles NUMERIC(6, 2)
     `);
 
-    // Backfill drivers.total_rides from completed bookings (idempotent — runs on every boot)
+    // Backfill drivers.total_rides from completed bookings (full reconciliation — runs on every boot)
     await client.query(`
       UPDATE drivers d
-      SET total_rides = sub.cnt
+      SET total_rides = coalesce(sub.cnt, 0)
       FROM (
-        SELECT driver_id, count(*)::int AS cnt
-        FROM bookings
-        WHERE status = 'completed' AND driver_id IS NOT NULL
-        GROUP BY driver_id
+        SELECT dr.id AS driver_id, count(b.id)::int AS cnt
+        FROM drivers dr
+        LEFT JOIN bookings b ON b.driver_id = dr.id AND b.status = 'completed'
+        GROUP BY dr.id
       ) sub
       WHERE d.id = sub.driver_id
-        AND d.total_rides IS DISTINCT FROM sub.cnt
+        AND d.total_rides IS DISTINCT FROM coalesce(sub.cnt, 0)
     `);
   } finally {
     client.release();
