@@ -21,9 +21,8 @@ type BookingRow = {
   dropoffAddress: string;
   status: string;
   pickupAt: string;
-  priceQuoted: number;
   tipAmount?: number | null;
-  driverEarnings?: number;
+  driverEarnings?: number | null;
 };
 
 type TripReview = { bookingId: number; rating: number; comment: string | null };
@@ -87,9 +86,9 @@ export default function DriverHistory() {
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Passenger</th>
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Route</th>
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Status</th>
-                  <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Fare</th>
+                  <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Ride Pay</th>
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Tip</th>
-                  <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Your Share</th>
+                  <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Total</th>
                   <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Rating</th>
                 </tr>
               </thead>
@@ -113,7 +112,9 @@ export default function DriverHistory() {
                         </span>
                       </td>
                       <td className="px-5 py-4 text-right tabular-nums">
-                        {isCompleted ? `$${booking.priceQuoted.toFixed(2)}` : <span className="text-muted-foreground">—</span>}
+                        {isCompleted && booking.driverEarnings != null
+                          ? `$${booking.driverEarnings.toFixed(2)}`
+                          : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="px-5 py-4 text-right tabular-nums">
                         {isCompleted && tip > 0
@@ -121,8 +122,8 @@ export default function DriverHistory() {
                           : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="px-5 py-4 text-right font-semibold text-primary tabular-nums">
-                        {isCompleted
-                          ? `$${((booking.driverEarnings ?? booking.priceQuoted * 0.70) + tip).toFixed(2)}`
+                        {isCompleted && booking.driverEarnings != null
+                          ? `$${(booking.driverEarnings + tip).toFixed(2)}`
                           : <span className="text-muted-foreground font-normal">—</span>}
                       </td>
                       <td className="px-5 py-4">
