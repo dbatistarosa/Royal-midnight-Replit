@@ -642,6 +642,13 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
     })();
     // Send trip completion email when admin manually marks a booking completed
     if (parsed.data.status === "completed") {
+      // Increment driver's totalRides counter
+      if (booking.driverId) {
+        db.update(driversTable)
+          .set({ totalRides: sql`total_rides + 1` })
+          .where(eq(driversTable.id, booking.driverId))
+          .catch(err => console.error("[bookings] totalRides increment error:", err));
+      }
       (async () => {
         try {
           await sendTripCompletionEmail({
@@ -975,6 +982,14 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
   }
 
   res.json(parseBooking(updated));
+
+  // Increment driver's totalRides counter
+  if (updated.driverId) {
+    db.update(driversTable)
+      .set({ totalRides: sql`total_rides + 1` })
+      .where(eq(driversTable.id, updated.driverId))
+      .catch(err => console.error("[bookings] totalRides increment error:", err));
+  }
 
   // Fire-and-forget: send trip completion email to passenger
   (async () => {

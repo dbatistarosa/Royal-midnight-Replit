@@ -53,7 +53,7 @@ function ProfilePhotoUpload({
   const photoSrc = currentUrl
     ? currentUrl.startsWith("http")
       ? currentUrl
-      : `${API_BASE}/storage/public-objects${currentUrl}`
+      : `${API_BASE}/storage/objects${currentUrl.replace(/^\/objects/, "")}`
     : null;
 
   return (

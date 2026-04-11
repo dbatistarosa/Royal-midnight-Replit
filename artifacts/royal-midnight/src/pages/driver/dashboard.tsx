@@ -39,6 +39,7 @@ type BookingRow = {
   flightNumber?: string | null;
   specialRequests?: string | null;
   priceQuoted?: number | null;
+  tipAmount?: number | null;
   status: string;
   pickupAt: string;
   driverEarnings?: number;
@@ -51,6 +52,8 @@ type EarningsData = {
   totalEarnings: number;
   totalRides: number;
   avgPerRide: number;
+  totalTips: number;
+  thisWeekTips: number;
   recentPayouts: { date: string; amount: number; rides: number }[];
 };
 
@@ -752,6 +755,15 @@ function TabEarnings({ driverId, authHeader }: { driverId: number; authHeader: s
           </div>
         ))}
       </div>
+      {(earnings?.thisWeekTips ?? 0) > 0 && (
+        <div className="bg-card border border-border p-5 flex items-center justify-between">
+          <div>
+            <h3 className="text-muted-foreground text-xs uppercase tracking-widest mb-1">Tips This Week</h3>
+            <div className="text-2xl font-serif text-amber-400">{fmt$(earnings?.thisWeekTips ?? 0)}</div>
+          </div>
+          <Star className="w-5 h-5 text-amber-400/40" />
+        </div>
+      )}
       <div className="bg-card border border-border p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="font-serif text-lg">Last 30 Days</h2>
@@ -801,6 +813,7 @@ function TabStats({ driverId, authHeader, rating, totalRides }: { driverId: numb
     { label: "Avg / Ride", value: fmt$(earnings?.avgPerRide ?? 0), sub: "Commission-based avg" },
     { label: "This Month", value: fmt$(earnings?.thisMonth ?? 0), sub: "Current month" },
     { label: "This Week", value: fmt$(earnings?.thisWeek ?? 0), sub: "Current week" },
+    { label: "Total Tips", value: fmt$(earnings?.totalTips ?? 0), sub: "All-time gratuities" },
   ];
 
   return (
@@ -839,7 +852,8 @@ function TabFinished({ driverId, authHeader }: { driverId: number; authHeader: s
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Date</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Passenger</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Route</th>
-              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Your Earnings</th>
+              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Earnings</th>
+              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Tip</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -851,6 +865,12 @@ function TabFinished({ driverId, authHeader }: { driverId: number; authHeader: s
                   {b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}
                 </td>
                 <td className="px-5 py-3 text-right font-medium text-primary">{fmt$(b.driverEarnings ?? 0)}</td>
+                <td className="px-5 py-3 text-right">
+                  {b.tipAmount != null && b.tipAmount > 0
+                    ? <span className="text-amber-400 font-medium">{fmt$(b.tipAmount)}</span>
+                    : <span className="text-muted-foreground/40">—</span>
+                  }
+                </td>
               </tr>
             ))}
           </tbody>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet, Star } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -48,6 +48,7 @@ type BookingRow = {
   luggageCount?: number | null;
   status: string;
   priceQuoted: number;
+  tipAmount?: number | null;
   discountAmount?: number | null;
   promoCode?: string | null;
   driverId: number | null;
@@ -59,6 +60,7 @@ type BookingRow = {
   userId?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  existingRating?: number | null;
 };
 
 type DriverOption = { id: number; name: string; status: string };
@@ -148,6 +150,19 @@ export default function AdminBookings() {
   const [pickupAirline, setPickupAirline] = useState("");
   const [dropoffAirline, setDropoffAirline] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [bookingRatings, setBookingRatings] = useState<Record<number, number | null>>({});
+
+  // Fetch rating for a booking when it's expanded
+  useEffect(() => {
+    if (expandedId == null || expandedId in bookingRatings) return;
+    fetch(`${API_BASE}/reviews?bookingId=${expandedId}`)
+      .then(r => r.ok ? r.json() as Promise<{ rating: number; id: number }[]> : Promise.resolve([]))
+      .then(data => {
+        const rating = Array.isArray(data) && data.length > 0 ? data[0]?.rating ?? null : null;
+        setBookingRatings(prev => ({ ...prev, [expandedId]: rating }));
+      })
+      .catch(() => setBookingRatings(prev => ({ ...prev, [expandedId]: null })));
+  }, [expandedId, bookingRatings]);
 
   // Payment collection state
   const [chargeBooking, setChargeBooking] = useState<BookingRow | null>(null);
@@ -843,7 +858,23 @@ export default function AdminBookings() {
                             <div className="space-y-2 text-sm">
                               <div>
                                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Amount Charged</p>
-                                <p className="text-primary font-medium text-base">${b.priceQuoted?.toFixed(2)}</p>
+                                <div className="flex items-baseline gap-2 flex-wrap">
+                                  <p className="text-primary font-medium text-base">${b.priceQuoted?.toFixed(2)}</p>
+                                  {b.tipAmount != null && b.tipAmount > 0 && (
+                                    <span className="text-amber-400 text-sm">+ ${b.tipAmount.toFixed(2)} gratuity</span>
+                                  )}
+                                </div>
+                                {(() => {
+                                  const r = bookingRatings[b.id];
+                                  return r != null ? (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      {Array.from({ length: 5 }).map((_, i) => (
+                                        <Star key={i} className={`w-3.5 h-3.5 ${i < r ? "text-amber-400 fill-amber-400" : "text-gray-600"}`} />
+                                      ))}
+                                      <span className="text-xs text-muted-foreground ml-1">Passenger rating</span>
+                                    </div>
+                                  ) : null;
+                                })()}
                               </div>
                               {b.discountAmount != null && b.discountAmount > 0 && (
                                 <div>

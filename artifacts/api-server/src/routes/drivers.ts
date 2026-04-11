@@ -484,6 +484,8 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
       thisWeek: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
       today: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
       totalRides: sql<number>`count(*) filter (where status = 'completed')::int`,
+      totalTips: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed'), 0)::float`,
+      thisWeekTips: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
     })
     .from(bookingsTable)
     .where(eq(bookingsTable.driverId, driverId));
@@ -512,6 +514,8 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
       today: Math.round((stats?.today ?? 0) * commissionPct * 100) / 100,
       totalRides,
       avgPerRide: totalRides > 0 ? Math.round((totalEarnings / totalRides) * 100) / 100 : 0,
+      totalTips: Math.round((stats?.totalTips ?? 0) * 100) / 100,
+      thisWeekTips: Math.round((stats?.thisWeekTips ?? 0) * 100) / 100,
       recentPayouts,
     })
   );
