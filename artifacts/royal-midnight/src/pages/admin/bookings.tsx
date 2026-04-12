@@ -356,6 +356,10 @@ export default function AdminBookings() {
     setChargeLoading(true);
     try {
       const configRes = await fetch(`${API_BASE}/payments/config`, { headers: { Authorization: authHdr } });
+      if (!configRes.ok) {
+        const cfgErr = await configRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(cfgErr.error ?? "Payment processing is not configured. Contact your administrator.");
+      }
       const { publishableKey } = await configRes.json() as { publishableKey: string };
 
       let clientSecret: string;

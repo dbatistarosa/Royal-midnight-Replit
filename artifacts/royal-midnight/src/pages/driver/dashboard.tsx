@@ -876,9 +876,9 @@ function TabFinished({ driverId, authHeader }: { driverId: number; authHeader: s
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Date</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Passenger</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Route</th>
-              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Fare Paid</th>
+              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Earnings</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Tip</th>
-              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Your Share</th>
+              <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs text-right">Total</th>
               <th className="px-5 py-3 font-medium text-muted-foreground uppercase tracking-widest text-xs">Rating</th>
             </tr>
           </thead>
@@ -893,7 +893,7 @@ function TabFinished({ driverId, authHeader }: { driverId: number; authHeader: s
                   <td className="px-5 py-3 max-w-[160px] truncate text-muted-foreground" title={`${b.pickupAddress} to ${b.dropoffAddress}`}>
                     {b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}
                   </td>
-                  <td className="px-5 py-3 text-right tabular-nums">{fmt$(b.priceQuoted ?? 0)}</td>
+                  <td className="px-5 py-3 text-right tabular-nums">{fmt$(b.driverEarnings ?? 0)}</td>
                   <td className="px-5 py-3 text-right tabular-nums">
                     {tip > 0 ? <span className="text-primary font-medium">+{fmt$(tip)}</span> : <span className="text-muted-foreground">—</span>}
                   </td>

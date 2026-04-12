@@ -651,7 +651,7 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
       // Increment driver's totalRides counter
       if (booking.driverId) {
         db.update(driversTable)
-          .set({ totalRides: sql`total_rides + 1` })
+          .set({ totalRides: sql`${driversTable.totalRides} + 1` })
           .where(eq(driversTable.id, booking.driverId))
           .catch(err => console.error("[bookings] totalRides increment error:", err));
       }
