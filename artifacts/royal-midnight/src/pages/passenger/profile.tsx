@@ -2,7 +2,7 @@ import { useGetUser, useUpdateUser, getGetUserQueryKey } from "@workspace/api-cl
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { useAuth } from "@/contexts/auth";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -17,35 +17,133 @@ const passengerNavItems = [
   { label: "Support", href: "/passenger/support", icon: MessageSquare },
 ];
 
+const MUSIC_OPTIONS = ["No Preference", "Jazz", "Classical", "R&B / Soul", "Pop", "Rock", "Hip-Hop", "Latin", "Silence"];
+const BEVERAGE_OPTIONS = ["No Preference", "Sparkling Water", "Still Water", "None"];
+const TITLE_OPTIONS = ["No Preference", "Mr.", "Ms.", "Mrs.", "Dr.", "Prof."];
+const TEMP_PRESETS = [65, 68, 70, 72, 74, 76, 78];
+
+type UserPrefs = {
+  cabinTempF: number | null;
+  musicPreference: string | null;
+  quietRide: boolean;
+  preferredBeverage: string | null;
+  opensOwnDoor: boolean;
+  addressTitle: string | null;
+};
+
+function TogglePill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1.5 text-xs border transition-colors ${
+        active
+          ? "bg-primary text-black border-primary font-semibold"
+          : "bg-transparent text-muted-foreground border-border hover:border-white/30 hover:text-white"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SectionHeader({ icon: Icon, title, subtitle }: { icon: React.ElementType; title: string; subtitle?: string }) {
+  return (
+    <div className="flex items-start gap-3 mb-4">
+      <div className="w-8 h-8 rounded-none bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+        <Icon className="w-4 h-4 text-primary" />
+      </div>
+      <div>
+        <p className="text-sm font-medium text-white">{title}</p>
+        {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
+      </div>
+    </div>
+  );
+}
+
 function PassengerProfileInner() {
-  const { user: authUser, login } = useAuth();
+  const { user: authUser, token } = useAuth();
   const userId = authUser?.id;
-  const { data: user, isLoading } = useGetUser(userId ?? 0, { query: { enabled: userId != null, queryKey: getGetUserQueryKey(userId ?? 0) } });
+  const { data: user, isLoading } = useGetUser(userId ?? 0, {
+    query: { enabled: userId != null, queryKey: getGetUserQueryKey(userId ?? 0) },
+  });
   const updateUser = useUpdateUser();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Basic info
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+
+  // Preferences
+  const [prefs, setPrefs] = useState<UserPrefs>({
+    cabinTempF: null,
+    musicPreference: null,
+    quietRide: false,
+    preferredBeverage: null,
+    opensOwnDoor: false,
+    addressTitle: null,
+  });
+  const [prefsSaving, setPrefsSaving] = useState(false);
 
   useEffect(() => {
     if (user) {
       setName(user.name);
       setPhone(user.phone || "");
+      const u = user as any;
+      setPrefs({
+        cabinTempF: u.cabinTempF ?? null,
+        musicPreference: u.musicPreference ?? null,
+        quietRide: u.quietRide ?? false,
+        preferredBeverage: u.preferredBeverage ?? null,
+        opensOwnDoor: u.opensOwnDoor ?? false,
+        addressTitle: u.addressTitle ?? null,
+      });
     }
   }, [user]);
 
-  const handleSave = () => {
+  const handleSaveBasic = () => {
     if (userId == null) return;
-    updateUser.mutate({
-      id: userId,
-      data: { name, phone }
-    }, {
-      onSuccess: () => {
-        toast({ title: "Profile updated" });
-        queryClient.invalidateQueries({ queryKey: getGetUserQueryKey(userId) });
+    updateUser.mutate(
+      { id: userId, data: { name, phone } },
+      {
+        onSuccess: () => {
+          toast({ title: "Profile updated" });
+          queryClient.invalidateQueries({ queryKey: getGetUserQueryKey(userId) });
+        },
+        onError: () => toast({ title: "Error", description: "Could not save changes.", variant: "destructive" }),
       }
-    });
+    );
+  };
+
+  const handleSavePrefs = async () => {
+    if (userId == null || !token) return;
+    setPrefsSaving(true);
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(prefs),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast({ title: "Preferences saved", description: "Your cabin preferences will be shared with your chauffeur." });
+      queryClient.invalidateQueries({ queryKey: getGetUserQueryKey(userId) });
+    } catch {
+      toast({ title: "Error", description: "Could not save preferences.", variant: "destructive" });
+    } finally {
+      setPrefsSaving(false);
+    }
   };
 
   return (
@@ -55,27 +153,154 @@ function PassengerProfileInner() {
       {isLoading ? (
         <div className="text-center py-12 text-muted-foreground">Loading profile...</div>
       ) : (
-        <div className="max-w-2xl bg-card border border-border p-8 rounded-lg">
-          <div className="space-y-6">
-            <div>
-              <label className="text-sm font-medium mb-2 block">Email Address</label>
-              <Input value={user?.email || ""} disabled className="bg-muted" />
-              <p className="text-xs text-muted-foreground mt-1">Email cannot be changed.</p>
+        <div className="space-y-8 max-w-2xl">
+          {/* ── Basic Info ── */}
+          <div className="bg-card border border-border p-8">
+            <h2 className="font-serif text-lg mb-6">Account Details</h2>
+            <div className="space-y-5">
+              <div>
+                <label className="text-xs uppercase tracking-widest text-muted-foreground block mb-1.5">Email Address</label>
+                <Input value={user?.email || ""} disabled className="bg-muted rounded-none" />
+                <p className="text-xs text-muted-foreground mt-1">Email cannot be changed.</p>
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-widest text-muted-foreground block mb-1.5">Full Name</label>
+                <Input value={name} onChange={e => setName(e.target.value)} className="rounded-none" />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-widest text-muted-foreground block mb-1.5">Phone Number</label>
+                <Input value={phone} onChange={e => setPhone(e.target.value)} className="rounded-none" placeholder="+1 (555) 000-0000" />
+              </div>
+              <div className="pt-4 border-t border-border">
+                <Button onClick={handleSaveBasic} disabled={updateUser.isPending} className="rounded-none bg-white text-black hover:bg-white/90 text-xs uppercase tracking-widest">
+                  {updateUser.isPending ? "Saving..." : "Save Changes"}
+                </Button>
+              </div>
             </div>
-            
-            <div>
-              <label className="text-sm font-medium mb-2 block">Full Name</label>
-              <Input value={name} onChange={e => setName(e.target.value)} />
+          </div>
+
+          {/* ── Preference Center ── */}
+          <div className="bg-card border border-primary/20 p-8">
+            <div className="mb-6">
+              <h2 className="font-serif text-lg text-primary mb-1">Cabin Preference Center</h2>
+              <p className="text-xs text-muted-foreground">
+                These preferences are automatically shared with your assigned chauffeur before every booking so your vehicle is staged exactly as you like it.
+              </p>
             </div>
 
-            <div>
-              <label className="text-sm font-medium mb-2 block">Phone Number</label>
-              <Input value={phone} onChange={e => setPhone(e.target.value)} />
+            <div className="space-y-8">
+              {/* Preferred Title */}
+              <div>
+                <SectionHeader icon={Tag} title="How should we address you?" subtitle="Shown on your driver's trip manifest." />
+                <div className="flex flex-wrap gap-2">
+                  {TITLE_OPTIONS.map(t => (
+                    <TogglePill
+                      key={t}
+                      active={(prefs.addressTitle ?? "No Preference") === t}
+                      onClick={() => setPrefs(p => ({ ...p, addressTitle: t === "No Preference" ? null : t }))}
+                    >
+                      {t}
+                    </TogglePill>
+                  ))}
+                </div>
+              </div>
+
+              {/* Cabin Temperature */}
+              <div>
+                <SectionHeader icon={Thermometer} title="Cabin Temperature" subtitle="Your preferred temperature in °F." />
+                <div className="flex flex-wrap gap-2">
+                  <TogglePill
+                    active={prefs.cabinTempF == null}
+                    onClick={() => setPrefs(p => ({ ...p, cabinTempF: null }))}
+                  >
+                    No Preference
+                  </TogglePill>
+                  {TEMP_PRESETS.map(t => (
+                    <TogglePill
+                      key={t}
+                      active={prefs.cabinTempF === t}
+                      onClick={() => setPrefs(p => ({ ...p, cabinTempF: t }))}
+                    >
+                      {t}°F
+                    </TogglePill>
+                  ))}
+                </div>
+              </div>
+
+              {/* Music */}
+              <div>
+                <SectionHeader icon={Music} title="Music Preference" subtitle="Genre or style you'd like playing on pickup." />
+                <div className="flex flex-wrap gap-2">
+                  {MUSIC_OPTIONS.map(m => (
+                    <TogglePill
+                      key={m}
+                      active={(prefs.musicPreference ?? "No Preference") === m}
+                      onClick={() => setPrefs(p => ({ ...p, musicPreference: m === "No Preference" ? null : m }))}
+                    >
+                      {m}
+                    </TogglePill>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quiet Ride */}
+              <div>
+                <SectionHeader icon={Volume2} title="Quiet Ride" subtitle="Let your chauffeur know you prefer minimal conversation." />
+                <div className="flex gap-2">
+                  <TogglePill active={!prefs.quietRide} onClick={() => setPrefs(p => ({ ...p, quietRide: false }))}>
+                    Happy to chat
+                  </TogglePill>
+                  <TogglePill active={prefs.quietRide} onClick={() => setPrefs(p => ({ ...p, quietRide: true }))}>
+                    Quiet ride please
+                  </TogglePill>
+                </div>
+              </div>
+
+              {/* Preferred Beverage */}
+              <div>
+                <SectionHeader icon={Coffee} title="Preferred Beverage" subtitle="For routes where refreshments are provided." />
+                <div className="flex flex-wrap gap-2">
+                  {BEVERAGE_OPTIONS.map(b => (
+                    <TogglePill
+                      key={b}
+                      active={(prefs.preferredBeverage ?? "No Preference") === b}
+                      onClick={() => setPrefs(p => ({ ...p, preferredBeverage: b === "No Preference" ? null : b }))}
+                    >
+                      {b}
+                    </TogglePill>
+                  ))}
+                </div>
+                <div className="mt-3">
+                  <Input
+                    className="rounded-none bg-white/5 border-white/10 text-sm max-w-xs"
+                    placeholder="Other (e.g. Espresso, Coconut Water)"
+                    value={BEVERAGE_OPTIONS.includes(prefs.preferredBeverage ?? "No Preference") ? "" : (prefs.preferredBeverage ?? "")}
+                    onChange={e => setPrefs(p => ({ ...p, preferredBeverage: e.target.value || null }))}
+                  />
+                </div>
+              </div>
+
+              {/* Door preference */}
+              <div>
+                <SectionHeader icon={DoorOpen} title="Door Service" subtitle="Should your chauffeur open and close the door for you?" />
+                <div className="flex gap-2">
+                  <TogglePill active={!prefs.opensOwnDoor} onClick={() => setPrefs(p => ({ ...p, opensOwnDoor: false }))}>
+                    Please open my door
+                  </TogglePill>
+                  <TogglePill active={prefs.opensOwnDoor} onClick={() => setPrefs(p => ({ ...p, opensOwnDoor: true }))}>
+                    I prefer to open it myself
+                  </TogglePill>
+                </div>
+              </div>
             </div>
 
-            <div className="pt-6 border-t border-border">
-              <Button onClick={handleSave} disabled={updateUser.isPending}>
-                {updateUser.isPending ? "Saving..." : "Save Changes"}
+            <div className="pt-6 mt-6 border-t border-primary/20">
+              <Button
+                onClick={() => void handleSavePrefs()}
+                disabled={prefsSaving}
+                className="rounded-none bg-primary text-black hover:bg-primary/90 text-xs uppercase tracking-widest px-6"
+              >
+                {prefsSaving ? "Saving Preferences..." : "Save Preferences"}
               </Button>
             </div>
           </div>

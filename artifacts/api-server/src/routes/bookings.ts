@@ -19,6 +19,7 @@ import {
   sendAccountInvitation,
   sendTripCompletionEmail,
 } from "../lib/mailer.js";
+import { sendDriverOnWaySms, sendDriverArrivedSms, sendCancellationSms } from "../lib/sms.js";
 import {
   ListBookingsQueryParams,
   ListBookingsResponse,
@@ -295,13 +296,48 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     let driverBookings = parsed2;
 
     // For the open pool, hide trips that conflict with the driver's existing schedule.
-    // A trip conflicts if its pickupAt falls within any busy window:
-    //   [existingPickup - 1h,  existingPickup + estimatedDuration + 1h]
     if (isDriverOpenPoolQuery && driverBusyWindows.length > 0) {
       driverBookings = parsed2.filter(b => !hasConflict(new Date(b.pickupAt), driverBusyWindows));
     }
 
-    res.json(driverBookings.map(b => toDriverView(b, commissionPct)));
+    // Attach passenger preferences so the driver can stage the vehicle correctly.
+    // Batch-fetch preferences for all unique userIds in this response.
+    const userIds = [...new Set(driverBookings.map(b => (b as any).userId).filter(Boolean) as number[])];
+    const prefsByUserId = new Map<number, Record<string, unknown>>();
+    if (userIds.length > 0) {
+      const prefRows = await db
+        .select({
+          id: usersTable.id,
+          cabinTempF: usersTable.cabinTempF,
+          musicPreference: usersTable.musicPreference,
+          quietRide: usersTable.quietRide,
+          preferredBeverage: usersTable.preferredBeverage,
+          opensOwnDoor: usersTable.opensOwnDoor,
+          addressTitle: usersTable.addressTitle,
+        })
+        .from(usersTable)
+        .where(
+          userIds.length === 1
+            ? eq(usersTable.id, userIds[0]!)
+            : sql`${usersTable.id} = ANY(ARRAY[${sql.join(userIds.map(id => sql`${id}`), sql`, `)}])`
+        );
+      for (const p of prefRows) {
+        const { id, ...prefs } = p;
+        // Only include if at least one preference is set
+        if (Object.values(prefs).some(v => v != null && v !== false)) {
+          prefsByUserId.set(id, prefs);
+        }
+      }
+    }
+
+    res.json(
+      driverBookings.map(b => {
+        const view = toDriverView(b, commissionPct);
+        const uid = (b as any).userId as number | null;
+        const passengerPreferences = uid ? (prefsByUserId.get(uid) ?? null) : null;
+        return { ...view, passengerPreferences };
+      })
+    );
     return;
   }
 
@@ -541,6 +577,54 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
   }
 
   res.json(parseBooking(booking));
+});
+
+// GET /bookings/:id/flight-status — live flight status for bookings with a flight number.
+// Accessible by the passenger (own booking), their assigned driver, and admins.
+router.get("/bookings/:id/flight-status", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const caller = req.currentUser!;
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+  // Access control: passenger (own booking), assigned driver, or admin
+  if (caller.role === "passenger" || caller.role === "corporate") {
+    if (booking.userId !== caller.userId) {
+      const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
+      if (!callerUser || booking.passengerEmail !== callerUser.email) {
+        res.status(403).json({ error: "Access denied" }); return;
+      }
+    }
+  } else if (caller.role === "driver") {
+    const [driverRow] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId));
+    if (!driverRow || booking.driverId !== driverRow.id) {
+      res.status(403).json({ error: "Access denied" }); return;
+    }
+  } else if (caller.role !== "admin") {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  if (!booking.flightNumber) {
+    res.json({ available: false, reason: "no_flight_number" });
+    return;
+  }
+
+  const { getFlightStatus, isFlightStatusConfigured } = await import("../lib/flightStatus.js");
+
+  if (!isFlightStatusConfigured()) {
+    res.json({ available: false, reason: "not_configured", flightNumber: booking.flightNumber });
+    return;
+  }
+
+  const status = await getFlightStatus(booking.flightNumber);
+  if (!status) {
+    res.json({ available: false, reason: "not_found", flightNumber: booking.flightNumber });
+    return;
+  }
+
+  res.json({ available: true, ...status });
 });
 
 // GET /bookings/:id/driver-location — passenger-accessible live driver position.
@@ -886,12 +970,19 @@ router.post("/bookings/:id/trip/on-way", requireAuth, async (req, res): Promise<
 
   res.json(parseBooking(updated));
 
-  // Fire-and-forget: notify passenger
+  // Fire-and-forget: notify passenger via email + SMS
   (async () => {
     try {
       const b = parseBooking(booking);
-      await sendDriverOnWay({ ...b, vehicleClass: b.vehicleClass ?? "business", passengers: b.passengers ?? 1 });
-    } catch (err) { console.error("[bookings] on-way email error:", err); }
+      const [driverRow] = await db.select().from(driversTable).where(eq(driversTable.id, booking.driverId!));
+      const vehicleDesc = driverRow
+        ? `${driverRow.vehicleYear ?? ""} ${driverRow.vehicleMake ?? ""} ${driverRow.vehicleModel ?? ""}`.trim()
+        : (booking.vehicleClass ?? "vehicle");
+      await Promise.allSettled([
+        sendDriverOnWay({ ...b, vehicleClass: b.vehicleClass ?? "business", passengers: b.passengers ?? 1 }),
+        sendDriverOnWaySms(booking.passengerPhone, driverRow?.name ?? "Your chauffeur", vehicleDesc),
+      ]);
+    } catch (err) { console.error("[bookings] on-way notification error:", err); }
   })();
 });
 
@@ -923,12 +1014,16 @@ router.post("/bookings/:id/trip/on-location", requireAuth, async (req, res): Pro
 
   res.json(parseBooking(updated));
 
-  // Fire-and-forget: notify passenger
+  // Fire-and-forget: notify passenger via email + SMS
   (async () => {
     try {
       const b = parseBooking(booking);
-      await sendDriverArrived({ ...b, vehicleClass: b.vehicleClass ?? "business", passengers: b.passengers ?? 1 });
-    } catch (err) { console.error("[bookings] on-location email error:", err); }
+      const [driverRow] = await db.select().from(driversTable).where(eq(driversTable.id, booking.driverId!));
+      await Promise.allSettled([
+        sendDriverArrived({ ...b, vehicleClass: b.vehicleClass ?? "business", passengers: b.passengers ?? 1 }),
+        sendDriverArrivedSms(booking.passengerPhone, driverRow?.name ?? "Your chauffeur"),
+      ]);
+    } catch (err) { console.error("[bookings] on-location notification error:", err); }
   })();
 });
 

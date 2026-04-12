@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, timestamp, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -11,6 +11,15 @@ export const usersTable = pgTable("users", {
   passwordHash: text("password_hash"),
   stripeCustomerId: text("stripe_customer_id"),
   defaultPaymentMethodId: text("default_payment_method_id"),
+  // ── Cabin Preference Center ───────────────────────────────────────────────
+  // Shown to the assigned chauffeur on their trip manifest so the vehicle
+  // is staged to the passenger's exact standards before arrival.
+  cabinTempF: integer("cabin_temp_f"),               // preferred temperature in °F (e.g. 70)
+  musicPreference: text("music_preference"),          // e.g. "Jazz", "None", "Classical"
+  quietRide: boolean("quiet_ride").default(false),    // prefers no conversation
+  preferredBeverage: text("preferred_beverage"),      // e.g. "Sparkling Water"
+  opensOwnDoor: boolean("opens_own_door").default(false), // chauffeur should not open door
+  addressTitle: text("address_title"),                // e.g. "Dr.", "Mr.", "Ms."
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

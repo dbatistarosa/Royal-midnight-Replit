@@ -95,6 +95,14 @@ router.patch("/users/:id", requireAuth, async (req, res): Promise<void> => {
   const updateData: Record<string, unknown> = {};
   if (parsed.data.name != null) updateData.name = parsed.data.name;
   if (parsed.data.phone !== undefined) updateData.phone = parsed.data.phone;
+  // Cabin preference fields — all optional, nulls explicitly allowed to clear them
+  const body = req.body as Record<string, unknown>;
+  if ("cabinTempF" in body) updateData.cabinTempF = body["cabinTempF"] ?? null;
+  if ("musicPreference" in body) updateData.musicPreference = body["musicPreference"] ?? null;
+  if ("quietRide" in body) updateData.quietRide = !!body["quietRide"];
+  if ("preferredBeverage" in body) updateData.preferredBeverage = body["preferredBeverage"] ?? null;
+  if ("opensOwnDoor" in body) updateData.opensOwnDoor = !!body["opensOwnDoor"];
+  if ("addressTitle" in body) updateData.addressTitle = body["addressTitle"] ?? null;
 
   const [user] = await db
     .update(usersTable)

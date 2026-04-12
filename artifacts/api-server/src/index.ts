@@ -40,6 +40,17 @@ async function runStartupMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS default_payment_method_id TEXT
     `);
 
+    // users: cabin preference center (Phase 1 — shown to chauffeur on trip manifest)
+    await client.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS cabin_temp_f INTEGER,
+        ADD COLUMN IF NOT EXISTS music_preference TEXT,
+        ADD COLUMN IF NOT EXISTS quiet_ride BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS preferred_beverage TEXT,
+        ADD COLUMN IF NOT EXISTS opens_own_door BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS address_title TEXT
+    `);
+
     // bookings: tip support (passenger features)
     await client.query(`
       ALTER TABLE bookings
@@ -229,7 +240,7 @@ async function sendTripReminders(): Promise<void> {
       try {
         await client.query("BEGIN");
         const { rows } = await client.query(
-          `SELECT id, passenger_name, passenger_email, pickup_address, dropoff_address,
+          `SELECT id, passenger_name, passenger_email, passenger_phone, pickup_address, dropoff_address,
                   pickup_at, vehicle_class, passengers, price_quoted, driver_id
            FROM bookings
            WHERE id = $1
@@ -278,6 +289,16 @@ async function sendTripReminders(): Promise<void> {
         // remains unclaimed so the next scheduler tick retries.
         await sendTripReminderPassenger(reminderData);
         await sendTripReminderDriver(reminderData, driver.email);
+
+        // SMS chauffeur intro — non-fatal (does not affect reminder_sent_at stamp)
+        const { sendChauffeurIntroSms } = await import("./lib/sms.js");
+        const bookingRef = `RM-${String(row.id).padStart(4, "0")}`;
+        sendChauffeurIntroSms(
+          row.passenger_phone ?? null,
+          driver.name,
+          bookingRef,
+          new Date(row.pickup_at).toISOString(),
+        ).catch((smsErr: unknown) => logger.warn({ smsErr, bookingId: row.id }, "Chauffeur intro SMS failed (non-fatal)"));
 
         // Stamp reminder_sent_at inside the same transaction (commits atomically)
         await client.query(

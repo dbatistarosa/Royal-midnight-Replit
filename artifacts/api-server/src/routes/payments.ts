@@ -10,6 +10,7 @@ import {
   sendInvoiceToPassenger,
   getMailerStatus,
 } from "../lib/mailer.js";
+import { sendBookingConfirmationSms } from "../lib/sms.js";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 
 const router: IRouter = Router();
@@ -69,10 +70,19 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
     .where(eq(driversTable.approvalStatus, "approved"));
   const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
 
+  const bookingRef = `RM-${String(bookingId).padStart(4, "0")}`;
+
   await Promise.all([
     sendBookingConfirmationPassenger(emailData),
     sendNewBookingAdmin(emailData),
     sendNewBookingAvailableToDrivers(emailData, driverEmails),
+    // SMS confirmation — non-fatal; passenger phone may be absent
+    sendBookingConfirmationSms(
+      booking.passengerPhone,
+      bookingRef,
+      booking.pickupAt.toISOString(),
+      booking.pickupAddress,
+    ).catch(err => console.error("[payments] booking confirmation SMS failed:", err)),
   ]);
 }
 
