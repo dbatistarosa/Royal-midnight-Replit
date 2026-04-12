@@ -30,6 +30,8 @@ export const bookingsTable = pgTable("bookings", {
   estimatedDistanceMiles: numeric("estimated_distance_miles", { precision: 6, scale: 2 }),
   reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
   authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+  checklistCompletedAt: timestamp("checklist_completed_at", { withTimezone: true }),
+  preferredDriverId: integer("preferred_driver_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

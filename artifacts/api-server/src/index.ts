@@ -65,6 +65,29 @@ async function runStartupMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS estimated_distance_miles NUMERIC(6, 2)
     `);
 
+    // users: VIP notes (admin-only, shown read-only to driver — Phase 2)
+    await client.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS vip_notes TEXT
+    `);
+
+    // bookings: pre-ride checklist + preferred driver (Phase 2)
+    await client.query(`
+      ALTER TABLE bookings
+        ADD COLUMN IF NOT EXISTS checklist_completed_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS preferred_driver_id INTEGER
+    `);
+
+    // Favorite drivers junction table (Phase 2)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_favorite_drivers (
+        user_id   INTEGER NOT NULL,
+        driver_id INTEGER NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (user_id, driver_id)
+      )
+    `);
+
     // Backfill drivers.total_rides from completed bookings (full reconciliation — runs on every boot)
     await client.query(`
       UPDATE drivers d

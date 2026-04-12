@@ -688,6 +688,7 @@ export const GetUserResponse = zod.object({
   phone: zod.string().nullish(),
   role: zod.enum(["passenger", "driver", "admin", "corporate"]),
   createdAt: zod.coerce.date(),
+  vipNotes: zod.string().nullish(),
 });
 
 /**
@@ -709,6 +710,7 @@ export const UpdateUserResponse = zod.object({
   phone: zod.string().nullish(),
   role: zod.enum(["passenger", "driver", "admin", "corporate"]),
   createdAt: zod.coerce.date(),
+  vipNotes: zod.string().nullish(),
 });
 
 /**

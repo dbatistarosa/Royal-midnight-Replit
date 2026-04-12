@@ -511,4 +511,61 @@ router.post("/admin/test-email", requireAdmin, async (req, res): Promise<void> =
   }
 });
 
+// ─── Fleet Compliance ─────────────────────────────────────────────────────────
+
+/**
+ * GET /admin/compliance
+ * Returns drivers whose license, registration, or insurance is expiring within
+ * the next 30 days (or is already past).  All date fields are stored as TEXT
+ * in YYYY-MM-DD format.
+ */
+router.get("/admin/compliance", requireAdmin, async (_req, res): Promise<void> => {
+  const drivers = await db.select({
+    id: driversTable.id,
+    name: driversTable.name,
+    email: driversTable.email,
+    phone: driversTable.phone,
+    approvalStatus: driversTable.approvalStatus,
+    licenseExpiry: driversTable.licenseExpiry,
+    regExpiry: driversTable.regExpiry,
+    insuranceExpiry: driversTable.insuranceExpiry,
+  }).from(driversTable);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const threshold = new Date(today);
+  threshold.setDate(threshold.getDate() + 30);
+
+  type Alert = { driverId: number; driverName: string; driverEmail: string; type: string; expiry: string; daysRemaining: number; };
+  const alerts: Alert[] = [];
+
+  for (const d of drivers) {
+    const checks: Array<{ label: string; val: string | null | undefined }> = [
+      { label: "Driver License",    val: d.licenseExpiry },
+      { label: "Vehicle Registration", val: d.regExpiry },
+      { label: "Insurance",        val: d.insuranceExpiry },
+    ];
+    for (const { label, val } of checks) {
+      if (!val) continue;
+      const expiry = new Date(val);
+      if (isNaN(expiry.getTime())) continue;
+      const daysRemaining = Math.floor((expiry.getTime() - today.getTime()) / 86_400_000);
+      if (daysRemaining <= 30) {
+        alerts.push({
+          driverId: d.id,
+          driverName: d.name,
+          driverEmail: d.email,
+          type: label,
+          expiry: val,
+          daysRemaining,
+        });
+      }
+    }
+  }
+
+  // Sort: most urgent first
+  alerts.sort((a, b) => a.daysRemaining - b.daysRemaining);
+  res.json(alerts);
+});
+
 export default router;

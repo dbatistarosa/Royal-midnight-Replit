@@ -20,6 +20,10 @@ export const usersTable = pgTable("users", {
   preferredBeverage: text("preferred_beverage"),      // e.g. "Sparkling Water"
   opensOwnDoor: boolean("opens_own_door").default(false), // chauffeur should not open door
   addressTitle: text("address_title"),                // e.g. "Dr.", "Mr.", "Ms."
+  // ── Admin VIP Notes ───────────────────────────────────────────────────────
+  // Permanent admin-only notes about this passenger (e.g. "CEO of Acme Corp").
+  // Never visible to the passenger; shown discreetly on the driver trip manifest.
+  vipNotes: text("vip_notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

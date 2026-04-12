@@ -3,7 +3,7 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import {
   LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag,
   MessageSquare, BarChart, Settings, Loader2, CheckCircle, XCircle,
-  Wallet, Plus, Trash2, X, ChevronDown,
+  Wallet, Plus, Trash2, X, ChevronDown, AlertTriangle, ShieldAlert,
 } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -72,7 +72,16 @@ const currentYear = new Date().getFullYear();
 const MIN_CATALOG_YEAR = 2015;
 const YEAR_OPTIONS = Array.from({ length: currentYear - MIN_CATALOG_YEAR + 1 }, (_, i) => currentYear - i);
 
-type Tab = "vehicles" | "catalog";
+type Tab = "vehicles" | "catalog" | "compliance";
+
+type ComplianceAlert = {
+  driverId: number;
+  driverName: string;
+  driverEmail: string;
+  type: string;
+  expiry: string;
+  daysRemaining: number;
+};
 
 export default function AdminFleet() {
   const { token } = useAuth();
@@ -83,6 +92,10 @@ export default function AdminFleet() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [vehiclesLoading, setVehiclesLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+
+  // Compliance alerts
+  const [compliance, setCompliance] = useState<ComplianceAlert[]>([]);
+  const [complianceLoading, setComplianceLoading] = useState(false);
 
   // Vehicle catalog
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -120,6 +133,15 @@ export default function AdminFleet() {
 
   useEffect(() => { fetchVehicles(); }, [fetchVehicles]);
   useEffect(() => { if (tab === "catalog") fetchCatalog(); }, [tab, fetchCatalog]);
+  useEffect(() => {
+    if (tab !== "compliance" || !token) return;
+    setComplianceLoading(true);
+    fetch(`${API_BASE}/admin/compliance`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() as Promise<ComplianceAlert[]> : Promise.resolve([]))
+      .then(data => setCompliance(Array.isArray(data) ? data : []))
+      .catch(() => setCompliance([]))
+      .finally(() => setComplianceLoading(false));
+  }, [tab, token]);
 
   const handleToggleAvailability = async (vehicle: Vehicle) => {
     setTogglingId(vehicle.id);
@@ -237,6 +259,13 @@ export default function AdminFleet() {
           className={`px-6 py-3 text-xs uppercase tracking-widest border-b-2 -mb-px transition-colors ${tab === "catalog" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-white"}`}
         >
           Vehicle Catalog
+        </button>
+        <button
+          onClick={() => setTab("compliance")}
+          className={`px-6 py-3 text-xs uppercase tracking-widest border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${tab === "compliance" ? "border-red-400 text-red-400" : "border-transparent text-muted-foreground hover:text-white"}`}
+        >
+          <ShieldAlert className="w-3.5 h-3.5" />
+          Compliance
         </button>
       </div>
 
@@ -485,6 +514,76 @@ export default function AdminFleet() {
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Compliance Tracker ── */}
+      {tab === "compliance" && (
+        <div>
+          <div className="mb-6">
+            <p className="text-sm text-muted-foreground">
+              Driver licenses, vehicle registrations, and insurance policies expiring within the next 30 days.
+              Contact each driver immediately to avoid service interruptions.
+            </p>
+          </div>
+
+          {complianceLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground py-12">
+              <Loader2 className="w-5 h-5 animate-spin" /> Loading compliance data...
+            </div>
+          ) : compliance.length === 0 ? (
+            <div className="bg-green-500/5 border border-green-500/20 p-8 text-center">
+              <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-3" />
+              <p className="text-sm font-medium text-green-400">All documents are current</p>
+              <p className="text-xs text-muted-foreground mt-1">No licenses, registrations, or insurance policies expire within 30 days.</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 mb-4 px-4 py-3 bg-red-500/10 border border-red-500/20">
+                <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                <p className="text-sm text-red-400">
+                  <span className="font-semibold">{compliance.length} alert{compliance.length !== 1 ? "s" : ""}</span> require immediate attention
+                </p>
+              </div>
+              <div className="bg-card border border-border overflow-hidden">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-background/50 border-b border-border">
+                    <tr>
+                      <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Driver</th>
+                      <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Document</th>
+                      <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Expiry Date</th>
+                      <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {compliance.map((alert, i) => {
+                      const isExpired = alert.daysRemaining < 0;
+                      const isCritical = alert.daysRemaining <= 7;
+                      const color = isExpired ? "text-red-400" : isCritical ? "text-orange-400" : "text-amber-400";
+                      const bg = isExpired ? "bg-red-500/5" : isCritical ? "bg-orange-500/5" : "bg-amber-500/5";
+                      return (
+                        <tr key={i} className={`${bg}`}>
+                          <td className="px-5 py-4">
+                            <p className="font-medium">{alert.driverName}</p>
+                            <p className="text-xs text-muted-foreground">{alert.driverEmail}</p>
+                          </td>
+                          <td className="px-5 py-4 text-muted-foreground">{alert.type}</td>
+                          <td className="px-5 py-4 font-mono text-sm">{alert.expiry}</td>
+                          <td className={`px-5 py-4 font-semibold ${color}`}>
+                            {isExpired
+                              ? `Expired ${Math.abs(alert.daysRemaining)} day${Math.abs(alert.daysRemaining) !== 1 ? "s" : ""} ago`
+                              : alert.daysRemaining === 0
+                              ? "Expires today"
+                              : `${alert.daysRemaining} day${alert.daysRemaining !== 1 ? "s" : ""} remaining`}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}
