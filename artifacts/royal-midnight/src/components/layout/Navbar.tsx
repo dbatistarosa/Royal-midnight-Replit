@@ -63,13 +63,13 @@ export function Navbar() {
     <nav
       className={`fixed top-0 w-full z-50 transition-all duration-300 ${
         isScrolled || location !== "/"
-          ? "bg-black/90 backdrop-blur-md border-b border-white/10 py-4"
-          : "bg-transparent py-6"
+          ? "bg-black/90 backdrop-blur-md border-b border-white/10 py-1"
+          : "bg-transparent py-2"
       }`}
     >
       <div className="container mx-auto px-6 flex items-center justify-between">
-        <Link href="/" className="text-2xl font-serif text-white tracking-widest">
-          ROYAL <span className="text-primary italic">MIDNIGHT</span>
+        <Link href="/" className="flex items-center">
+          <img src="/royal-midnight-logo-original.png" alt="Royal Midnight" className="h-24 w-auto max-w-[260px] object-contain object-left" />
         </Link>
 
         {/* Desktop Nav */}

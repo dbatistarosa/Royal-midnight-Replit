@@ -1,4 +1,5 @@
 import { Link, useLocation } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -56,10 +57,16 @@ export default function Signup() {
 
   return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center px-6 pt-24 pb-16">
+      <PageSeo
+        title="Create Account"
+        description="Create a Royal Midnight account to manage your luxury transportation bookings, track rides in real time, and access your reservation history."
+        path="/auth/signup"
+        noIndex={true}
+      />
       <div className="w-full max-w-md">
         <div className="text-center mb-12">
-          <Link href="/" className="text-2xl font-serif text-white tracking-widest block mb-8">
-            ROYAL <span className="text-primary italic">MIDNIGHT</span>
+          <Link href="/" className="block mb-8">
+            <img src="/royal-midnight-logo-original.png" alt="Royal Midnight" className="h-28 w-auto mx-auto max-w-xs object-contain" />
           </Link>
           <h1 className="text-3xl font-serif text-white mb-2">Create Account</h1>
           <p className="text-gray-400 text-sm">Join the Royal Midnight experience</p>

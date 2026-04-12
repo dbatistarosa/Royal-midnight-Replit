@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock, BarChart2 } from "lucide-react";
 import { format } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useDriverStatus } from "@/contexts/driverStatus";
@@ -16,7 +16,7 @@ const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
   { label: "Finished", href: "/driver/history", icon: History },
   { label: "Earnings", href: "/driver/earnings", icon: DollarSign },
-  { label: "Stats", href: "/driver/stats", icon: Star },
+  { label: "Stats", href: "/driver/stats", icon: BarChart2 },
   { label: "Profile", href: "/driver/profile", icon: User },
 ];
 

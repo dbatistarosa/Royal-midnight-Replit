@@ -9,7 +9,12 @@ const SOUTH_FLORIDA_AIRPORTS: Array<{ code: string; name: string; address: strin
 ];
 
 router.get("/autocomplete", async (req, res): Promise<void> => {
-  const query = (req.query["q"] as string || "").trim();
+  const rawQ = (req.query["q"] as string || "").trim();
+  if (rawQ.length > 200) {
+    res.status(400).json({ error: "Query parameter too long (max 200 characters)" });
+    return;
+  }
+  const query = rawQ;
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 
   if (!query) {

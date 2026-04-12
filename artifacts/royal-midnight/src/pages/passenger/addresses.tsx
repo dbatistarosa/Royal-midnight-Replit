@@ -147,7 +147,7 @@ function AddressCard({ addr, authHeader, onDelete, onUpdate }: {
 
 function PassengerAddressesInner() {
   const { user, token } = useAuth();
-  const userId = user?.id ?? 0;
+  const userId = user?.id ?? null;
   const authHeader = `Bearer ${token ?? ""}`;
   const { toast } = useToast();
 

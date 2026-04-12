@@ -23,12 +23,12 @@ export default function Home() {
       <section className="relative h-screen min-h-[700px] flex items-center pt-20">
         <div className="absolute inset-0 z-0">
           <img
-            src="/hero-bg.png"
+            src="/hero-bg.webp"
             alt="Luxury black sedan at night"
             className="w-full h-full object-cover object-center opacity-60"
             loading="eager"
             decoding="async"
-            fetchpriority="high"
+            fetchPriority="high"
           />
           <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black"></div>
         </div>
@@ -151,7 +151,7 @@ export default function Home() {
       <section className="relative h-[600px] flex items-center justify-center">
         <div className="absolute inset-0 z-0">
           <img
-            src="/interior.png"
+            src="/interior.webp"
             alt="Luxury interior"
             className="w-full h-full object-cover opacity-50"
             loading="lazy"

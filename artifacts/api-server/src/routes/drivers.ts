@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, driversTable, bookingsTable, settingsTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
+import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
+import { fetchCommissionPct } from "../lib/commission.js";
 import {
   ListDriversQueryParams,
   ListDriversResponse,
@@ -222,14 +224,34 @@ router.patch("/drivers/:id/contact", requireAuth, async (req, res): Promise<void
   }
 
   const phone = req.body?.phone as string | undefined;
-  if (typeof phone !== "string" || phone.trim().length < 7) {
-    res.status(400).json({ error: "Invalid phone number" });
+  const profilePicture = req.body?.profilePicture as string | undefined;
+
+  const updates: Partial<typeof driversTable.$inferInsert> = {};
+
+  if (phone !== undefined) {
+    if (typeof phone !== "string" || phone.trim().length < 7) {
+      res.status(400).json({ error: "Invalid phone number" });
+      return;
+    }
+    updates.phone = phone.trim();
+  }
+
+  if (profilePicture !== undefined) {
+    if (typeof profilePicture !== "string" || !profilePicture.startsWith("/")) {
+      res.status(400).json({ error: "Invalid profile picture path" });
+      return;
+    }
+    updates.profilePicture = profilePicture;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ error: "No fields to update" });
     return;
   }
 
   const [updated] = await db
     .update(driversTable)
-    .set({ phone: phone.trim() })
+    .set(updates)
     .where(eq(driversTable.id, id))
     .returning();
 
@@ -249,17 +271,17 @@ router.get("/drivers/:id/payout", requireAuth, async (req, res): Promise<void> =
     res.status(403).json({ error: "Access denied" }); return;
   }
 
-  // Return masked sensitive fields
+  // Return masked sensitive fields — never return raw SSN/routing/account
   res.json({
     payoutLegalName: driver.payoutLegalName ?? "",
     payoutEmail: driver.payoutEmail ?? "",
     payoutBankName: driver.payoutBankName ?? "",
     hasSsn: !!driver.payoutSsn,
-    ssnLast4: driver.payoutSsn ? driver.payoutSsn.slice(-4) : null,
+    ssnLast4: lastN(driver.payoutSsn, 4),
     hasRoutingNumber: !!driver.payoutRoutingNumber,
-    routingLast4: driver.payoutRoutingNumber ? driver.payoutRoutingNumber.slice(-4) : null,
+    routingLast4: lastN(driver.payoutRoutingNumber, 4),
     hasAccountNumber: !!driver.payoutAccountNumber,
-    accountLast4: driver.payoutAccountNumber ? driver.payoutAccountNumber.slice(-4) : null,
+    accountLast4: lastN(driver.payoutAccountNumber, 4),
   });
 });
 
@@ -282,15 +304,15 @@ router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void>
   if (payoutLegalName !== undefined) updates.payoutLegalName = payoutLegalName.trim() || null;
   if (payoutEmail !== undefined) updates.payoutEmail = payoutEmail.trim() || null;
   if (payoutBankName !== undefined) updates.payoutBankName = payoutBankName.trim() || null;
-  // Only update sensitive fields if a new value is actually provided (non-empty)
+  // Encrypt sensitive fields before storage
   if (payoutSsn && payoutSsn.replace(/\D/g, "").length >= 9) {
-    updates.payoutSsn = payoutSsn.replace(/\D/g, "");
+    updates.payoutSsn = encryptField(payoutSsn.replace(/\D/g, ""));
   }
   if (payoutRoutingNumber && payoutRoutingNumber.replace(/\D/g, "").length === 9) {
-    updates.payoutRoutingNumber = payoutRoutingNumber.replace(/\D/g, "");
+    updates.payoutRoutingNumber = encryptField(payoutRoutingNumber.replace(/\D/g, ""));
   }
   if (payoutAccountNumber && payoutAccountNumber.replace(/\D/g, "").length >= 4) {
-    updates.payoutAccountNumber = payoutAccountNumber.replace(/\D/g, "");
+    updates.payoutAccountNumber = encryptField(payoutAccountNumber.replace(/\D/g, ""));
   }
 
   if (Object.keys(updates).length === 0) {
@@ -304,11 +326,11 @@ router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void>
     payoutEmail: updated.payoutEmail ?? "",
     payoutBankName: updated.payoutBankName ?? "",
     hasSsn: !!updated.payoutSsn,
-    ssnLast4: updated.payoutSsn ? updated.payoutSsn.slice(-4) : null,
+    ssnLast4: lastN(updated.payoutSsn, 4),
     hasRoutingNumber: !!updated.payoutRoutingNumber,
-    routingLast4: updated.payoutRoutingNumber ? updated.payoutRoutingNumber.slice(-4) : null,
+    routingLast4: lastN(updated.payoutRoutingNumber, 4),
     hasAccountNumber: !!updated.payoutAccountNumber,
-    accountLast4: updated.payoutAccountNumber ? updated.payoutAccountNumber.slice(-4) : null,
+    accountLast4: lastN(updated.payoutAccountNumber, 4),
   });
 });
 
@@ -453,16 +475,14 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
     return;
   }
 
-  // Fetch commission rate from settings (stored as whole percent, e.g. "70" = 70%); divide by 100 for multiplier
-  const [commissionRow] = await db.select().from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct"));
-  const commissionPct = commissionRow ? parseFloat(commissionRow.value) / 100 : 0.70;
+  const commissionPct = await fetchCommissionPct();
 
   const [stats] = await db
     .select({
-      totalEarnings: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
-      thisMonth: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
-      thisWeek: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
-      today: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
+      totalEarnings: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed'), 0)::float`,
+      thisMonth: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
+      thisWeek: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
+      today: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
       totalRides: sql<number>`count(*) filter (where status = 'completed')::int`,
       tipsTotal: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null), 0)::float`,
       tipsThisWeek: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and created_at >= date_trunc('week', now())), 0)::float`,
@@ -474,7 +494,7 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
   const dailyRaw = await db
     .select({
       date: sql<string>`date(created_at)::text`,
-      amount: sql<number>`coalesce(sum(price_quoted::numeric), 0)::float`,
+      amount: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric), 0)::float`,
       rides: sql<number>`count(*)::int`,
     })
     .from(bookingsTable)

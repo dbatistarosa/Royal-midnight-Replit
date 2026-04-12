@@ -1,10 +1,16 @@
 import { VEHICLE_CLASSES } from "@/lib/constants";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { PageSeo } from "@/components/PageSeo";
 
 export default function Fleet() {
   return (
     <div className="min-h-screen bg-black pt-32 pb-24">
+      <PageSeo
+        title="Our Fleet — Luxury Vehicles"
+        description="Explore Royal Midnight's curated fleet of luxury vehicles. From executive sedans to premium SUVs — choose the perfect vehicle for your South Florida journey."
+        path="/fleet"
+      />
       <div className="container mx-auto px-6">
         <div className="text-center mb-20 max-w-3xl mx-auto">
           <h1 className="text-3xl sm:text-5xl font-serif text-white mb-6">The Royal Fleet</h1>
@@ -29,6 +35,9 @@ export default function Fleet() {
                   src={vehicle.image} 
                   alt={vehicle.name} 
                   className="w-full h-full object-cover border border-white/10"
+                  loading="lazy"
+                  width={1408}
+                  height={768}
                 />
               </div>
 

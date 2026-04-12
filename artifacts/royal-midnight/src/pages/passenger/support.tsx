@@ -204,7 +204,7 @@ function TicketThread({ ticket, authHeader, userName }: { ticket: Ticket; authHe
 
 function PassengerSupportInner() {
   const { user, token } = useAuth();
-  const userId = user?.id ?? 0;
+  const userId = user?.id ?? null;
   const authHeader = `Bearer ${token ?? ""}`;
   const { toast } = useToast();
 

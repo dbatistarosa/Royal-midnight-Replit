@@ -3,6 +3,7 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { HelmetProvider } from "react-helmet-async";
 import { AuthProvider } from "@/contexts/auth";
 import { DriverStatusProvider, useDriverStatus } from "@/contexts/driverStatus";
 import { AuthGuard } from "@/components/layout/AuthGuard";
@@ -153,6 +154,12 @@ function DriverApprovalGate({ children }: { children: React.ReactNode }) {
           <p className="text-gray-400 text-sm leading-relaxed mb-6">
             Your application is being reviewed by our fleet team. This typically takes 1–2 business days.
           </p>
+          <div className="bg-primary/5 border border-primary/20 p-4 mb-6 text-left">
+            <p className="text-xs uppercase tracking-widest text-primary mb-1">Billing &amp; Payment</p>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Once approved, you will receive an email with instructions for setting up your payment and billing information.
+            </p>
+          </div>
           <p className="text-xs text-gray-600">Questions? Contact dispatch@royalmidnight.com</p>
         </div>
       </div>
@@ -362,18 +369,20 @@ function Router() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <DriverStatusProvider>
-          <TooltipProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <Router />
-            </WouterRouter>
-            <Toaster />
-          </TooltipProvider>
-        </DriverStatusProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <HelmetProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <DriverStatusProvider>
+            <TooltipProvider>
+              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                <Router />
+              </WouterRouter>
+              <Toaster />
+            </TooltipProvider>
+          </DriverStatusProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </HelmetProvider>
   );
 }
 

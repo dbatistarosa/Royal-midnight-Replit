@@ -9,6 +9,7 @@ import { API_BASE } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
+import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -36,6 +37,9 @@ type BookingDetail = {
   driverId?: number | null;
   tipAmount?: number | null;
   tipPaymentIntentId?: string | null;
+  hasRating?: boolean;
+  existingRating?: number | null;
+  existingComment?: string | null;
 };
 
 type DriverLocation = {
@@ -260,8 +264,17 @@ function PassengerRideDetailInner() {
   const [tipAmount, setTipAmount] = useState("");
   const [tipSubmitting, setTipSubmitting] = useState(false);
   const [tipSubmitted, setTipSubmitted] = useState(false);
+  // Inline card entry for tip (when no saved card on file)
+  const [showTipCardEntry, setShowTipCardEntry] = useState(false);
+  const [tipCheckoutSecret, setTipCheckoutSecret] = useState<string | null>(null);
+  const [tipCheckoutPubKey, setTipCheckoutPubKey] = useState<string | null>(null);
+  const [tipCheckoutLoading, setTipCheckoutLoading] = useState(false);
+  const [tipCardError, setTipCardError] = useState<string | null>(null);
+  // Saved card for off-session tip charge
+  type SavedCard = { id: string; brand: string; last4: string; expMonth: number; expYear: number };
+  const [savedCard, setSavedCard] = useState<SavedCard | null>(null);
 
-  // Rating state
+  // Rating state — initialized from API once booking loads
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingHover, setRatingHover] = useState(0);
   const [ratingComment, setRatingComment] = useState("");
@@ -277,7 +290,15 @@ function PassengerRideDetailInner() {
         if (!r.ok) throw new Error("Not found");
         return r.json() as Promise<BookingDetail>;
       })
-      .then(data => setBooking(data))
+      .then(data => {
+        setBooking(data);
+        // Pre-populate rating state from persisted review
+        if (data.hasRating && data.existingRating) {
+          setRatingSubmitted(true);
+          setRatingValue(data.existingRating);
+          setRatingComment(data.existingComment ?? "");
+        }
+      })
       .catch(() => setBooking(null))
       .finally(() => setIsLoading(false));
   }, [id, token]);
@@ -287,6 +308,17 @@ function PassengerRideDetailInner() {
     setIsLoading(true);
     loadBooking();
   }, [loadBooking]);
+
+  // Fetch saved card for tip off-session charging
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${API_BASE}/payments/saved-cards`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() as Promise<{ cards: SavedCard[] }> : Promise.resolve({ cards: [] }))
+      .then(data => setSavedCard(data.cards?.[0] ?? null))
+      .catch(() => {});
+  }, [token]);
 
   // Poll booking status every 15 seconds so the map appears automatically when driver departs
   useEffect(() => {
@@ -349,7 +381,14 @@ function PassengerRideDetailInner() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(data.error || "Could not process tip.");
+        const msg = data.error || "Could not process tip.";
+        // No saved card → show inline card entry instead of a toast error
+        if (msg.toLowerCase().includes("no saved payment") || msg.toLowerCase().includes("no payment method")) {
+          setTipSubmitting(false);
+          await handleTipCheckout(amount);
+          return;
+        }
+        throw new Error(msg);
       }
       setTipSubmitted(true);
       setBooking(prev => prev ? { ...prev, tipAmount: amount } : prev);
@@ -358,6 +397,75 @@ function PassengerRideDetailInner() {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Could not process tip.", variant: "destructive" });
     } finally {
       setTipSubmitting(false);
+    }
+  };
+
+  const handleTipCheckout = async (amount: number) => {
+    if (!token) return;
+    setTipCheckoutLoading(true);
+    setTipCardError(null);
+    try {
+      const res = await fetch(`${API_BASE}/payments/tip-checkout/${id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ tipAmount: amount }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error || "Could not initiate tip payment.");
+      }
+      const { clientSecret, publishableKey } = await res.json() as { clientSecret: string; publishableKey: string };
+      setTipCheckoutSecret(clientSecret);
+      setTipCheckoutPubKey(publishableKey);
+      setShowTipCardEntry(true);
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not open payment form.", variant: "destructive" });
+    } finally {
+      setTipCheckoutLoading(false);
+    }
+  };
+
+  const handleTipCardSuccess = async (paymentIntentId: string) => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_BASE}/payments/tip-confirm/${id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentIntentId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        // Payment went through on Stripe but server failed to record it — reset card form
+        // so user is not stuck, and prompt them to contact support
+        setShowTipCardEntry(false);
+        setTipCheckoutSecret(null);
+        setTipCheckoutPubKey(null);
+        setTipCardError(null);
+        toast({
+          title: "Payment processed but not recorded",
+          description: `${data.error ?? "An error occurred."} Your card was charged — please contact support with your booking reference.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      const { tipAmount: confirmedAmount } = await res.json() as { tipAmount: number };
+      setTipSubmitted(true);
+      setShowTipCardEntry(false);
+      setTipCheckoutSecret(null);
+      setTipCheckoutPubKey(null);
+      setBooking(prev => prev ? { ...prev, tipAmount: confirmedAmount } : prev);
+      toast({ title: "Tip sent!", description: `$${confirmedAmount.toFixed(2)} gratuity has been recorded. Thank you!` });
+    } catch (err: unknown) {
+      // Network or parse error — reset card form, allow user to try again from amount entry
+      setShowTipCardEntry(false);
+      setTipCheckoutSecret(null);
+      setTipCheckoutPubKey(null);
+      setTipCardError(null);
+      toast({
+        title: "Connection error",
+        description: "Could not confirm your tip. If your card was charged, please contact support.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -537,43 +645,116 @@ function PassengerRideDetailInner() {
               </div>
             )}
 
-            {/* Add a Tip (completed trips with no tip yet and card on file) */}
-            {booking?.status === "completed" && !booking.tipAmount && !tipSubmitted && (
+            {/* Add a Tip (completed trips with no tip yet) */}
+            {booking?.status === "completed" && !booking.tipAmount && !tipSubmitted && !showTipCardEntry && (
               <div className="bg-card border border-border p-5 sm:p-6">
                 <h2 className="font-serif text-xl mb-2 flex items-center gap-2">
                   <Star className="w-4 h-4 text-primary" /> Add Gratuity
                 </h2>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Show your appreciation — a tip is charged to your card on file.
+                  Show your appreciation — add a gratuity for your driver.
                 </p>
                 <div className="flex gap-2 mb-3">
-                  {[5, 10, 20].map(preset => (
-                    <button
-                      key={preset}
-                      onClick={() => setTipAmount(String(preset))}
-                      className={`flex-1 py-2 text-sm border rounded-none transition-colors ${tipAmount === String(preset) ? "border-primary bg-primary/10 text-primary" : "border-white/10 text-muted-foreground hover:border-primary/50"}`}
-                    >
-                      ${preset}
-                    </button>
-                  ))}
+                  {[15, 18, 20, 25].map(pct => {
+                    const base = booking.priceQuoted ?? 0;
+                    const computed = base > 0 ? Math.round(base * pct) / 100 : null;
+                    const label = computed != null ? `$${computed.toFixed(2)}` : "";
+                    const val = computed != null ? String(computed.toFixed(2)) : "";
+                    return (
+                      <button
+                        key={pct}
+                        onClick={() => val && setTipAmount(val)}
+                        className={`flex-1 py-2.5 text-sm border rounded-none transition-colors flex flex-col items-center gap-0.5 ${tipAmount === val && val ? "border-primary bg-primary/10 text-primary" : "border-white/10 text-muted-foreground hover:border-primary/50"}`}
+                      >
+                        <span className="font-medium">{pct}%</span>
+                        {label && <span className="text-xs opacity-70">{label}</span>}
+                      </button>
+                    );
+                  })}
                 </div>
                 <input
                   type="number"
                   min="1"
                   max="500"
-                  step="1"
-                  placeholder="Custom amount"
+                  step="0.01"
+                  placeholder="Custom amount ($)"
                   value={tipAmount}
                   onChange={e => setTipAmount(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 text-white h-10 px-3 text-sm focus:outline-none focus:border-primary mb-3"
                 />
-                <Button
-                  onClick={() => void handleTipSubmit()}
-                  disabled={tipSubmitting || !tipAmount || parseFloat(tipAmount) <= 0}
-                  className="w-full bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest"
-                >
-                  {tipSubmitting ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Processing...</> : "Send Tip"}
-                </Button>
+                {savedCard ? (
+                  <>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3 px-0.5">
+                      <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="capitalize">{savedCard.brand}</span>
+                      <span>•••• {savedCard.last4}</span>
+                      <span className="opacity-60">exp {savedCard.expMonth}/{String(savedCard.expYear).slice(-2)}</span>
+                      <button
+                        onClick={() => {
+                          const amt = parseFloat(tipAmount);
+                          if (amt > 0) void handleTipCheckout(amt);
+                        }}
+                        className="ml-auto text-primary hover:underline text-xs"
+                      >
+                        Use different card
+                      </button>
+                    </div>
+                    <Button
+                      onClick={() => void handleTipSubmit()}
+                      disabled={tipSubmitting || !tipAmount || parseFloat(tipAmount) <= 0}
+                      className="w-full bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest"
+                    >
+                      {tipSubmitting
+                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Processing...</>
+                        : `Charge ${tipAmount ? `$${parseFloat(tipAmount).toFixed(2)}` : "Tip"} to Card`}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    onClick={() => {
+                      const amt = parseFloat(tipAmount);
+                      if (amt > 0) void handleTipCheckout(amt);
+                    }}
+                    disabled={tipCheckoutLoading || !tipAmount || parseFloat(tipAmount) <= 0}
+                    className="w-full bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest"
+                  >
+                    {tipCheckoutLoading
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Processing...</>
+                      : "Enter Card & Send Tip"}
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Inline card entry for tip — shown when no saved card on file */}
+            {booking?.status === "completed" && !booking.tipAmount && !tipSubmitted && showTipCardEntry && tipCheckoutSecret && tipCheckoutPubKey && (
+              <div className="bg-card border border-border p-5 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-serif text-xl flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-primary" /> Pay Gratuity
+                  </h2>
+                  <button
+                    onClick={() => { setShowTipCardEntry(false); setTipCardError(null); }}
+                    className="text-muted-foreground hover:text-white text-xs uppercase tracking-widest"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Enter your card to send a ${parseFloat(tipAmount || "0").toFixed(2)} gratuity.
+                </p>
+                {tipCardError && (
+                  <div className="mb-4 border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-400">
+                    {tipCardError}
+                  </div>
+                )}
+                <StripePaymentForm
+                  clientSecret={tipCheckoutSecret}
+                  publishableKey={tipCheckoutPubKey}
+                  amount={parseFloat(tipAmount || "0")}
+                  onSuccess={(piId) => void handleTipCardSuccess(piId)}
+                  onError={(msg) => setTipCardError(msg)}
+                />
               </div>
             )}
 
@@ -624,13 +805,27 @@ function PassengerRideDetailInner() {
               </div>
             )}
 
-            {/* Rating submitted confirmation */}
+            {/* Rating submitted / already rated confirmation */}
             {ratingSubmitted && (
-              <div className="bg-card border border-primary/20 p-5">
-                <div className="flex items-center gap-2 text-primary text-sm">
+              <div className="bg-card border border-primary/20 p-5 sm:p-6">
+                <div className="flex items-center gap-2 text-primary text-sm mb-3">
                   <CheckCircle className="w-4 h-4" />
-                  <span>Thank you for your {ratingValue}-star rating!</span>
+                  <span className="font-medium">
+                    {booking?.hasRating ? "You already rated this ride" : "Thank you for your feedback!"}
+                  </span>
                 </div>
+                <div className="flex gap-1 mb-2">
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <Star
+                      key={star}
+                      className={`w-5 h-5 ${star <= ratingValue ? "text-primary fill-primary" : "text-muted-foreground/30"}`}
+                    />
+                  ))}
+                  <span className="text-xs text-muted-foreground ml-2 self-center">{ratingValue} / 5</span>
+                </div>
+                {ratingComment && (
+                  <p className="text-sm text-muted-foreground italic">"{ratingComment}"</p>
+                )}
               </div>
             )}
 

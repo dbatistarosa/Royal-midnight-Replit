@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -33,9 +34,19 @@ type ForgotResponse = {
 
 export default function Login() {
   const [, setLocation] = useLocation();
-  const { login } = useAuth();
+  const { login, user } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Redirect already-logged-in users straight to their dashboard
+  useEffect(() => {
+    if (!user) return;
+    if (user.role === "admin") setLocation("/admin");
+    else if (user.role === "driver") setLocation("/driver/dashboard");
+    else if (user.role === "corporate") setLocation("/corporate/dashboard");
+    else setLocation("/passenger/dashboard");
+  }, [user, setLocation]);
+
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSubmitting, setForgotSubmitting] = useState(false);
@@ -99,10 +110,16 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center px-6 pt-24">
+      <PageSeo
+        title="Sign In"
+        description="Sign in to your Royal Midnight account to view bookings, manage your profile, and access your reservation history."
+        path="/auth/login"
+        noIndex={true}
+      />
       <div className="w-full max-w-md">
         <div className="text-center mb-12">
-          <Link href="/" className="text-2xl font-serif text-white tracking-widest block mb-8">
-            ROYAL <span className="text-primary italic">MIDNIGHT</span>
+          <Link href="/" className="block mb-8">
+            <img src="/royal-midnight-logo-original.png" alt="Royal Midnight" className="h-28 w-auto mx-auto max-w-xs object-contain" />
           </Link>
           {mode === "login" ? (
             <>

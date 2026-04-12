@@ -4,6 +4,8 @@ import Stripe from "stripe";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { hashPassword, isValidHash } from "./lib/hash.js";
+import { safeDecryptField } from "./lib/encrypt.js";
+import { readFileSync, readdirSync, readlinkSync } from "fs";
 
 const rawPort = process.env["PORT"];
 
@@ -51,6 +53,20 @@ async function runStartupMigrations(): Promise<void> {
         ADD COLUMN IF NOT EXISTS estimated_duration_minutes INTEGER,
         ADD COLUMN IF NOT EXISTS estimated_distance_miles NUMERIC(6, 2)
     `);
+
+    // Backfill drivers.total_rides from completed bookings (full reconciliation — runs on every boot)
+    await client.query(`
+      UPDATE drivers d
+      SET total_rides = coalesce(sub.cnt, 0)
+      FROM (
+        SELECT dr.id AS driver_id, count(b.id)::int AS cnt
+        FROM drivers dr
+        LEFT JOIN bookings b ON b.driver_id = dr.id AND b.status = 'completed'
+        GROUP BY dr.id
+      ) sub
+      WHERE d.id = sub.driver_id
+        AND d.total_rides IS DISTINCT FROM coalesce(sub.cnt, 0)
+    `);
   } finally {
     client.release();
   }
@@ -62,12 +78,16 @@ async function seedDatabase(): Promise<void> {
     const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, adminEmail));
 
     if (!existing) {
+      const seedPassword = process.env.ADMIN_SEED_PASSWORD;
+      if (!seedPassword) {
+        logger.warn("ADMIN_SEED_PASSWORD is not set — using default seed password. Set this env var in production.");
+      }
       await db.insert(usersTable).values({
         name: "Royal Midnight Admin",
         email: adminEmail,
         phone: null,
         role: "admin",
-        passwordHash: hashPassword("admin2024!"),
+        passwordHash: await hashPassword(seedPassword || "admin2024!"),
       });
       logger.info("Admin user seeded successfully");
     } else {
@@ -77,7 +97,7 @@ async function seedDatabase(): Promise<void> {
     const allUsers = await db.select().from(usersTable);
     for (const user of allUsers) {
       if (user.passwordHash && !isValidHash(user.passwordHash)) {
-        const fixedHash = hashPassword(user.passwordHash);
+        const fixedHash = await hashPassword(user.passwordHash);
         await db
           .update(usersTable)
           .set({ passwordHash: fixedHash })
@@ -181,12 +201,11 @@ async function sendTripReminders(): Promise<void> {
     const windowStart = new Date(now.getTime() + 55 * 60 * 1000);
     const windowEnd = new Date(now.getTime() + 65 * 60 * 1000);
 
-    const { driversTable, bookingsTable: bookTbl, settingsTable: settTbl } = await import("@workspace/db");
+    const { driversTable, bookingsTable: bookTbl } = await import("@workspace/db");
     const { sendTripReminderPassenger, sendTripReminderDriver } = await import("./lib/mailer.js");
 
-    const [commRow] = await db.select({ value: settTbl.value }).from(settTbl).where(eq(settTbl.key, "driver_commission_pct"));
-    const rawPct = parseFloat(commRow?.value ?? "70");
-    const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+    const { fetchCommissionPct: fetchCommPct } = await import("./lib/commission.js");
+    const commissionPct = await fetchCommPct();
 
     // Find candidates outside the transaction first to avoid long-held locks
     const candidates = await db
@@ -301,12 +320,11 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
     }
 
     logger.info("Sending scheduled weekly payout emails...");
-    const { driversTable, bookingsTable: bookTbl, settingsTable: settTbl } = await import("@workspace/db");
+    const { driversTable, bookingsTable: bookTbl } = await import("@workspace/db");
     const { sql: sqlFn } = await import("drizzle-orm");
 
-    const [commRow] = await db.select({ value: settTbl.value }).from(settTbl).where(eqOp(settTbl.key, "driver_commission_pct"));
-    const rawPct = parseFloat(commRow?.value ?? "0.80");
-    const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+    const { fetchCommissionPct: fetchCommPct2 } = await import("./lib/commission.js");
+    const commissionPct = await fetchCommPct2();
 
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - 7); // Previous week
@@ -334,8 +352,8 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
         driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
         rides: e.rides, grossEarnings: Math.round(e.gross * 100) / 100,
         commissionPct, driverNet, weekLabel,
-        bankName: d.payoutBankName ?? null, routingNumber: d.payoutRoutingNumber ?? null,
-        accountNumber: d.payoutAccountNumber ?? null, legalName: d.payoutLegalName ?? null,
+        bankName: d.payoutBankName ?? null, routingNumber: safeDecryptField(d.payoutRoutingNumber),
+        accountNumber: safeDecryptField(d.payoutAccountNumber), legalName: d.payoutLegalName ?? null,
       };
     });
 
@@ -357,25 +375,84 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
   }
 }
 
+// Kill any process currently holding a given TCP port using /proc/net/tcp{,6}.
+// Node commonly binds on IPv6 (::) even for dual-stack sockets, so we check
+// both files. Works on Linux without fuser/lsof — both absent from this container.
+function killProcessOnPort(targetPort: number): void {
+  try {
+    const hexPort = targetPort.toString(16).padStart(4, "0").toUpperCase();
+    let targetInode: string | null = null;
+
+    // Check IPv4 and IPv6 proc files
+    for (const procFile of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+      try {
+        const content = readFileSync(procFile, "utf8");
+        for (const line of content.split("\n").slice(1)) {
+          const parts = line.trim().split(/\s+/);
+          const localAddr = parts[1] ?? "";
+          // IPv4:  "0100007F:1F40"  — port is after the single colon
+          // IPv6:  "000...0001:1F40" — port is after the last colon
+          const colonIdx = localAddr.lastIndexOf(":");
+          const localPortHex = colonIdx >= 0 ? localAddr.slice(colonIdx + 1) : "";
+          if (localPortHex.toUpperCase() === hexPort) {
+            targetInode = parts[9] ?? null;
+            break;
+          }
+        }
+      } catch { /* file may not exist on some kernels */ }
+      if (targetInode) break;
+    }
+
+    if (!targetInode) return;
+
+    for (const pid of readdirSync("/proc").filter(d => /^\d+$/.test(d))) {
+      try {
+        for (const fd of readdirSync(`/proc/${pid}/fd`)) {
+          try {
+            const link = readlinkSync(`/proc/${pid}/fd/${fd}`);
+            if (link === `socket:[${targetInode}]`) {
+              process.kill(parseInt(pid, 10), "SIGTERM");
+              logger.info({ pid, port: targetPort }, "Killed process holding port — will retry listen");
+              return;
+            }
+          } catch { /* fd unreadable — process may have exited */ }
+        }
+      } catch { /* pid directory gone */ }
+    }
+  } catch (err) {
+    logger.warn({ err }, "killProcessOnPort failed (non-fatal)");
+  }
+}
+
+function startListening(attempt = 1): void {
+  const server = app.listen(port);
+
+  server.on("listening", () => {
+    logger.info({ port }, "Server listening");
+
+    // Run payout check immediately on startup, then every hour
+    void runWeeklyPayoutIfNeeded();
+    setInterval(() => void runWeeklyPayoutIfNeeded(), 60 * 60 * 1000);
+
+    // Run trip reminder check immediately on startup, then every minute
+    void sendTripReminders();
+    setInterval(() => void sendTripReminders(), 60 * 1000);
+  });
+
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE" && attempt <= 2) {
+      logger.warn({ port, attempt }, "Port in use — killing old process and retrying in 1s");
+      killProcessOnPort(port);
+      setTimeout(() => startListening(attempt + 1), 1000);
+      return;
+    }
+    logger.error({ err }, "Error listening on port");
+    process.exit(1);
+  });
+}
+
 runStartupMigrations()
   .then(() => seedDatabase())
   .then(() => retroactiveEmailLink())
   .then(() => ensureStripeWebhook())
-  .then(() => {
-    app.listen(port, (err) => {
-      if (err) {
-        logger.error({ err }, "Error listening on port");
-        process.exit(1);
-      }
-
-      logger.info({ port }, "Server listening");
-
-      // Run payout check immediately on startup, then every hour
-      void runWeeklyPayoutIfNeeded();
-      setInterval(() => void runWeeklyPayoutIfNeeded(), 60 * 60 * 1000);
-
-      // Run trip reminder check immediately on startup, then every minute
-      void sendTripReminders();
-      setInterval(() => void sendTripReminders(), 60 * 1000);
-    });
-  });
+  .then(() => startListening());

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq, and } from "drizzle-orm";
-import { db, reviewsTable, bookingsTable } from "@workspace/db";
+import { eq, and, sql } from "drizzle-orm";
+import { db, reviewsTable, bookingsTable, driversTable } from "@workspace/db";
 import { requireAuth } from "../middleware/auth.js";
 import {
   ListReviewsQueryParams,
@@ -56,6 +56,26 @@ router.post("/reviews", requireAuth, async (req, res): Promise<void> => {
   }
 
   const [review] = await db.insert(reviewsTable).values({ ...parsed.data, userId: req.currentUser!.userId }).returning();
+
+  // Recalculate avg rating for the driver and update the drivers table
+  if (booking.driverId) {
+    const [agg] = await db
+      .select({
+        avgRating: sql<number>`coalesce(avg(rating::numeric), 0)::float`,
+        totalCount: sql<number>`count(*)::int`,
+      })
+      .from(reviewsTable)
+      .where(eq(reviewsTable.driverId, booking.driverId));
+
+    await db
+      .update(driversTable)
+      .set({
+        rating: agg ? Math.round(agg.avgRating * 10) / 10 : null,
+      })
+      .where(eq(driversTable.id, booking.driverId));
+  }
+
+
   res.status(201).json({ ...review, createdAt: review.createdAt.toISOString() });
 });
 

@@ -23,7 +23,7 @@ type BookingRow = {
   pickupAt: string;
   priceQuoted: number;
   tipAmount?: number | null;
-  driverEarnings?: number;
+  driverEarnings?: number | null;
 };
 
 type TripReview = { bookingId: number; rating: number; comment: string | null };

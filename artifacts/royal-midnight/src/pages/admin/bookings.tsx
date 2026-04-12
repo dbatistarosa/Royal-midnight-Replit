@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet, Star } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -48,6 +48,7 @@ type BookingRow = {
   luggageCount?: number | null;
   status: string;
   priceQuoted: number;
+  tipAmount?: number | null;
   discountAmount?: number | null;
   promoCode?: string | null;
   driverId: number | null;
@@ -59,6 +60,7 @@ type BookingRow = {
   userId?: number | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  existingRating?: number | null;
 };
 
 type DriverOption = { id: number; name: string; status: string };
@@ -148,6 +150,19 @@ export default function AdminBookings() {
   const [pickupAirline, setPickupAirline] = useState("");
   const [dropoffAirline, setDropoffAirline] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [bookingRatings, setBookingRatings] = useState<Record<number, number | null>>({});
+
+  // Fetch rating for a booking when it's expanded
+  useEffect(() => {
+    if (expandedId == null || expandedId in bookingRatings) return;
+    fetch(`${API_BASE}/reviews?bookingId=${expandedId}`)
+      .then(r => r.ok ? r.json() as Promise<{ rating: number; id: number }[]> : Promise.resolve([]))
+      .then(data => {
+        const rating = Array.isArray(data) && data.length > 0 ? data[0]?.rating ?? null : null;
+        setBookingRatings(prev => ({ ...prev, [expandedId]: rating }));
+      })
+      .catch(() => setBookingRatings(prev => ({ ...prev, [expandedId]: null })));
+  }, [expandedId, bookingRatings]);
 
   // Payment collection state
   const [chargeBooking, setChargeBooking] = useState<BookingRow | null>(null);
@@ -161,6 +176,44 @@ export default function AdminBookings() {
   const [linkingLoading, setLinkingLoading] = useState<number | null>(null);
 
   const authHdr = token ? `Bearer ${token}` : "";
+
+  // Handle 3DS redirect return after admin "Charge Card" — Stripe appends
+  // payment_intent + redirect_status to the return URL (window.location.href).
+  // We detect this on mount, confirm the booking server-side, then clean the URL.
+  const handled3DS = useRef(false);
+  useEffect(() => {
+    if (handled3DS.current || !token) return;
+    const params = new URLSearchParams(window.location.search);
+    const pi = params.get("payment_intent");
+    const redirectStatus = params.get("redirect_status");
+    if (!pi || !["succeeded", "requires_capture"].includes(redirectStatus ?? "")) return;
+
+    handled3DS.current = true;
+    window.history.replaceState({}, "", window.location.pathname);
+
+    // Find which booking this PI belongs to via its metadata, then confirm it
+    fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`)
+      .then(r => r.ok ? r.json() as Promise<{ bookingId: number }> : Promise.reject("not found"))
+      .then(({ bookingId }) =>
+        fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHdr },
+          body: JSON.stringify({ paymentIntentId: pi }),
+        })
+      )
+      .then(r => {
+        if (r.ok) {
+          toast({ title: "Payment captured", description: "Booking has been confirmed and moved to pending." });
+          refetch();
+        } else {
+          toast({ title: "Sync needed", description: 'Payment may have succeeded — use "Sync Payment" to confirm.', variant: "destructive" });
+        }
+      })
+      .catch(() => {
+        toast({ title: "Sync needed", description: 'Payment may have succeeded — use "Sync Payment" to confirm.', variant: "destructive" });
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   type PassengerUser = { id: number; email: string; name: string; role: string };
   const [passengerUsers, setPassengerUsers] = useState<PassengerUser[]>([]);
@@ -302,16 +355,63 @@ export default function AdminBookings() {
   const handleChargeCard = async (b: BookingRow) => {
     setChargeLoading(true);
     try {
-      const [configRes, intentRes] = await Promise.all([
-        fetch(`${API_BASE}/payments/config`, { headers: { Authorization: authHdr } }),
-        fetch(`${API_BASE}/payments/create-intent`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: authHdr },
-          body: JSON.stringify({ bookingId: b.id, amount: b.priceQuoted }),
-        }),
-      ]);
+      const configRes = await fetch(`${API_BASE}/payments/config`, { headers: { Authorization: authHdr } });
       const { publishableKey } = await configRes.json() as { publishableKey: string };
-      const { clientSecret } = await intentRes.json() as { clientSecret: string };
+
+      let clientSecret: string;
+
+      if (b.stripePaymentIntentId) {
+        // Never create a duplicate PI when one already exists — check status first.
+        const existingRes = await fetch(
+          `${API_BASE}/payments/intent/${b.stripePaymentIntentId}/client-secret`,
+          { headers: { Authorization: authHdr } }
+        );
+        if (existingRes.ok) {
+          const existing = await existingRes.json() as { clientSecret: string; status: string };
+          const payable = ["requires_payment_method", "requires_confirmation", "requires_action"];
+          const alreadyPaid = ["succeeded", "processing", "requires_capture"];
+
+          if (payable.includes(existing.status)) {
+            // Reuse the existing PI — passenger can complete payment with it
+            clientSecret = existing.clientSecret;
+            setChargePublishableKey(publishableKey);
+            setChargeClientSecret(clientSecret);
+            setChargeBooking(b);
+            return;
+          }
+
+          if (alreadyPaid.includes(existing.status)) {
+            // Payment already received or in-flight — do not create a new PI
+            toast({
+              title: "Payment already processed",
+              description: `Stripe shows this payment as "${existing.status}". Use the "Check Payment" action to sync the booking status.`,
+              variant: "destructive",
+            });
+            return;
+          }
+
+          // PI is canceled — fall through to create a replacement
+        } else if (existingRes.status !== 404) {
+          // Transient error (5xx, network issue) — do NOT create a new PI to avoid duplicates
+          const errData = await existingRes.json().catch(() => ({})) as { error?: string };
+          throw new Error(errData.error ?? "Could not retrieve payment status. Please try again.");
+        }
+        // 404 means PI is gone from Stripe (canceled/deleted) — fall through to create new
+      }
+
+      // Create a fresh PI (only when no existing PI, or existing one is canceled/expired)
+      const intentRes = await fetch(`${API_BASE}/payments/create-intent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: authHdr },
+        body: JSON.stringify({ bookingId: b.id, amount: b.priceQuoted }),
+      });
+      if (!intentRes.ok) {
+        const err = await intentRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Could not create payment intent.");
+      }
+      const { clientSecret: newClientSecret } = await intentRes.json() as { clientSecret: string };
+      clientSecret = newClientSecret;
+
       setChargePublishableKey(publishableKey);
       setChargeClientSecret(clientSecret);
       setChargeBooking(b);
@@ -796,7 +896,23 @@ export default function AdminBookings() {
                             <div className="space-y-2 text-sm">
                               <div>
                                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Amount Charged</p>
-                                <p className="text-primary font-medium text-base">${b.priceQuoted?.toFixed(2)}</p>
+                                <div className="flex items-baseline gap-2 flex-wrap">
+                                  <p className="text-primary font-medium text-base">${b.priceQuoted?.toFixed(2)}</p>
+                                  {b.tipAmount != null && b.tipAmount > 0 && (
+                                    <span className="text-amber-400 text-sm">+ ${b.tipAmount.toFixed(2)} gratuity</span>
+                                  )}
+                                </div>
+                                {(() => {
+                                  const r = bookingRatings[b.id];
+                                  return r != null ? (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      {Array.from({ length: 5 }).map((_, i) => (
+                                        <Star key={i} className={`w-3.5 h-3.5 ${i < r ? "text-amber-400 fill-amber-400" : "text-gray-600"}`} />
+                                      ))}
+                                      <span className="text-xs text-muted-foreground ml-1">Passenger rating</span>
+                                    </div>
+                                  ) : null;
+                                })()}
                               </div>
                               {b.discountAmount != null && b.discountAmount > 0 && (
                                 <div>

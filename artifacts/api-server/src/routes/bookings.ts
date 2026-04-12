@@ -470,8 +470,14 @@ router.get("/bookings/:id/track", async (req, res): Promise<void> => {
     pickupAt: booking.pickupAt.toISOString(),
     driverId: booking.driverId,
     vehicleClass: booking.vehicleClass,
+    passengers: booking.passengers,
+    luggageCount: booking.luggageCount,
+    flightNumber: booking.flightNumber ?? null,
+    specialRequests: booking.specialRequests ?? null,
     priceQuoted: booking.priceQuoted ? parseFloat(booking.priceQuoted) : null,
     discountAmount: booking.discountAmount ? parseFloat(booking.discountAmount) : null,
+    promoCode: booking.promoCode ?? null,
+    paymentType: booking.paymentType ?? null,
   });
 });
 
@@ -517,6 +523,21 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
         return;
       }
     }
+  }
+
+  // For passengers/corporate: include existing rating if any
+  if (caller.role === "passenger" || caller.role === "corporate" || caller.role === "admin") {
+    const [existingReview] = await db
+      .select({ rating: reviewsTable.rating, comment: reviewsTable.comment })
+      .from(reviewsTable)
+      .where(eq(reviewsTable.bookingId, params.data.id));
+    const base = parseBooking(booking);
+    return res.json({
+      ...base,
+      hasRating: existingReview != null,
+      existingRating: existingReview?.rating ?? null,
+      existingComment: existingReview?.comment ?? null,
+    });
   }
 
   res.json(parseBooking(booking));
@@ -627,6 +648,13 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
     })();
     // Send trip completion email when admin manually marks a booking completed
     if (parsed.data.status === "completed") {
+      // Increment driver's totalRides counter
+      if (booking.driverId) {
+        db.update(driversTable)
+          .set({ totalRides: sql`total_rides + 1` })
+          .where(eq(driversTable.id, booking.driverId))
+          .catch(err => console.error("[bookings] totalRides increment error:", err));
+      }
       (async () => {
         try {
           await sendTripCompletionEmail({
@@ -1182,6 +1210,20 @@ router.post("/bookings/:id/rate", requireAuth, async (req, res): Promise<void> =
     .insert(reviewsTable)
     .values({ bookingId: id, driverId: booking.driverId, userId: caller.userId, rating, comment: comment ?? null })
     .returning();
+
+  // Recalculate driver avg rating (fire-and-forget)
+  db.select({ avg: sql<number>`coalesce(avg(rating::numeric), 0)::float` })
+    .from(reviewsTable)
+    .where(eq(reviewsTable.driverId, booking.driverId))
+    .then(([row]) => {
+      if (row != null) {
+        const newRating = String(Math.round((row.avg ?? 0) * 10) / 10);
+        return db.update(driversTable)
+          .set({ rating: newRating })
+          .where(eq(driversTable.id, booking.driverId!));
+      }
+    })
+    .catch(err => console.error("[bookings/rate] failed to update driver rating:", err));
 
   res.json({ success: true, reviewId: review.id });
 

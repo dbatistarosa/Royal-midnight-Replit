@@ -1,5 +1,62 @@
 import { Link } from "wouter";
 import { Plane, Clock, Briefcase, GlassWater, ArrowRight } from "lucide-react";
+import { PageSeo } from "@/components/PageSeo";
+import { Helmet } from "react-helmet-async";
+
+const FAQ_JSON_LD = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "How do I book a Royal Midnight ride?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "You can book online at royalmidnight.com/book in minutes. Simply enter your pickup and dropoff locations, select your date and time, choose a vehicle, and confirm your reservation. You'll receive an email confirmation with full details."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What airports does Royal Midnight serve?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Royal Midnight provides luxury airport transfer service to and from Fort Lauderdale-Hollywood International (FLL), Miami International (MIA), and Palm Beach International (PBI). We track all flights in real time."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the pricing flat-rate or metered?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "All Royal Midnight rides are flat-rate with no surge pricing, hidden fees, or meters. The price you are quoted when you book is exactly what you pay — guaranteed."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the cancellation policy?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Cancellations made more than 24 hours before pickup receive a full refund. Cancellations within 24 hours incur a 25% fee. No-shows are charged 50% of the fare. Please contact us as early as possible if your plans change."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What areas does Royal Midnight serve?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "We serve all of South Florida including Miami, Miami Beach, Fort Lauderdale, Boca Raton, West Palm Beach, and surrounding communities. We also offer long-distance transfers throughout Florida."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do you offer corporate accounts?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Royal Midnight provides dedicated corporate accounts with streamlined invoicing, account management, and priority service. Contact us at concierge@royalmidnight.com to set up a corporate account."
+      }
+    }
+  ]
+};
 
 const services = [
   {
@@ -35,6 +92,14 @@ const services = [
 export default function Services() {
   return (
     <div className="py-24">
+      <PageSeo
+        title="Our Services — Luxury Transportation"
+        description="Royal Midnight offers airport transfers, hourly chauffeur service, corporate accounts, and special event transportation across South Florida. Flat-rate luxury rides, no surge pricing."
+        path="/services"
+      />
+      <Helmet>
+        <script type="application/ld+json">{JSON.stringify(FAQ_JSON_LD)}</script>
+      </Helmet>
       <div className="container mx-auto max-w-6xl px-4">
         <div className="text-center mb-16">
           <h1 className="font-serif text-3xl sm:text-4xl md:text-6xl mb-6">Our Services</h1>
