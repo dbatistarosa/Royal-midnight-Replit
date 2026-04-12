@@ -35,6 +35,7 @@ type DriverPayout = {
   rides: number;
   grossEarnings: number;
   commissionPct: number;
+  tipsTotal: number;
   driverNet: number;
   bankName: string | null;
   routingNumber: string | null;
@@ -209,7 +210,7 @@ export default function AdminPayouts() {
           <div className="bg-card border border-border p-5">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Total Driver Payouts</p>
             <p className="font-serif text-2xl text-amber-400">${board.totalDriverNet.toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{Math.round(board.commissionPct * 100)}% commission</p>
+            <p className="text-xs text-muted-foreground mt-1">{Math.round(board.commissionPct * 100)}% commission + tips</p>
           </div>
           <div className="bg-card border border-border p-5">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Company Net</p>
@@ -254,7 +255,8 @@ export default function AdminPayouts() {
                   <th className="px-5 py-4 text-left text-xs text-muted-foreground uppercase tracking-widest font-medium">Driver</th>
                   <th className="px-5 py-4 text-center text-xs text-muted-foreground uppercase tracking-widest font-medium">Rides</th>
                   <th className="px-5 py-4 text-right text-xs text-muted-foreground uppercase tracking-widest font-medium">Gross</th>
-                  <th className="px-5 py-4 text-right text-xs text-muted-foreground uppercase tracking-widest font-medium">Net to Driver</th>
+                  <th className="px-5 py-4 text-right text-xs text-muted-foreground uppercase tracking-widest font-medium">Tips</th>
+                  <th className="px-5 py-4 text-right text-xs text-muted-foreground uppercase tracking-widest font-medium">Total to Driver</th>
                   <th className="px-5 py-4 text-left text-xs text-muted-foreground uppercase tracking-widest font-medium">Bank Details</th>
                   <th className="px-5 py-4 text-left text-xs text-muted-foreground uppercase tracking-widest font-medium">Status</th>
                   <th className="px-5 py-4" />
@@ -276,6 +278,11 @@ export default function AdminPayouts() {
                       <span className={driver.grossEarnings > 0 ? "text-white" : "text-muted-foreground"}>
                         ${driver.grossEarnings.toFixed(2)}
                       </span>
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      {driver.tipsTotal > 0
+                        ? <span className="text-primary font-medium">+${driver.tipsTotal.toFixed(2)}</span>
+                        : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-5 py-4 text-right">
                       <span className={`font-medium ${driver.driverNet > 0 ? "text-primary text-base" : "text-muted-foreground"}`}>

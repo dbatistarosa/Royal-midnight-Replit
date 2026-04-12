@@ -271,26 +271,30 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
     .select({
       driverId: bookingsTable.driverId,
       priceQuoted: bookingsTable.priceQuoted,
+      tipAmount: bookingsTable.tipAmount,
     })
     .from(bookingsTable)
     .where(
       sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`
     );
 
-  // Aggregate per driver
-  const earningsByDriver = new Map<number, { rides: number; gross: number }>();
+  // Aggregate per driver (gross fare + tips tracked separately)
+  const earningsByDriver = new Map<number, { rides: number; gross: number; tips: number }>();
   for (const b of bookings) {
     if (!b.driverId) continue;
-    const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0 };
+    const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0, tips: 0 };
     earningsByDriver.set(b.driverId, {
       rides: existing.rides + 1,
       gross: existing.gross + parseFloat(b.priceQuoted ?? "0"),
+      tips: existing.tips + parseFloat(b.tipAmount ?? "0"),
     });
   }
 
   const payouts = drivers.map(d => {
-    const earnings = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0 };
-    const driverNet = Math.round(earnings.gross * commissionPct * 100) / 100;
+    const earnings = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0, tips: 0 };
+    const commission = Math.round(earnings.gross * commissionPct * 100) / 100;
+    const tipsTotal = Math.round(earnings.tips * 100) / 100;
+    const driverNet = Math.round((commission + tipsTotal) * 100) / 100;
     return {
       driverId: d.id,
       driverName: d.name,
@@ -299,6 +303,7 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
       rides: earnings.rides,
       grossEarnings: Math.round(earnings.gross * 100) / 100,
       commissionPct,
+      tipsTotal,
       driverNet,
       bankName: d.payoutBankName ?? null,
       routingNumber: d.payoutRoutingNumber ?? null,
@@ -351,27 +356,33 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
     .orderBy(driversTable.name);
 
   const bookings = await db
-    .select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted })
+    .select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted, tipAmount: bookingsTable.tipAmount })
     .from(bookingsTable)
     .where(sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
 
-  const earningsByDriver = new Map<number, { rides: number; gross: number }>();
+  const earningsByDriver = new Map<number, { rides: number; gross: number; tips: number }>();
   for (const b of bookings) {
     if (!b.driverId) continue;
-    const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0 };
-    earningsByDriver.set(b.driverId, { rides: existing.rides + 1, gross: existing.gross + parseFloat(b.priceQuoted ?? "0") });
+    const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0, tips: 0 };
+    earningsByDriver.set(b.driverId, {
+      rides: existing.rides + 1,
+      gross: existing.gross + parseFloat(b.priceQuoted ?? "0"),
+      tips: existing.tips + parseFloat(b.tipAmount ?? "0"),
+    });
   }
 
   const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("../lib/mailer.js");
   const weekLabel = weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " – " + new Date(weekEnd.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   const payouts = drivers.map(d => {
-    const earnings = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0 };
-    const driverNet = Math.round(earnings.gross * commissionPct * 100) / 100;
+    const earnings = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0, tips: 0 };
+    const commission = Math.round(earnings.gross * commissionPct * 100) / 100;
+    const tipsTotal = Math.round(earnings.tips * 100) / 100;
+    const driverNet = Math.round((commission + tipsTotal) * 100) / 100;
     return {
       driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
       rides: earnings.rides, grossEarnings: Math.round(earnings.gross * 100) / 100,
-      commissionPct, driverNet,
+      commissionPct, tipsTotal, driverNet,
       bankName: d.payoutBankName ?? null, routingNumber: d.payoutRoutingNumber ?? null,
       accountNumber: d.payoutAccountNumber ?? null, legalName: d.payoutLegalName ?? null,
     };

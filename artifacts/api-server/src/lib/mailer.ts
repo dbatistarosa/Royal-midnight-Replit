@@ -527,6 +527,7 @@ export async function sendWeeklyDriverPayout(params: {
   rides: number;
   grossEarnings: number;
   commissionPct: number;
+  tipsTotal: number;
   driverNet: number;
   bankName: string | null;
   routingNumber: string | null;
@@ -535,12 +536,13 @@ export async function sendWeeklyDriverPayout(params: {
 }) {
   const {
     driverName, driverEmail, weekLabel, rides,
-    grossEarnings, commissionPct, driverNet,
+    grossEarnings, commissionPct, tipsTotal, driverNet,
     bankName, routingNumber, accountNumber,
   } = params;
 
   const commPctDisplay = `${Math.round(commissionPct * 100)}%`;
   const maskAccount = accountNumber ? `****${accountNumber.slice(-4)}` : "Not on file";
+  const commission = Math.round((grossEarnings * commissionPct) * 100) / 100;
 
   const html = baseHtml(`
 <h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Weekly Earnings Statement</h2>
@@ -551,7 +553,9 @@ export async function sendWeeklyDriverPayout(params: {
   ${row("Total Rides", String(rides))}
   ${row("Gross Revenue", `$${grossEarnings.toFixed(2)}`)}
   ${row("Your Commission Rate", commPctDisplay)}
-  ${row("Your Net Earnings", `<strong style='color:#c9a84c;font-size:18px'>$${driverNet.toFixed(2)}</strong>`)}
+  ${row("Commission Earnings", `$${commission.toFixed(2)}`)}
+  ${tipsTotal > 0 ? row("Tips Earned", `<span style='color:#c9a84c'>+$${tipsTotal.toFixed(2)}</span>`) : ""}
+  ${row("Total Payout", `<strong style='color:#c9a84c;font-size:18px'>$${driverNet.toFixed(2)}</strong>`)}
 </table>
 ${bankName ? `
 <p style="color:#9ca3af;font-size:13px;margin:20px 0 8px;">Payout will be sent to:</p>
@@ -579,6 +583,7 @@ export async function sendWeeklyPayoutAdminReport(params: {
     driverEmail: string;
     rides: number;
     grossEarnings: number;
+    tipsTotal: number;
     driverNet: number;
     bankName: string | null;
     routingNumber: string | null;
@@ -589,6 +594,7 @@ export async function sendWeeklyPayoutAdminReport(params: {
   const { weekLabel, commissionPct, totalGross, totalDriverNet, payouts } = params;
   const commPctDisplay = `${Math.round(commissionPct * 100)}%`;
   const companyNet = Math.round((totalGross - totalDriverNet) * 100) / 100;
+  const totalTips = Math.round(payouts.reduce((s, p) => s + (p.tipsTotal ?? 0), 0) * 100) / 100;
 
   const driverRows = payouts.map(p => `
 <tr style="border-bottom:1px solid #27272a;">
@@ -596,6 +602,7 @@ export async function sendWeeklyPayoutAdminReport(params: {
   <td style="padding:10px 8px;color:#9ca3af;font-size:13px;">${p.driverEmail}</td>
   <td style="padding:10px 8px;text-align:center;color:#e8e0d0;">${p.rides}</td>
   <td style="padding:10px 8px;text-align:right;color:#e8e0d0;">$${p.grossEarnings.toFixed(2)}</td>
+  <td style="padding:10px 8px;text-align:right;color:#9ca3af;">${p.tipsTotal > 0 ? `<span style="color:#c9a84c">+$${p.tipsTotal.toFixed(2)}</span>` : "—"}</td>
   <td style="padding:10px 8px;text-align:right;color:#c9a84c;font-weight:600;">$${p.driverNet.toFixed(2)}</td>
   <td style="padding:10px 8px;color:#9ca3af;font-size:12px;">${p.bankName ?? '<span style="color:#ef4444">Missing</span>'}</td>
   <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.routingNumber ?? '—'}</td>
@@ -608,7 +615,8 @@ export async function sendWeeklyPayoutAdminReport(params: {
 <table style="width:100%;border-collapse:collapse;margin:0 0 24px;">
   ${row("Week", weekLabel)}
   ${row("Total Gross Revenue", `$${totalGross.toFixed(2)}`)}
-  ${row("Total Driver Payouts (${commPctDisplay})", `$${totalDriverNet.toFixed(2)}`)}
+  ${totalTips > 0 ? row("Total Tips", `<span style="color:#c9a84c">+$${totalTips.toFixed(2)}</span>`) : ""}
+  ${row(`Total Driver Payouts (${commPctDisplay} + tips)`, `$${totalDriverNet.toFixed(2)}`)}
   ${row("Company Net", `<strong style='color:#22c55e'>$${companyNet.toFixed(2)}</strong>`)}
 </table>
 <h3 style="color:#c9a84c;margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:0.1em;">Driver Breakdown</h3>
@@ -620,7 +628,8 @@ export async function sendWeeklyPayoutAdminReport(params: {
       <th style="padding:8px;text-align:left;color:#9ca3af;text-transform:uppercase;font-size:11px;">Email</th>
       <th style="padding:8px;text-align:center;color:#9ca3af;text-transform:uppercase;font-size:11px;">Rides</th>
       <th style="padding:8px;text-align:right;color:#9ca3af;text-transform:uppercase;font-size:11px;">Gross</th>
-      <th style="padding:8px;text-align:right;color:#9ca3af;text-transform:uppercase;font-size:11px;">Net to Driver</th>
+      <th style="padding:8px;text-align:right;color:#9ca3af;text-transform:uppercase;font-size:11px;">Tips</th>
+      <th style="padding:8px;text-align:right;color:#9ca3af;text-transform:uppercase;font-size:11px;">Total to Driver</th>
       <th style="padding:8px;text-align:left;color:#9ca3af;text-transform:uppercase;font-size:11px;">Bank</th>
       <th style="padding:8px;text-align:left;color:#9ca3af;text-transform:uppercase;font-size:11px;">Routing</th>
       <th style="padding:8px;text-align:left;color:#9ca3af;text-transform:uppercase;font-size:11px;">Account</th>
