@@ -477,24 +477,28 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
 
   const commissionPct = await fetchCommissionPct();
 
+  // Track fare and tips separately — commission applies only to fares, tips pass through 100%
   const [stats] = await db
     .select({
-      totalEarnings: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed'), 0)::float`,
-      thisMonth: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
-      thisWeek: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
-      today: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
+      fareTotal: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
+      fareThisMonth: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
+      fareThisWeek: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
+      fareToday: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
       totalRides: sql<number>`count(*) filter (where status = 'completed')::int`,
       tipsTotal: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null), 0)::float`,
+      tipsThisMonth: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
       tipsThisWeek: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and created_at >= date_trunc('week', now())), 0)::float`,
       tipsToday: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and created_at::date = current_date), 0)::float`,
     })
     .from(bookingsTable)
     .where(eq(bookingsTable.driverId, driverId));
 
+  // Daily chart: commission on fare + 100% of tip
   const dailyRaw = await db
     .select({
       date: sql<string>`date(created_at)::text`,
-      amount: sql<number>`coalesce(sum((price_quoted + coalesce(tip_amount, 0))::numeric), 0)::float`,
+      fare: sql<number>`coalesce(sum(price_quoted::numeric), 0)::float`,
+      tip: sql<number>`coalesce(sum(coalesce(tip_amount, 0)::numeric), 0)::float`,
       rides: sql<number>`count(*)::int`,
     })
     .from(bookingsTable)
@@ -503,21 +507,37 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
     .orderBy(sql`date(created_at)`);
 
   const totalRides = stats?.totalRides ?? 0;
-  const totalEarnings = (stats?.totalEarnings ?? 0) * commissionPct;
+  const commissionAllTime = Math.round((stats?.fareTotal ?? 0) * commissionPct * 100) / 100;
+  const commissionThisWeek = Math.round((stats?.fareThisWeek ?? 0) * commissionPct * 100) / 100;
+  const tipsTotal = Math.round((stats?.tipsTotal ?? 0) * 100) / 100;
+  const tipsThisWeek = Math.round((stats?.tipsThisWeek ?? 0) * 100) / 100;
+  const tipsToday = Math.round((stats?.tipsToday ?? 0) * 100) / 100;
 
-  const recentPayouts = dailyRaw.map(d => ({ ...d, amount: d.amount * commissionPct }));
+  // Total driver payout = commission (% of fare) + tips (100%)
+  const totalEarnings = Math.round((commissionAllTime + tipsTotal) * 100) / 100;
+  const thisWeek = Math.round((commissionThisWeek + tipsThisWeek) * 100) / 100;
+  const thisMonth = Math.round(((stats?.fareThisMonth ?? 0) * commissionPct + (stats?.tipsThisMonth ?? 0)) * 100) / 100;
+  const today = Math.round(((stats?.fareToday ?? 0) * commissionPct + tipsToday) * 100) / 100;
+
+  const recentPayouts = dailyRaw.map(d => ({
+    date: d.date,
+    rides: d.rides,
+    amount: Math.round((d.fare * commissionPct + d.tip) * 100) / 100,
+  }));
 
   res.json(
     GetDriverEarningsResponse.parse({
-      totalEarnings: Math.round(totalEarnings * 100) / 100,
-      thisMonth: Math.round((stats?.thisMonth ?? 0) * commissionPct * 100) / 100,
-      thisWeek: Math.round((stats?.thisWeek ?? 0) * commissionPct * 100) / 100,
-      today: Math.round((stats?.today ?? 0) * commissionPct * 100) / 100,
+      totalEarnings,
+      thisMonth,
+      thisWeek,
+      today,
       totalRides,
       avgPerRide: totalRides > 0 ? Math.round((totalEarnings / totalRides) * 100) / 100 : 0,
-      tipsTotal: Math.round((stats?.tipsTotal ?? 0) * 100) / 100,
-      tipsThisWeek: Math.round((stats?.tipsThisWeek ?? 0) * 100) / 100,
-      tipsToday: Math.round((stats?.tipsToday ?? 0) * 100) / 100,
+      commissionAllTime,
+      commissionThisWeek,
+      tipsTotal,
+      tipsThisWeek,
+      tipsToday,
       recentPayouts,
     })
   );

@@ -21,6 +21,8 @@ type EarningsData = {
   totalEarnings: number;
   totalRides: number;
   avgPerRide: number;
+  commissionAllTime?: number;
+  commissionThisWeek?: number;
   tipsTotal?: number;
   tipsThisWeek?: number;
   tipsToday?: number;
@@ -91,6 +93,19 @@ export default function DriverEarnings() {
               </div>
             </div>
           )}
+
+          <div className="grid grid-cols-2 gap-3 sm:gap-6">
+            <div className="bg-card border border-border rounded-none p-6">
+              <h3 className="text-muted-foreground text-xs uppercase tracking-widest font-medium mb-1">This Week Commission</h3>
+              <p className="text-[10px] text-muted-foreground/60 mb-3">Your fare share this week (excl. tips)</p>
+              <div className="text-3xl font-serif text-foreground">{fmt$(earnings?.commissionThisWeek ?? 0)}</div>
+            </div>
+            <div className="bg-card border border-border rounded-none p-6">
+              <h3 className="text-muted-foreground text-xs uppercase tracking-widest font-medium mb-1">All-Time Commission</h3>
+              <p className="text-[10px] text-muted-foreground/60 mb-3">Total fare share earned (excl. tips)</p>
+              <div className="text-3xl font-serif text-foreground">{fmt$(earnings?.commissionAllTime ?? 0)}</div>
+            </div>
+          </div>
 
           <div className="bg-card border border-border rounded-none p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 sm:mb-6 gap-1">
