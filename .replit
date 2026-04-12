@@ -33,3 +33,4 @@ channel = "stable-25_05"
 
 [userenv.shared]
 SMTP_FROM = "Support@royalmidnight.com"
+ADMIN_EMAIL = "Dbatistarosa89@gmail.com"
