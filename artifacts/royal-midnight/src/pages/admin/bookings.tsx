@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet, Star } from "lucide-react";
 import { format } from "date-fns";
@@ -176,6 +176,44 @@ export default function AdminBookings() {
   const [linkingLoading, setLinkingLoading] = useState<number | null>(null);
 
   const authHdr = token ? `Bearer ${token}` : "";
+
+  // Handle 3DS redirect return after admin "Charge Card" — Stripe appends
+  // payment_intent + redirect_status to the return URL (window.location.href).
+  // We detect this on mount, confirm the booking server-side, then clean the URL.
+  const handled3DS = useRef(false);
+  useEffect(() => {
+    if (handled3DS.current || !token) return;
+    const params = new URLSearchParams(window.location.search);
+    const pi = params.get("payment_intent");
+    const redirectStatus = params.get("redirect_status");
+    if (!pi || !["succeeded", "requires_capture"].includes(redirectStatus ?? "")) return;
+
+    handled3DS.current = true;
+    window.history.replaceState({}, "", window.location.pathname);
+
+    // Find which booking this PI belongs to via its metadata, then confirm it
+    fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`)
+      .then(r => r.ok ? r.json() as Promise<{ bookingId: number }> : Promise.reject("not found"))
+      .then(({ bookingId }) =>
+        fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: authHdr },
+          body: JSON.stringify({ paymentIntentId: pi }),
+        })
+      )
+      .then(r => {
+        if (r.ok) {
+          toast({ title: "Payment captured", description: "Booking has been confirmed and moved to pending." });
+          refetch();
+        } else {
+          toast({ title: "Sync needed", description: 'Payment may have succeeded — use "Sync Payment" to confirm.', variant: "destructive" });
+        }
+      })
+      .catch(() => {
+        toast({ title: "Sync needed", description: 'Payment may have succeeded — use "Sync Payment" to confirm.', variant: "destructive" });
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   type PassengerUser = { id: number; email: string; name: string; role: string };
   const [passengerUsers, setPassengerUsers] = useState<PassengerUser[]>([]);

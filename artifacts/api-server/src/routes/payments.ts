@@ -158,7 +158,18 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
       description,
       ...(customerId ? { customer: customerId } : {}),
     });
-    res.json({ clientSecret: paymentIntent.client_secret });
+
+    // Persist the PI ID on the booking immediately so that:
+    //  1. "Sync Payment" can locate it even before confirm is called
+    //  2. "Charge Card" reuses the same PI on retry instead of creating duplicates
+    if (bookingId) {
+      db.update(bookings)
+        .set({ stripePaymentIntentId: paymentIntent.id, updatedAt: new Date() })
+        .where(eq(bookings.id, bookingId))
+        .catch((err: any) => console.warn("[payments] could not pre-save PI ID:", err?.message));
+    }
+
+    res.json({ clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id });
   } catch (err: any) {
     // Surface the real Stripe error message so the frontend can show it to the user.
     res.status(500).json({ error: err.message ?? "Stripe error — please try again." });
@@ -184,6 +195,30 @@ router.get("/payments/find-booking", async (req, res): Promise<void> => {
     res.json({ bookingId: bId });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Retrieve the client_secret and status for an existing PaymentIntent — used by
+// admin "Charge Card" to reuse a PI created in a previous attempt instead of
+// creating a duplicate.
+router.get("/payments/intent/:piId/client-secret", requireAdmin, async (req, res): Promise<void> => {
+  const piId = req.params["piId"];
+  if (!piId) { res.status(400).json({ error: "piId is required" }); return; }
+  try {
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.retrieve(piId);
+    if (!intent.client_secret) {
+      res.status(404).json({ error: "No client secret available for this intent" });
+      return;
+    }
+    res.json({ clientSecret: intent.client_secret, status: intent.status });
+  } catch (err: any) {
+    const isNotFound = err?.statusCode === 404 || err?.code === "resource_missing";
+    if (isNotFound) {
+      res.status(404).json({ error: "PaymentIntent not found in Stripe" });
+    } else {
+      res.status(500).json({ error: err.message });
+    }
   }
 });
 

@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRoute, Link } from "wouter";
 import { API_BASE } from "@/lib/constants";
 import { format } from "date-fns";
-import { CheckCircle2, Loader2, Calendar, MapPin, User, Mail } from "lucide-react";
+import { CheckCircle2, Loader2, Calendar, MapPin, User, Mail, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type PublicBooking = {
@@ -30,16 +30,48 @@ export default function BookingConfirmation() {
   const [booking, setBooking] = useState<PublicBooking | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [paymentConfirming, setPaymentConfirming] = useState(false);
+  const confirmed3DS = useRef(false);
+
+  // Handle 3DS redirect return: Stripe sends payment_intent + redirect_status in the URL.
+  // Call /payments/confirm so the booking status is updated even when the webhook is slow.
+  useEffect(() => {
+    if (!id || confirmed3DS.current) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const pi = urlParams.get("payment_intent");
+    const redirectStatus = urlParams.get("redirect_status");
+
+    if (!pi || !["succeeded", "requires_capture"].includes(redirectStatus ?? "")) return;
+
+    confirmed3DS.current = true;
+    // Remove params from URL so a page refresh doesn't reprocess
+    window.history.replaceState({}, "", window.location.pathname);
+
+    setPaymentConfirming(true);
+    fetch(`${API_BASE}/payments/confirm/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paymentIntentId: pi }),
+    })
+      .catch(() => {})
+      .finally(() => setPaymentConfirming(false));
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
-    fetchBooking(id)
-      .then(data => { setBooking(data); setError(false); })
-      .catch(() => setError(true))
-      .finally(() => setIsLoading(false));
-  }, [id]);
+    // Small delay when coming back from 3DS so the confirm call above has time to settle
+    const delay = confirmed3DS.current ? 800 : 0;
+    const t = setTimeout(() => {
+      setIsLoading(true);
+      fetchBooking(id)
+        .then(data => { setBooking(data); setError(false); })
+        .catch(() => setError(true))
+        .finally(() => setIsLoading(false));
+    }, delay);
+    return () => clearTimeout(t);
+  }, [id, paymentConfirming]);
 
-  if (isLoading) {
+  if (isLoading || paymentConfirming) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
@@ -65,6 +97,7 @@ export default function BookingConfirmation() {
   }
 
   const isCancelled = booking.status === "cancelled";
+  const isPaid = ["pending", "confirmed", "on_way", "on_location", "in_progress", "completed", "authorized"].includes(booking.status);
 
   return (
     <div className="min-h-screen bg-[#050505] pt-32 pb-24">
@@ -98,18 +131,30 @@ export default function BookingConfirmation() {
               <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Reservation Confirmed</h1>
               <p className="text-gray-400 text-base mb-6">Thank you for choosing Royal Midnight. Your vehicle has been reserved.</p>
 
-              {/* Invoice notice */}
-              <div className="bg-primary/5 border border-primary/20 p-5 flex gap-4 items-start text-left mb-8 max-w-lg mx-auto">
-                <Mail className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm text-white font-medium mb-1">Invoice Coming Your Way</p>
-                  <p className="text-xs text-gray-400 leading-relaxed">
-                    Our team will review your booking and send a payment invoice to{" "}
-                    <span className="text-white">{booking.passengerEmail || "your email"}</span>.
-                    No payment is required at this time.
-                  </p>
+              {isPaid ? (
+                <div className="bg-green-500/5 border border-green-500/20 p-5 flex gap-4 items-start text-left mb-8 max-w-lg mx-auto">
+                  <CreditCard className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-white font-medium mb-1">Payment Received</p>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      Your payment has been processed. A confirmation has been sent to{" "}
+                      <span className="text-white">{booking.passengerEmail || "your email"}</span>.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="bg-primary/5 border border-primary/20 p-5 flex gap-4 items-start text-left mb-8 max-w-lg mx-auto">
+                  <Mail className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-white font-medium mb-1">Invoice Coming Your Way</p>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      Our team will review your booking and send a payment invoice to{" "}
+                      <span className="text-white">{booking.passengerEmail || "your email"}</span>.
+                      No payment is required at this time.
+                    </p>
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -153,11 +198,11 @@ export default function BookingConfirmation() {
                   </div>
                   {booking.priceQuoted != null && (
                     <div className="flex gap-3 sm:col-span-2 pt-2 border-t border-white/5">
-                      <Mail className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                      <CreditCard className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
                       <div>
-                        <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Estimated Total</p>
+                        <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Total</p>
                         <p className="text-white font-medium">${booking.priceQuoted.toFixed(2)}</p>
-                        <p className="text-xs text-gray-600 mt-0.5">Invoice will be sent via email</p>
+                        {!isPaid && <p className="text-xs text-gray-600 mt-0.5">Invoice will be sent via email</p>}
                       </div>
                     </div>
                   )}
