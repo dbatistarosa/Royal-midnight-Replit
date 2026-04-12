@@ -7,6 +7,7 @@ import { z } from "zod";
 import { requireAdmin } from "../middleware/auth.js";
 import { hashPassword, verifyPassword } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
+import { sendOtpSms } from "../lib/sms.js";
 
 const router: IRouter = Router();
 
@@ -123,7 +124,8 @@ router.post("/auth/send-otp", async (req, res): Promise<void> => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   otpStore.set(phone, { otp, expiresAt: Date.now() + 10 * 60 * 1000 });
 
-  req.log.info({ phone }, "OTP generated (SMS integration required for production)");
+  req.log.info({ phone }, "OTP generated — sending via SMS");
+  sendOtpSms(phone, otp).catch(err => req.log.error({ err }, "OTP SMS failed (non-fatal)"));
   res.json({ message: "OTP sent successfully" });
 });
 

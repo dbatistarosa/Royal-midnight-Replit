@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle, Navigation, Star } from "lucide-react";
+import { generateInvoicePdf } from "@/lib/generateInvoicePdf";
 import { Link, useParams, useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/contexts/auth";
@@ -259,6 +260,34 @@ function PassengerRideDetailInner() {
   const [cancelPreview, setCancelPreview] = useState<CancelPreview | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelConfirming, setCancelConfirming] = useState(false);
+
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  const handleDownloadReceipt = async () => {
+    if (!booking) return;
+    setPdfGenerating(true);
+    try {
+      await generateInvoicePdf({
+        bookingId: booking.id,
+        passengerName: booking.passengerName,
+        passengerEmail: booking.passengerEmail,
+        pickupAddress: booking.pickupAddress,
+        dropoffAddress: booking.dropoffAddress,
+        pickupAt: booking.pickupAt,
+        vehicleClass: booking.vehicleClass,
+        passengers: booking.passengers,
+        flightNumber: booking.flightNumber,
+        priceQuoted: booking.priceQuoted!,
+        discountAmount: booking.discountAmount,
+        tipAmount: booking.tipAmount,
+        status: booking.status,
+      });
+    } catch {
+      toast({ title: "Error", description: "Could not generate receipt PDF.", variant: "destructive" });
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
 
   // Tip state
   const [tipAmount, setTipAmount] = useState("");
@@ -638,9 +667,22 @@ function PassengerRideDetailInner() {
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background p-3">
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Billed via {booking.status === "awaiting_payment" ? "pending payment" : "card on file"}</span>
+                <div className="flex items-center justify-between gap-2 bg-background p-3">
+                  <span className="text-xs text-muted-foreground">
+                    Billed via {booking.status === "awaiting_payment" ? "pending payment" : "card on file"}
+                  </span>
+                  {booking.status === "completed" && (
+                    <button
+                      onClick={() => void handleDownloadReceipt()}
+                      disabled={pdfGenerating}
+                      className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                    >
+                      {pdfGenerating
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <Download className="w-3.5 h-3.5" />}
+                      {pdfGenerating ? "Generating..." : "Download Receipt"}
+                    </button>
+                  )}
                 </div>
               </div>
             )}

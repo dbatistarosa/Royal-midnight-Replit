@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock, BarChart2 } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock, BarChart2, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag } from "lucide-react";
 import { format } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useDriverStatus } from "@/contexts/driverStatus";
@@ -28,6 +28,15 @@ const STATUS_CONFIG: Record<DriverAvailability, { label: string; color: string; 
   unavailable: { label: "Unavailable",  color: "text-gray-400",   dot: "bg-gray-400",   bg: "bg-gray-400/10",   border: "border-gray-400/20"  },
 };
 
+type PassengerPreferences = {
+  cabinTempF?: number | null;
+  musicPreference?: string | null;
+  quietRide?: boolean;
+  preferredBeverage?: string | null;
+  opensOwnDoor?: boolean;
+  addressTitle?: string | null;
+};
+
 type BookingRow = {
   id: number;
   passengerName: string;
@@ -44,6 +53,7 @@ type BookingRow = {
   status: string;
   pickupAt: string;
   driverEarnings?: number;
+  passengerPreferences?: PassengerPreferences | null;
 };
 
 type EarningsData = {
@@ -331,6 +341,72 @@ function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; sh
           </div>
         </div>
       )}
+      {booking.passengerPreferences && (() => {
+        const p = booking.passengerPreferences;
+        const hasPrefs = p.cabinTempF != null || p.musicPreference || p.quietRide || p.preferredBeverage || p.opensOwnDoor || p.addressTitle;
+        if (!hasPrefs) return null;
+        return (
+          <div className="mt-3 pt-3 border-t border-primary/20">
+            <p className="text-[10px] uppercase tracking-widest text-primary mb-2">Passenger Preferences</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+              {p.addressTitle && (
+                <div className="flex items-start gap-2">
+                  <Tag className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Address As</p>
+                    <p className="text-xs text-gray-300">{p.addressTitle}</p>
+                  </div>
+                </div>
+              )}
+              {p.cabinTempF != null && (
+                <div className="flex items-start gap-2">
+                  <Thermometer className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Cabin Temp</p>
+                    <p className="text-xs text-gray-300">{p.cabinTempF}°F</p>
+                  </div>
+                </div>
+              )}
+              {p.musicPreference && (
+                <div className="flex items-start gap-2">
+                  <Music className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Music</p>
+                    <p className="text-xs text-gray-300">{p.musicPreference}</p>
+                  </div>
+                </div>
+              )}
+              {p.quietRide && (
+                <div className="flex items-start gap-2">
+                  <Volume2 className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Quiet Ride</p>
+                    <p className="text-xs text-gray-300">Prefers minimal conversation</p>
+                  </div>
+                </div>
+              )}
+              {p.preferredBeverage && (
+                <div className="flex items-start gap-2">
+                  <Coffee className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Beverage</p>
+                    <p className="text-xs text-gray-300">{p.preferredBeverage}</p>
+                  </div>
+                </div>
+              )}
+              {p.opensOwnDoor && (
+                <div className="flex items-start gap-2">
+                  <DoorOpen className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Door Service</p>
+                    <p className="text-xs text-gray-300">Opens own door</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
