@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRoute, Link } from "wouter";
 import { API_BASE } from "@/lib/constants";
 import { format } from "date-fns";
-import { CheckCircle2, Loader2, Calendar, MapPin, User, Mail, CreditCard } from "lucide-react";
+import { CheckCircle2, Loader2, Calendar, MapPin, User, Mail, CreditCard, Car, Users, Plane, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type PublicBooking = {
@@ -13,8 +13,15 @@ type PublicBooking = {
   pickupAddress: string;
   dropoffAddress: string;
   pickupAt: string;
-  priceQuoted?: number | null;
   vehicleClass?: string | null;
+  passengers?: number | null;
+  luggageCount?: number | null;
+  flightNumber?: string | null;
+  specialRequests?: string | null;
+  priceQuoted?: number | null;
+  discountAmount?: number | null;
+  promoCode?: string | null;
+  paymentType?: string | null;
 };
 
 async function fetchBooking(id: number): Promise<PublicBooking> {
@@ -165,49 +172,119 @@ export default function BookingConfirmation() {
                 <span className="text-2xl font-mono text-primary tracking-widest">RM-{booking.id.toString().padStart(6, "0")}</span>
               </div>
 
-              <div className="text-left bg-white/5 p-6 sm:p-8 border border-white/5 mb-8 space-y-5">
-                <h3 className="text-lg font-serif text-white border-b border-white/10 pb-3 mb-2">Itinerary Details</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-sm">
+              {/* Itinerary */}
+              <div className="text-left bg-white/5 border border-white/8 p-6 sm:p-8 mb-4 space-y-5">
+                <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-4">Itinerary</p>
+                <div className="space-y-4 text-sm">
                   <div className="flex gap-3">
                     <Calendar className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
                     <div>
                       <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Date &amp; Time</p>
-                      <p className="text-white">{format(new Date(booking.pickupAt), "PPP 'at' p")}</p>
+                      <p className="text-white">{format(new Date(booking.pickupAt), "EEEE, MMMM d, yyyy 'at' h:mm a")}</p>
                     </div>
                   </div>
                   <div className="flex gap-3">
-                    <User className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Passenger</p>
-                      <p className="text-white">{booking.passengerName}</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3 sm:col-span-2">
                     <MapPin className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
                     <div>
                       <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Pick-up</p>
                       <p className="text-white">{booking.pickupAddress}</p>
                     </div>
                   </div>
-                  <div className="flex gap-3 sm:col-span-2">
-                    <MapPin className="w-4 h-4 text-primary/50 mt-0.5 flex-shrink-0" />
+                  <div className="flex gap-3">
+                    <MapPin className="w-4 h-4 text-primary/40 mt-0.5 flex-shrink-0" />
                     <div>
                       <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Drop-off</p>
                       <p className="text-white">{booking.dropoffAddress}</p>
                     </div>
                   </div>
-                  {booking.priceQuoted != null && (
-                    <div className="flex gap-3 sm:col-span-2 pt-2 border-t border-white/5">
-                      <CreditCard className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                  {booking.flightNumber && (
+                    <div className="flex gap-3">
+                      <Plane className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
                       <div>
-                        <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Total</p>
-                        <p className="text-white font-medium">${booking.priceQuoted.toFixed(2)}</p>
-                        {!isPaid && <p className="text-xs text-gray-600 mt-0.5">Invoice will be sent via email</p>}
+                        <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Flight</p>
+                        <p className="text-white">{booking.flightNumber}</p>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* Vehicle & Passengers */}
+              <div className="text-left bg-white/5 border border-white/8 p-6 sm:p-8 mb-4">
+                <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-4">Vehicle &amp; Passengers</p>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  {booking.vehicleClass && (
+                    <div className="flex gap-3">
+                      <Car className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Vehicle</p>
+                        <p className="text-white capitalize">
+                          {booking.vehicleClass === "business" ? "Business Class Sedan" : booking.vehicleClass === "suv" ? "Premium SUV" : booking.vehicleClass}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {booking.passengers != null && (
+                    <div className="flex gap-3">
+                      <Users className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Passengers</p>
+                        <p className="text-white">{booking.passengers}</p>
+                      </div>
+                    </div>
+                  )}
+                  {booking.passengerName && (
+                    <div className="flex gap-3 col-span-2">
+                      <User className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Passenger</p>
+                        <p className="text-white">{booking.passengerName}</p>
+                      </div>
+                    </div>
+                  )}
+                  {booking.specialRequests && (
+                    <div className="flex gap-3 col-span-2">
+                      <MessageSquare className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Special Requests</p>
+                        <p className="text-white">{booking.specialRequests}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Payment Summary */}
+              {booking.priceQuoted != null && (
+                <div className="text-left bg-white/5 border border-primary/20 p-6 sm:p-8 mb-8">
+                  <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-4">Payment Summary</p>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between text-gray-400">
+                      <span>Subtotal</span>
+                      <span>${(booking.priceQuoted + (booking.discountAmount ?? 0)).toFixed(2)}</span>
+                    </div>
+                    {booking.discountAmount != null && booking.discountAmount > 0 && (
+                      <div className="flex justify-between text-green-400">
+                        <span>Promo {booking.promoCode ? `(${booking.promoCode})` : "Discount"}</span>
+                        <span>−${booking.discountAmount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between pt-2 border-t border-white/10">
+                      <span className="text-white font-semibold">Total {isPaid ? "Charged" : "Due"}</span>
+                      <span className="text-primary font-bold text-lg">${booking.priceQuoted.toFixed(2)}</span>
+                    </div>
+                    {isPaid && (
+                      <div className="flex items-center gap-2 mt-2 text-green-400 text-xs">
+                        <CreditCard className="w-3 h-3" />
+                        <span>Payment received — receipt sent to {booking.passengerEmail || "your email"}</span>
+                      </div>
+                    )}
+                    {!isPaid && (
+                      <p className="text-xs text-gray-600 mt-1">Invoice will be sent to {booking.passengerEmail || "your email"}</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-col sm:flex-row justify-center gap-4">
                 <Link href="/passenger/rides">

@@ -470,8 +470,14 @@ router.get("/bookings/:id/track", async (req, res): Promise<void> => {
     pickupAt: booking.pickupAt.toISOString(),
     driverId: booking.driverId,
     vehicleClass: booking.vehicleClass,
+    passengers: booking.passengers,
+    luggageCount: booking.luggageCount,
+    flightNumber: booking.flightNumber ?? null,
+    specialRequests: booking.specialRequests ?? null,
     priceQuoted: booking.priceQuoted ? parseFloat(booking.priceQuoted) : null,
     discountAmount: booking.discountAmount ? parseFloat(booking.discountAmount) : null,
+    promoCode: booking.promoCode ?? null,
+    paymentType: booking.paymentType ?? null,
   });
 });
 

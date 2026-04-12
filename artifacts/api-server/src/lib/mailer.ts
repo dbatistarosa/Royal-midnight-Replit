@@ -113,63 +113,121 @@ export type BookingEmailData = {
 };
 
 export async function sendBookingConfirmationPassenger(b: BookingEmailData) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const refNum = `RM-${String(b.id).padStart(4, "0")}`;
+  const vehicleLabel = b.vehicleClass === "business" ? "Business Class Sedan" : b.vehicleClass === "suv" ? "Premium SUV" : b.vehicleClass;
+  const dateStr = new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" });
+
   const html = wrap(`
-<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Booking Confirmed</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Thank you for choosing Royal Midnight. Your reservation is confirmed and our team will be in touch shortly.</p>
-<table style="width:100%;border-collapse:collapse">
-  ${row("Booking #", String(b.id))}
-  ${row("Pickup", b.pickupAddress)}
-  ${row("Dropoff", b.dropoffAddress)}
-  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
-  ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
-  ${row("Passengers", String(b.passengers))}
-  ${row("Total Fare", `<span style="color:#c9a84c;font-weight:bold">$${b.priceQuoted.toFixed(2)}</span>`)}
-  ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
-  ${b.specialRequests ? row("Special Requests", b.specialRequests) : ""}
-</table>
-<p style="margin-top:24px;color:#888;font-size:12px">
-  Questions? Reply to this email or contact our support team.<br>
-  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+<div style="text-align:center;margin-bottom:28px">
+  <div style="display:inline-block;background:#c9a84c14;border:1px solid #c9a84c40;padding:16px 32px">
+    <p style="color:#888;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin:0 0 6px">Payment Receipt</p>
+    <p style="color:#c9a84c;font-size:28px;font-weight:bold;letter-spacing:4px;margin:0;font-family:monospace">${refNum}</p>
+  </div>
+</div>
+
+<p style="color:#e8e0d0;font-size:14px;margin:0 0 4px">Dear ${b.passengerName.split(" ")[0]},</p>
+<p style="color:#888;font-size:13px;margin:0 0 24px;line-height:1.6">
+  Your payment has been received and your reservation is confirmed. Below is your booking receipt — please keep it for your records.
+</p>
+
+<div style="background:#0d0d0d;border:1px solid #222;padding:20px;margin-bottom:20px">
+  <p style="color:#c9a84c;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin:0 0 14px">Itinerary</p>
+  <table style="width:100%;border-collapse:collapse">
+    ${row("Date &amp; Time", dateStr)}
+    ${row("Pick-up", b.pickupAddress)}
+    ${row("Drop-off", b.dropoffAddress)}
+    ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
+  </table>
+</div>
+
+<div style="background:#0d0d0d;border:1px solid #222;padding:20px;margin-bottom:20px">
+  <p style="color:#c9a84c;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin:0 0 14px">Vehicle &amp; Passengers</p>
+  <table style="width:100%;border-collapse:collapse">
+    ${row("Vehicle", vehicleLabel)}
+    ${row("Passengers", String(b.passengers))}
+    ${b.specialRequests ? row("Special Requests", b.specialRequests) : ""}
+  </table>
+</div>
+
+<div style="background:#0d0d0d;border:1px solid #c9a84c40;padding:20px;margin-bottom:24px">
+  <p style="color:#c9a84c;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin:0 0 14px">Payment Summary</p>
+  <table style="width:100%;border-collapse:collapse">
+    <tr>
+      <td style="padding:6px 0;color:#888;font-size:13px">Subtotal</td>
+      <td style="padding:6px 0;font-size:13px;color:#e8e0d0;text-align:right">$${b.priceQuoted.toFixed(2)}</td>
+    </tr>
+    <tr style="border-top:1px solid #333">
+      <td style="padding:10px 0 4px;color:#e8e0d0;font-size:15px;font-weight:bold">Total Charged</td>
+      <td style="padding:10px 0 4px;font-size:15px;font-weight:bold;color:#c9a84c;text-align:right">$${b.priceQuoted.toFixed(2)}</td>
+    </tr>
+  </table>
+</div>
+
+<div style="text-align:center;margin-bottom:28px">
+  <a href="${appUrl}/passenger/rides" style="display:inline-block;background:#c9a84c;color:#050505;padding:12px 32px;text-decoration:none;font-weight:bold;font-size:12px;letter-spacing:2px;text-transform:uppercase">VIEW MY BOOKING</a>
+</div>
+
+<p style="color:#666;font-size:12px;line-height:1.7;text-align:center">
+  Your driver details will be sent closer to your pickup time.<br>
+  Questions? Reply to this email or visit <a href="${appUrl}" style="color:#c9a84c">${appUrl.replace(/^https?:\/\//, "")}</a>
 </p>`);
-  await send(b.passengerEmail, `Booking Confirmed — Royal Midnight #${b.id}`, html, "booking_confirmation_passenger");
+
+  await send(b.passengerEmail, `Payment Receipt — Royal Midnight ${refNum}`, html, "booking_confirmation_passenger");
 }
 
 export async function sendNewBookingAdmin(b: BookingEmailData) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const refNum = `RM-${String(b.id).padStart(4, "0")}`;
+  const vehicleLabel = b.vehicleClass === "business" ? "Business Class Sedan" : b.vehicleClass === "suv" ? "Premium SUV" : b.vehicleClass;
   const html = wrap(`
-<h2 style="color:#c9a84c;font-size:20px;margin:0 0 20px">New Booking #${b.id}</h2>
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 4px">New Paid Booking — ${refNum}</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">A new reservation has been paid and is awaiting driver assignment.</p>
 <table style="width:100%;border-collapse:collapse">
+  ${row("Booking #", refNum)}
   ${row("Passenger", b.passengerName)}
   ${row("Email", b.passengerEmail)}
   ${row("Pickup", b.pickupAddress)}
   ${row("Dropoff", b.dropoffAddress)}
-  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York" }))}
-  ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
+  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+  ${row("Vehicle", vehicleLabel)}
   ${row("Passengers", String(b.passengers))}
-  ${row("Total Fare", `$${b.priceQuoted.toFixed(2)}`)}
+  ${row("Total Fare", `<strong style="color:#c9a84c">$${b.priceQuoted.toFixed(2)}</strong>`)}
   ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
-  ${b.specialRequests ? row("Requests", b.specialRequests) : ""}
-</table>`);
-  await send(ADMIN_EMAIL, `New Booking #${b.id} — ${b.passengerName}`, html, "new_booking_admin");
+  ${b.specialRequests ? row("Special Requests", b.specialRequests) : ""}
+</table>
+<p style="margin-top:24px"><a href="${appUrl}/admin/bookings" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">MANAGE IN ADMIN</a></p>`);
+  await send(ADMIN_EMAIL, `New Booking ${refNum} — ${b.passengerName}`, html, "new_booking_admin");
 }
 
 export async function sendNewBookingAvailableToDrivers(b: BookingEmailData, driverEmails: string[]) {
   if (driverEmails.length === 0) return;
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const refNum = `RM-${String(b.id).padStart(4, "0")}`;
   const earnings = b.driverEarnings != null ? `$${b.driverEarnings.toFixed(2)}` : "—";
+  const vehicleLabel = b.vehicleClass === "business" ? "Business Class Sedan" : b.vehicleClass === "suv" ? "Premium SUV" : b.vehicleClass;
+  const dateStr = new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" });
   const html = wrap(`
-<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">New Ride Available</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">A new booking is ready to accept. Log in to the driver portal to claim it.</p>
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 4px">New Ride Available — ${refNum}</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">A confirmed booking is ready to accept. Log in to the driver portal to claim it before another driver does.</p>
+
+<div style="background:#0d0d0d;border:1px solid #c9a84c40;padding:20px;margin-bottom:20px">
+  <p style="color:#c9a84c;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin:0 0 14px">Your Earnings</p>
+  <p style="color:#c9a84c;font-size:32px;font-weight:bold;margin:0;font-family:monospace">${earnings}</p>
+</div>
+
 <table style="width:100%;border-collapse:collapse">
-  ${row("Booking #", String(b.id))}
-  ${row("Pickup", b.pickupAddress)}
-  ${row("Dropoff", b.dropoffAddress)}
-  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York" }))}
-  ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
-  ${row("Your Earnings", `<span style="color:#c9a84c;font-weight:bold">${earnings}</span>`)}
+  ${row("Date &amp; Time", dateStr)}
+  ${row("Pick-up", b.pickupAddress)}
+  ${row("Drop-off", b.dropoffAddress)}
+  ${row("Vehicle", vehicleLabel)}
+  ${row("Passengers", String(b.passengers))}
   ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
   ${b.specialRequests ? row("Special Requests", b.specialRequests) : ""}
 </table>
-<p style="margin-top:24px"><a href="${process.env.APP_URL ?? "https://royalmidnight.com"}/driver/dashboard" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">ACCEPT RIDE</a></p>`);
-  await send(driverEmails, `New Ride Available — Booking #${b.id}`, html, "new_booking_drivers");
+<p style="margin-top:24px"><a href="${appUrl}/driver/dashboard" style="background:#c9a84c;color:#050505;padding:12px 28px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">ACCEPT THIS RIDE</a></p>
+<p style="margin-top:16px;color:#666;font-size:11px">Log in to the driver portal to view full details and accept the ride.</p>`);
+  await send(driverEmails, `New Ride ${refNum} — ${earnings} earnings`, html, "new_booking_drivers");
 }
 
 export async function sendBookingCancelledAdmin(b: BookingEmailData) {
