@@ -35,6 +35,7 @@ type PassengerPreferences = {
   preferredBeverage?: string | null;
   opensOwnDoor?: boolean;
   addressTitle?: string | null;
+  vipNotes?: string | null;
 };
 
 type BookingRow = {
@@ -54,6 +55,7 @@ type BookingRow = {
   pickupAt: string;
   driverEarnings?: number;
   passengerPreferences?: PassengerPreferences | null;
+  checklistCompletedAt?: string | null;
 };
 
 type EarningsData = {
@@ -343,11 +345,17 @@ function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; sh
       )}
       {booking.passengerPreferences && (() => {
         const p = booking.passengerPreferences;
-        const hasPrefs = p.cabinTempF != null || p.musicPreference || p.quietRide || p.preferredBeverage || p.opensOwnDoor || p.addressTitle;
+        const hasPrefs = p.cabinTempF != null || p.musicPreference || p.quietRide || p.preferredBeverage || p.opensOwnDoor || p.addressTitle || p.vipNotes;
         if (!hasPrefs) return null;
         return (
           <div className="mt-3 pt-3 border-t border-primary/20">
             <p className="text-[10px] uppercase tracking-widest text-primary mb-2">Passenger Preferences</p>
+            {p.vipNotes && (
+              <div className="mb-3 p-2 bg-primary/10 border border-primary/30">
+                <p className="text-[10px] uppercase tracking-widest text-primary mb-1">VIP Note</p>
+                <p className="text-xs text-gray-200 italic">{p.vipNotes}</p>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
               {p.addressTitle && (
                 <div className="flex items-start gap-2">
@@ -418,22 +426,35 @@ const TRIP_STATUS_BADGE: Record<string, string> = {
   in_progress: "bg-blue-400/10 text-blue-400 border-blue-400/20",
 };
 
+const CHECKLIST_ITEMS = [
+  "Vehicle is clean and detailed",
+  "Vehicle is fueled (>¼ tank)",
+  "Cabin temperature set to passenger preference",
+  "Refreshments / requested amenities prepared",
+  "Dress code / uniform is appropriate",
+];
+
 function TripActionButton({
   bookingId,
   authHeader,
   currentStatus,
   pickupAt,
+  checklistCompletedAt,
   onRefresh,
 }: {
   bookingId: number;
   authHeader: string;
   currentStatus: string;
   pickupAt: string;
+  checklistCompletedAt?: string | null;
   onRefresh: () => void;
 }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [, setTick] = useState(0);
+  const [showChecklist, setShowChecklist] = useState(false);
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [checklistDone, setChecklistDone] = useState(!!checklistCompletedAt);
 
   // Re-render every 30 s so the countdown / unlock state stays current
   useEffect(() => {
@@ -471,21 +492,92 @@ function TripActionButton({
     }
   };
 
+  const submitChecklist = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${bookingId}/trip/checklist`, {
+        method: "POST",
+        headers: { Authorization: authHeader },
+      });
+      if (!res.ok) throw new Error("Failed");
+      setChecklistDone(true);
+      setShowChecklist(false);
+      toast({ title: "Pre-ride checklist complete", description: "You can now mark yourself On the Way." });
+    } catch {
+      toast({ title: "Error", description: "Could not save checklist.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (currentStatus === "confirmed") {
     const minsLabel = onWayDisabled ? `${Math.ceil(minsUntilPickup - 60)} min until unlock` : null;
+    const allChecked = checked.size === CHECKLIST_ITEMS.length;
+
+    if (!checklistDone && showChecklist) {
+      return (
+        <div className="border border-primary/30 bg-primary/5 p-3 space-y-2">
+          <p className="text-[10px] uppercase tracking-widest text-primary mb-2">Pre-Ride Checklist</p>
+          {CHECKLIST_ITEMS.map((item, i) => (
+            <label key={i} className="flex items-center gap-2 cursor-pointer text-xs text-gray-300">
+              <input
+                type="checkbox"
+                checked={checked.has(i)}
+                onChange={() => setChecked(prev => {
+                  const next = new Set(prev);
+                  if (next.has(i)) next.delete(i); else next.add(i);
+                  return next;
+                })}
+                className="accent-primary w-3.5 h-3.5"
+              />
+              {item}
+            </label>
+          ))}
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={() => void submitChecklist()}
+              disabled={!allChecked || loading}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs uppercase tracking-widest bg-primary text-black font-semibold disabled:opacity-40"
+            >
+              {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+              Confirm & Continue
+            </button>
+            <button onClick={() => setShowChecklist(false)} className="px-3 py-2 text-xs text-muted-foreground border border-white/10">
+              Cancel
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <button
-        onClick={() => void callEndpoint("on-way")}
-        disabled={loading || onWayDisabled}
-        className="w-full flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-widest bg-primary text-black font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Navigation className="w-3.5 h-3.5" />}
-        {onWayDisabled ? (
-          <span className="flex items-center gap-1.5">
-            On the Way <span className="font-normal opacity-60">({minsLabel})</span>
-          </span>
-        ) : "On the Way"}
-      </button>
+      <div className="space-y-1.5">
+        {!checklistDone && (
+          <button
+            onClick={() => setShowChecklist(true)}
+            className="w-full flex items-center justify-center gap-2 py-2 text-xs uppercase tracking-widest border border-primary/30 text-primary/80 hover:border-primary hover:text-primary transition-colors"
+          >
+            <Clock className="w-3.5 h-3.5" /> Complete Pre-Ride Checklist
+          </button>
+        )}
+        {checklistDone && (
+          <div className="flex items-center gap-1.5 text-xs text-green-400 justify-center py-1">
+            <FlagTriangleRight className="w-3 h-3" /> Checklist complete
+          </div>
+        )}
+        <button
+          onClick={() => void callEndpoint("on-way")}
+          disabled={loading || onWayDisabled || !checklistDone}
+          className="w-full flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-widest bg-primary text-black font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Navigation className="w-3.5 h-3.5" />}
+          {onWayDisabled ? (
+            <span className="flex items-center gap-1.5">
+              On the Way <span className="font-normal opacity-60">({minsLabel})</span>
+            </span>
+          ) : !checklistDone ? "Complete Checklist First" : "On the Way"}
+        </button>
+      </div>
     );
   }
 
@@ -584,6 +676,7 @@ function BookingCard({ booking, authHeader, onRefresh }: { booking: BookingRow; 
             authHeader={authHeader}
             currentStatus={booking.status}
             pickupAt={booking.pickupAt}
+            checklistCompletedAt={(booking as BookingRow).checklistCompletedAt}
             onRefresh={onRefresh}
           />
         </div>

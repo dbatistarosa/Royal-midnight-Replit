@@ -252,7 +252,7 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
 function PassengerRideDetailInner() {
   const params = useParams();
   const id = parseInt(params.id || "0", 10);
-  const { token } = useAuth();
+  const { token, user: authUser } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [booking, setBooking] = useState<BookingDetail | null>(null);
@@ -262,6 +262,28 @@ function PassengerRideDetailInner() {
   const [cancelConfirming, setCancelConfirming] = useState(false);
 
   const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  // Favorite driver state
+  const [driverSaved, setDriverSaved] = useState(false);
+  const [driverSaving, setDriverSaving] = useState(false);
+
+  const handleSaveDriver = async (driverId: number) => {
+    if (!token || !authUser) return;
+    setDriverSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/users/${authUser.id}/favorite-drivers/${driverId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed");
+      setDriverSaved(true);
+      toast({ title: "Driver saved", description: "This chauffeur has been added to your favorites. You can request them on your next booking." });
+    } catch {
+      toast({ title: "Error", description: "Could not save driver.", variant: "destructive" });
+    } finally {
+      setDriverSaving(false);
+    }
+  };
 
   const handleDownloadReceipt = async () => {
     if (!booking) return;
@@ -868,6 +890,32 @@ function PassengerRideDetailInner() {
                 {ratingComment && (
                   <p className="text-sm text-muted-foreground italic">"{ratingComment}"</p>
                 )}
+              </div>
+            )}
+
+            {/* Save Driver as Favorite */}
+            {booking?.status === "completed" && booking.driverId && !driverSaved && (
+              <div className="bg-card border border-border p-5 sm:p-6">
+                <h2 className="font-serif text-xl mb-2">Save Your Chauffeur</h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Had a great experience? Save this chauffeur to your favorites so you can request them on future bookings.
+                </p>
+                <button
+                  onClick={() => void handleSaveDriver(booking.driverId!)}
+                  disabled={driverSaving}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-primary text-black text-xs uppercase tracking-widest font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                >
+                  {driverSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Star className="w-3.5 h-3.5" />}
+                  {driverSaving ? "Saving..." : "Save This Chauffeur"}
+                </button>
+              </div>
+            )}
+            {driverSaved && (
+              <div className="bg-card border border-primary/20 p-5">
+                <div className="flex items-center gap-2 text-primary text-sm">
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Chauffeur saved to your favorites.</span>
+                </div>
               </div>
             )}
 

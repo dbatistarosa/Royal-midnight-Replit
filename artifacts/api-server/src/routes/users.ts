@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, or, and, isNull } from "drizzle-orm";
-import { db, usersTable, bookingsTable } from "@workspace/db";
+import { db, usersTable, bookingsTable, userFavoriteDriversTable, driversTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import {
   ListUsersQueryParams,
@@ -103,6 +103,10 @@ router.patch("/users/:id", requireAuth, async (req, res): Promise<void> => {
   if ("preferredBeverage" in body) updateData.preferredBeverage = body["preferredBeverage"] ?? null;
   if ("opensOwnDoor" in body) updateData.opensOwnDoor = !!body["opensOwnDoor"];
   if ("addressTitle" in body) updateData.addressTitle = body["addressTitle"] ?? null;
+  // VIP notes — admin only
+  if ("vipNotes" in body && caller.role === "admin") {
+    updateData.vipNotes = body["vipNotes"] ?? null;
+  }
 
   const [user] = await db
     .update(usersTable)
@@ -176,6 +180,74 @@ router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> =
       }))
     )
   );
+});
+
+// ─── Favorite Drivers ─────────────────────────────────────────────────────────
+
+// GET /users/:id/favorite-drivers — list saved drivers (self or admin)
+router.get("/users/:id/favorite-drivers", requireAuth, async (req, res): Promise<void> => {
+  const userId = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(userId)) { res.status(400).json({ error: "Invalid user id" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== userId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  const rows = await db
+    .select({
+      driverId: userFavoriteDriversTable.driverId,
+      driverName: driversTable.name,
+      profilePicture: driversTable.profilePicture,
+      vehicleMake: driversTable.vehicleMake,
+      vehicleModel: driversTable.vehicleModel,
+      vehicleYear: driversTable.vehicleYear,
+      rating: driversTable.rating,
+      createdAt: userFavoriteDriversTable.createdAt,
+    })
+    .from(userFavoriteDriversTable)
+    .leftJoin(driversTable, eq(driversTable.id, userFavoriteDriversTable.driverId))
+    .where(eq(userFavoriteDriversTable.userId, userId));
+
+  res.json(rows.map(r => ({ ...r, createdAt: r.createdAt.toISOString() })));
+});
+
+// POST /users/:id/favorite-drivers/:driverId — save a driver as favourite
+router.post("/users/:id/favorite-drivers/:driverId", requireAuth, async (req, res): Promise<void> => {
+  const userId = parseInt(req.params["id"] ?? "", 10);
+  const driverId = parseInt(req.params["driverId"] ?? "", 10);
+  if (isNaN(userId) || isNaN(driverId)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== userId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  // Upsert — silently succeed if already saved
+  await db
+    .insert(userFavoriteDriversTable)
+    .values({ userId, driverId })
+    .onConflictDoNothing();
+
+  res.json({ ok: true });
+});
+
+// DELETE /users/:id/favorite-drivers/:driverId — remove a saved driver
+router.delete("/users/:id/favorite-drivers/:driverId", requireAuth, async (req, res): Promise<void> => {
+  const userId = parseInt(req.params["id"] ?? "", 10);
+  const driverId = parseInt(req.params["driverId"] ?? "", 10);
+  if (isNaN(userId) || isNaN(driverId)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== userId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  await db
+    .delete(userFavoriteDriversTable)
+    .where(and(eq(userFavoriteDriversTable.userId, userId), eq(userFavoriteDriversTable.driverId, driverId)));
+
+  res.json({ ok: true });
 });
 
 export default router;

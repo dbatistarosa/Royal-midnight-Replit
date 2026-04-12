@@ -110,6 +110,9 @@ export default function Book() {
   const [promoValidating, setPromoValidating] = useState(false);
   const [promoResult, setPromoResult] = useState<{ valid: boolean; discountAmount: number | null; finalAmount: number | null; message: string } | null>(null);
   const [savedCards, setSavedCards] = useState<Array<{ id: string; brand: string; last4: string; expMonth: number; expYear: number; isDefault: boolean }>>([]);
+  type FavoriteDriver = { driverId: number; driverName: string | null; vehicleMake: string | null; vehicleModel: string | null; vehicleYear: string | null; rating: string | null };
+  const [favoriteDrivers, setFavoriteDrivers] = useState<FavoriteDriver[]>([]);
+  const [requestPreferredDriver, setRequestPreferredDriver] = useState(false);
 
   const getQuote = useGetQuote();
 
@@ -236,6 +239,15 @@ export default function Book() {
     fetch(`${API_BASE}/payments/saved-cards`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() as Promise<{ cards: Array<{ id: string; brand: string; last4: string; expMonth: number; expYear: number; isDefault: boolean }> }> : null)
       .then(data => { if (data?.cards?.length) setSavedCards(data.cards); })
+      .catch(() => {});
+  }, [step, token, user]);
+
+  // Load favorite drivers when reaching step 2 (vehicle selection) for logged-in users
+  useEffect(() => {
+    if (step !== 2 || !token || !user) return;
+    fetch(`${API_BASE}/users/${user.id}/favorite-drivers`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() as Promise<FavoriteDriver[]> : Promise.resolve([]))
+      .then(data => setFavoriteDrivers(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [step, token, user]);
 
@@ -470,6 +482,7 @@ export default function Book() {
             discountAmount: promoResult?.valid && promoResult.discountAmount != null ? promoResult.discountAmount : null,
             userId: userId,
             paymentType: "standard",
+            preferredDriverId: requestPreferredDriver && favoriteDrivers.length > 0 ? favoriteDrivers[0]!.driverId : null,
           }),
         });
         if (!bookingRes.ok) {
@@ -907,6 +920,27 @@ export default function Book() {
                     </span>
                   )}
                 </div>
+
+                {/* Preferred Driver Toggle — only shown when passenger has saved drivers */}
+                {favoriteDrivers.length > 0 && (() => {
+                  const fd = favoriteDrivers[0]!;
+                  const vehicleDesc = [fd.vehicleYear, fd.vehicleMake, fd.vehicleModel].filter(Boolean).join(" ");
+                  return (
+                    <div
+                      onClick={() => setRequestPreferredDriver(v => !v)}
+                      className={`cursor-pointer flex items-center justify-between p-4 border transition-colors ${requestPreferredDriver ? "border-primary/50 bg-primary/5" : "border-white/10 bg-white/2"}`}
+                    >
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-0.5">Request Preferred Chauffeur</p>
+                        <p className="text-sm font-medium text-white">{fd.driverName ?? "Saved Chauffeur"}</p>
+                        {vehicleDesc && <p className="text-xs text-muted-foreground">{vehicleDesc}</p>}
+                      </div>
+                      <div className={`w-5 h-5 rounded-none border-2 flex items-center justify-center flex-shrink-0 transition-colors ${requestPreferredDriver ? "border-primary bg-primary" : "border-white/20 bg-transparent"}`}>
+                        {requestPreferredDriver && <svg className="w-3 h-3 text-black" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <p className="text-center text-xs uppercase tracking-[0.3em] text-gray-600 py-1">Select your vehicle</p>
 

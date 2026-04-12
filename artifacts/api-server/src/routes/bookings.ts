@@ -314,6 +314,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
           preferredBeverage: usersTable.preferredBeverage,
           opensOwnDoor: usersTable.opensOwnDoor,
           addressTitle: usersTable.addressTitle,
+          vipNotes: usersTable.vipNotes,
         })
         .from(usersTable)
         .where(
@@ -935,6 +936,30 @@ async function resolveAssignedDriver(
 
   return { booking, driverRow };
 }
+
+// POST /bookings/:id/trip/checklist
+// Driver marks pre-ride checklist complete — required before En Route can activate
+router.post("/bookings/:id/trip/checklist", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const resolved = await resolveAssignedDriver(req, res, id);
+  if (!resolved) return;
+  const { booking } = resolved;
+
+  if (!["confirmed", "on_way", "on_location"].includes(booking.status)) {
+    res.status(400).json({ error: `Cannot complete checklist for booking in status: ${booking.status}` });
+    return;
+  }
+
+  const [updated] = await db
+    .update(bookingsTable)
+    .set({ checklistCompletedAt: new Date(), updatedAt: new Date() })
+    .where(eq(bookingsTable.id, id))
+    .returning();
+
+  res.json({ ok: true, checklistCompletedAt: updated.checklistCompletedAt?.toISOString() ?? null });
+});
 
 // POST /bookings/:id/trip/on-way
 // Requires: caller = assigned driver, booking status = confirmed, pickup within 60 min
