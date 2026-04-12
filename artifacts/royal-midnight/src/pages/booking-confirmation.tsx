@@ -39,6 +39,9 @@ export default function BookingConfirmation() {
   const [error, setError] = useState(false);
   const [paymentConfirming, setPaymentConfirming] = useState(false);
   const confirmed3DS = useRef(false);
+  // Track polling attempts so we stop after a few tries
+  const pollCount = useRef(0);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Handle 3DS redirect return: Stripe sends payment_intent + redirect_status in the URL.
   // Call /payments/confirm so the booking status is updated even when the webhook is slow.
@@ -77,6 +80,24 @@ export default function BookingConfirmation() {
     }, delay);
     return () => clearTimeout(t);
   }, [id, paymentConfirming]);
+
+  // If booking is loaded and still awaiting_payment, poll for webhook confirmation.
+  // The direct /payments/confirm call above is the fast path; this is the safety net.
+  useEffect(() => {
+    if (!booking || booking.status !== "awaiting_payment") return;
+    if (pollCount.current >= 6) return; // max ~12 seconds of polling
+
+    pollTimer.current = setTimeout(() => {
+      pollCount.current += 1;
+      fetchBooking(id)
+        .then(data => { setBooking(data); })
+        .catch(() => {});
+    }, 2000);
+
+    return () => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    };
+  }, [booking, id]);
 
   if (isLoading || paymentConfirming) {
     return (

@@ -80,7 +80,11 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
       });
 
       if (error) {
-        onError(error.message || "Payment failed. Please try again.");
+        // In test mode, append a helpful hint so the user knows to use test card numbers
+        const hint = isTestMode && (error.code === "card_declined" || error.type === "card_error")
+          ? " (Test mode: use card 4242 4242 4242 4242, any future expiry, any CVC)"
+          : "";
+        onError((error.message || "Payment failed. Please try again.") + hint);
       } else if (paymentIntent?.status === "succeeded" || paymentIntent?.status === "requires_capture") {
         // "succeeded" = immediate capture; "requires_capture" = manual-capture authorization hold
         // Both are success states — the card was validated and a hold placed.

@@ -119,6 +119,22 @@ export default function Book() {
   useEffect(() => {
     const pi = searchParams.get("payment_intent");
     const status = searchParams.get("redirect_status");
+
+    // Clear Stripe params from URL so a refresh doesn't reprocess them
+    if (pi) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    // If the 3DS auth was cancelled or failed, show an error so the user can retry
+    if (pi && status === "failed") {
+      setPaymentError("Payment authentication failed or was cancelled. Please try again.");
+      // Reset the payment form so the user can re-enter their card
+      setPaymentClientSecret(null);
+      setPaymentPublishableKey(null);
+      setStripeReturnUrl(null);
+      return;
+    }
+
     if (!pi || !["succeeded", "requires_capture"].includes(status ?? "")) return;
 
     void (async () => {
@@ -222,6 +238,20 @@ export default function Book() {
       .then(data => { if (data?.cards?.length) setSavedCards(data.cards); })
       .catch(() => {});
   }, [step, token, user]);
+
+  // When the user reaches step 3, pre-check Stripe config and show a clear error early.
+  useEffect(() => {
+    if (step !== 3) return;
+    fetch(`${API_BASE}/payments/config`)
+      .then(r => {
+        if (!r.ok) {
+          setPaymentError("Payment processing is not configured. Contact support to complete your booking.");
+        }
+      })
+      .catch(() => {
+        setPaymentError("Cannot connect to payment service. Please check your connection and try again.");
+      });
+  }, [step]);
 
   const showBusiness = Number(passengers) <= 3;
   const selectedQuote = selectedVehicle ? quotes[selectedVehicle] : null;
@@ -396,6 +426,15 @@ export default function Book() {
     setIsConfirming(true);
     setPaymentError("");
     try {
+      // Step 1: Verify Stripe is configured BEFORE creating any booking.
+      // This prevents orphaned awaiting_payment bookings when Stripe keys are missing.
+      const configRes = await fetch(`${API_BASE}/payments/config`);
+      if (!configRes.ok) {
+        const cfgErr = await configRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(cfgErr.error || "Payment processing is not available. Please contact support.");
+      }
+      const { publishableKey } = await configRes.json() as { publishableKey: string };
+
       let bookingId: number;
 
       if (existingBookingId) {
@@ -405,11 +444,11 @@ export default function Book() {
         if (!pendingBookingIdRef.current) pendingBookingIdRef.current = existingBookingId;
         if (!pendingBookingId) setPendingBookingId(existingBookingId);
       } else {
-        // Step 1: Ensure the user has an account
+        // Step 2: Ensure the user has an account
         const userId = await ensureAccount(values.passengerName, values.passengerEmail, values.passengerPhone, values.password || "");
         if (userId === null) { setIsConfirming(false); return; }
 
-        // Step 2: Create the booking in awaiting_payment state FIRST so it's always in the database
+        // Step 3: Create the booking in awaiting_payment state
         const isoDate = new Date(`${format(values.pickupDate, "yyyy-MM-dd")}T${values.pickupTime}:00`).toISOString();
         const bookingRes = await fetch(`${API_BASE}/bookings`, {
           method: "POST",
@@ -445,17 +484,10 @@ export default function Book() {
         sessionStorage.setItem("rm_pending_booking_id", String(bookingId));
       }
 
-      // Build the 3DS return URL now, while bookingId is known — do this BEFORE loading
-      // Stripe so that the URL is always set when the payment form renders.
-      // The confirmation page handles the payment_intent + redirect_status params from Stripe.
+      // Build the 3DS return URL — confirmation page handles the redirect_status params from Stripe.
       const baseUrl = `${window.location.origin}${(import.meta.env.BASE_URL ?? "/").replace(/\/$/, "")}`;
       const confirmationReturnUrl = `${baseUrl}/booking-confirmation/${bookingId}`;
       setStripeReturnUrl(confirmationReturnUrl);
-
-      // Step 3: Get Stripe publishable key
-      const configRes = await fetch(`${API_BASE}/payments/config`);
-      if (!configRes.ok) throw new Error("Payment configuration failed.");
-      const { publishableKey } = await configRes.json() as { publishableKey: string };
 
       // Step 4: Create a payment intent tied to this booking
       const intentRes = await fetch(`${API_BASE}/payments/create-intent`, {
@@ -473,7 +505,7 @@ export default function Book() {
       setPaymentPublishableKey(publishableKey);
     } catch (err: any) {
       setPaymentError(err?.message || "Could not initiate payment. Please try again.");
-      toast({ title: "Error", description: err?.message, variant: "destructive" });
+      toast({ title: "Payment setup failed", description: err?.message, variant: "destructive" });
     }
     setIsConfirming(false);
   };
@@ -1200,7 +1232,15 @@ export default function Book() {
                           </div>
                         </div>
 
-                        {paymentError && <p className="text-red-400 text-sm p-3 border border-red-900/40 bg-red-900/8">{paymentError}</p>}
+                        {paymentError && (
+                          <div className="border border-red-500/40 bg-red-950/30 p-4 flex gap-3 items-start">
+                            <span className="text-red-400 text-lg leading-none flex-shrink-0 mt-0.5">⚠</span>
+                            <div>
+                              <p className="text-sm text-red-400 font-medium mb-1">Payment Error</p>
+                              <p className="text-xs text-red-300/80 leading-relaxed">{paymentError}</p>
+                            </div>
+                          </div>
+                        )}
 
                         <Button
                           type="button"
