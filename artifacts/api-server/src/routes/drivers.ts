@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
-import { db, driversTable, bookingsTable, settingsTable } from "@workspace/db";
+import { db, driversTable, bookingsTable, settingsTable, usersTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
@@ -194,7 +194,22 @@ router.get("/drivers/by-user/:userId", requireAuth, async (req, res): Promise<vo
     return;
   }
 
-  const [driver] = await db.select().from(driversTable).where(eq(driversTable.userId, userId));
+  // Primary lookup: by userId foreign key
+  let driver = (await db.select().from(driversTable).where(eq(driversTable.userId, userId)))[0];
+
+  // Fallback: match by email for drivers whose userId link was never set
+  if (!driver) {
+    const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, userId));
+    if (callerUser?.email) {
+      driver = (await db.select().from(driversTable).where(eq(driversTable.email, callerUser.email)))[0];
+      // Retroactively link userId so future lookups use the fast path
+      if (driver) {
+        db.update(driversTable).set({ userId }).where(eq(driversTable.id, driver.id))
+          .catch(err => req.log.error({ err }, "[drivers/by-user] retroactive userId link error"));
+      }
+    }
+  }
+
   if (!driver) {
     res.status(404).json({ error: "Driver not found" });
     return;
