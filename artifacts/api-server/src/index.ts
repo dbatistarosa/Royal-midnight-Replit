@@ -137,6 +137,43 @@ async function runStartupMigrations(): Promise<void> {
       WHERE d.id = sub.driver_id
         AND d.total_rides IS DISTINCT FROM coalesce(sub.cnt, 0)
     `);
+
+    // De-duplicate driver userId links: when a user has multiple driver records linked
+    // to the same userId, keep the link only on the record with the most rides (the
+    // admin-created, historically active one) and null out the others. This prevents
+    // the "no trips" bug caused by by-user returning the empty onboarding-created record.
+    await client.query(`
+      UPDATE drivers d
+      SET user_id = NULL
+      WHERE user_id IS NOT NULL
+        AND id NOT IN (
+          SELECT DISTINCT ON (user_id) id
+          FROM drivers
+          WHERE user_id IS NOT NULL
+          ORDER BY user_id, total_rides DESC, id ASC
+        )
+    `);
+
+    // Compliance: compliance_hold column on drivers
+    await client.query(`
+      ALTER TABLE drivers
+        ADD COLUMN IF NOT EXISTS compliance_hold BOOLEAN NOT NULL DEFAULT FALSE
+    `);
+
+    // Compliance documents table — one row per driver per document submission
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS compliance_documents (
+        id            SERIAL PRIMARY KEY,
+        driver_id     INTEGER NOT NULL REFERENCES drivers(id),
+        doc_type      TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'pending_review',
+        file_url      TEXT NOT NULL,
+        new_expiry    TEXT,
+        admin_notes   TEXT,
+        reviewed_at   TIMESTAMPTZ,
+        submitted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
   } finally {
     client.release();
   }
@@ -504,6 +541,106 @@ function killProcessOnPort(targetPort: number): void {
   }
 }
 
+/**
+ * Compliance enforcement — runs every minute, meaningful work only at midnight.
+ * For each driver with an expired document (today > expiry) that has no approved
+ * pending renewal:
+ *   1. Sets compliance_hold = true
+ *   2. Unassigns all future bookings for that driver → status 'pending'
+ *   3. Sends a high-priority admin alert email
+ */
+async function runComplianceEnforcement(): Promise<void> {
+  try {
+    const now = new Date();
+    // Only run in the 00:00–00:05 window to avoid repeated triggers
+    if (now.getHours() !== 0 || now.getMinutes() > 5) return;
+
+    const { driversTable: dTbl, bookingsTable: bTbl, complianceDocumentsTable } = await import("@workspace/db");
+    const { eq: eqOp, and: andOp, gt, isNull, or } = await import("drizzle-orm");
+    const { sendComplianceLockoutAdmin } = await import("./lib/mailer.js");
+
+    const todayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const drivers = await db.select({
+      id: dTbl.id,
+      name: dTbl.name,
+      email: dTbl.email,
+      complianceHold: dTbl.complianceHold,
+      licenseExpiry: dTbl.licenseExpiry,
+      regExpiry: dTbl.regExpiry,
+      insuranceExpiry: dTbl.insuranceExpiry,
+    }).from(dTbl);
+
+    for (const driver of drivers) {
+      // Determine which docs (if any) are expired as of today
+      const docChecks: Array<{ label: string; expiry: string | null | undefined }> = [
+        { label: "Driver License", expiry: driver.licenseExpiry },
+        { label: "Vehicle Registration", expiry: driver.regExpiry },
+        { label: "Insurance", expiry: driver.insuranceExpiry },
+      ];
+
+      for (const { label, expiry } of docChecks) {
+        if (!expiry || expiry > todayStr) continue; // not expired
+
+        // Check if there's an approved pending submission
+        const [approved] = await db.select({ id: complianceDocumentsTable.id })
+          .from(complianceDocumentsTable)
+          .where(andOp(
+            eqOp(complianceDocumentsTable.driverId, driver.id),
+            eqOp(complianceDocumentsTable.docType, label),
+            eqOp(complianceDocumentsTable.status, "approved"),
+          ))
+          .limit(1);
+
+        if (approved) continue; // renewed — don't lock
+
+        if (!driver.complianceHold) {
+          // Lock the driver
+          await db.update(dTbl).set({ complianceHold: true }).where(eqOp(dTbl.id, driver.id));
+          logger.info({ driverId: driver.id, docType: label }, "Driver placed on compliance_hold");
+
+          // Unassign all future bookings
+          const futureBookings = await db.select({ id: bTbl.id })
+            .from(bTbl)
+            .where(andOp(
+              eqOp(bTbl.driverId, driver.id),
+              gt(bTbl.pickupAt, now),
+              or(
+                eqOp(bTbl.status, "confirmed"),
+                eqOp(bTbl.status, "pending"),
+              ),
+            ));
+
+          if (futureBookings.length > 0) {
+            await db.update(bTbl)
+              .set({ driverId: null, status: "pending", updatedAt: new Date() })
+              .where(andOp(
+                eqOp(bTbl.driverId, driver.id),
+                gt(bTbl.pickupAt, now),
+                or(eqOp(bTbl.status, "confirmed"), eqOp(bTbl.status, "pending")),
+              ));
+          }
+
+          // Notify admin
+          try {
+            await sendComplianceLockoutAdmin({
+              driverName: driver.name,
+              driverEmail: driver.email,
+              docType: label,
+              expiryDate: expiry,
+              ridesUnassigned: futureBookings.length,
+            });
+          } catch (emailErr) {
+            logger.error({ emailErr, driverId: driver.id }, "Failed to send compliance lockout admin alert (non-fatal)");
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "Compliance enforcement error (non-fatal)");
+  }
+}
+
 function startListening(attempt = 1): void {
   const server = app.listen(port);
 
@@ -517,6 +654,10 @@ function startListening(attempt = 1): void {
     // Run trip reminder check immediately on startup, then every minute
     void sendTripReminders();
     setInterval(() => void sendTripReminders(), 60 * 1000);
+
+    // Compliance enforcement — runs every minute, triggers at midnight
+    void runComplianceEnforcement();
+    setInterval(() => void runComplianceEnforcement(), 60 * 1000);
   });
 
   server.on("error", (err: NodeJS.ErrnoException) => {
