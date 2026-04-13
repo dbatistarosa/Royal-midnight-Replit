@@ -106,54 +106,96 @@ router.get("/admin/recent-bookings", requireAdmin, async (req, res): Promise<voi
   res.json(GetRecentBookingsResponse.parse(bookings.map(parseBooking)));
 });
 
-router.get("/admin/revenue", requireAdmin, async (_req, res): Promise<void> => {
-  // Fetch commission rate from settings
-  const [commRow] = await db
-    .select({ value: settingsTable.value })
-    .from(settingsTable)
-    .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "70");
-  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
+router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
+  // ── Date range params ────────────────────────────────────────────────────────
+  const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+  const start = startDate ? new Date(startDate) : null;
+  const end = endDate ? new Date(endDate) : null;
+  // Build a SQL fragment for date-scoping completed bookings
+  const dateFilter = start && end
+    ? sql`status = 'completed' AND pickup_at >= ${start.toISOString()} AND pickup_at < ${end.toISOString()}`
+    : sql`status = 'completed'`;
+  const completedFilter = start && end
+    ? sql`status = 'completed' AND pickup_at >= ${start.toISOString()} AND pickup_at < ${end.toISOString()}`
+    : sql`status = 'completed'`;
 
+  // ── Load all settings in one pass ────────────────────────────────────────────
+  const settingRows = await db.select().from(settingsTable);
+  const settingsMap: Record<string, string> = {};
+  for (const row of settingRows) settingsMap[row.key] = row.value;
+
+  const rawComm = parseFloat(settingsMap["driver_commission_pct"] ?? "70");
+  const commissionPct = rawComm > 1 ? rawComm / 100 : rawComm;
+
+  const rawTax = parseFloat(settingsMap["florida_tax_rate"] ?? "7");
+  const taxRatePct = rawTax > 1 ? rawTax / 100 : rawTax;
+
+  const rawCcFee = parseFloat(settingsMap["cc_fee_pct"] ?? "0");
+  const ccFeePct = rawCcFee > 1 ? rawCcFee / 100 : rawCcFee;
+
+  // ── Daily chart data (always last 30 days, unaffected by date filter) ────────
   const daily = await db
     .select({
-      date: sql<string>`date(created_at)::text`,
+      date: sql<string>`date(pickup_at)::text`,
       revenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
       bookings: sql<number>`count(*)::int`,
     })
     .from(bookingsTable)
-    .where(sql`created_at >= now() - interval '30 days'`)
-    .groupBy(sql`date(created_at)`)
-    .orderBy(sql`date(created_at)`);
+    .where(start && end
+      ? sql`pickup_at >= ${start.toISOString()} AND pickup_at < ${end.toISOString()}`
+      : sql`pickup_at >= now() - interval '30 days'`)
+    .groupBy(sql`date(pickup_at)`)
+    .orderBy(sql`date(pickup_at)`);
 
   const byVehicleClass = await db
     .select({
       vehicleClass: bookingsTable.vehicleClass,
-      revenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
-      bookings: sql<number>`count(*)::int`,
+      revenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where ${completedFilter}), 0)::float`,
+      bookings: sql<number>`count(*) filter (where ${completedFilter})::int`,
     })
     .from(bookingsTable)
     .groupBy(bookingsTable.vehicleClass);
 
   const [totals] = await db
     .select({
-      totalRevenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
-      completedCount: sql<number>`count(*) filter (where status = 'completed')::int`,
+      totalRevenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where ${dateFilter}), 0)::float`,
+      completedCount: sql<number>`count(*) filter (where ${dateFilter})::int`,
     })
     .from(bookingsTable);
 
-  const totalRevenue = totals?.totalRevenue ?? 0;
-  const totalCommissionPaid = Math.round(totalRevenue * commissionPct * 100) / 100;
-  const totalCompanyRevenue = Math.round((totalRevenue - totalCommissionPaid) * 100) / 100;
+  // ── Financial breakdown ───────────────────────────────────────────────────────
+  // price_quoted = subtotal + taxes (gross charged to passenger, pre–CC fee).
+  // Reverse-calculate components using the current rates for reporting purposes.
+  const totalGrossIncome = totals?.totalRevenue ?? 0;
+  // subtotal = grossIncome / (1 + taxRate)  →  taxes = grossIncome - subtotal
+  const totalSubtotal = Math.round((totalGrossIncome / (1 + taxRatePct)) * 100) / 100;
+  const totalTaxesCollected = Math.round((totalGrossIncome - totalSubtotal) * 100) / 100;
+  const totalFeesCollected = Math.round(totalGrossIncome * ccFeePct * 100) / 100;
+  const totalDriverCommissions = Math.round(totalSubtotal * commissionPct * 100) / 100;
+  const companyNetIncome = Math.round(
+    (totalGrossIncome - totalTaxesCollected - totalFeesCollected - totalDriverCommissions) * 100,
+  ) / 100;
+
+  // Legacy fields (kept for backward compat with existing hooks/components)
+  const totalCommissionPaid = totalDriverCommissions;
+  const totalCompanyRevenue = Math.round((totalGrossIncome - totalCommissionPaid) * 100) / 100;
 
   res.json(GetRevenueStatsResponse.parse({
     daily,
     byVehicleClass,
-    totalRevenue,
+    totalRevenue: totalGrossIncome,
     totalCommissionPaid,
     totalCompanyRevenue,
     commissionPct,
     completedRides: totals?.completedCount ?? 0,
+    // New financial breakdown fields
+    totalGrossIncome,
+    totalTaxesCollected,
+    totalFeesCollected,
+    totalDriverCommissions,
+    companyNetIncome,
+    taxRatePct,
+    ccFeePct,
   }));
 });
 

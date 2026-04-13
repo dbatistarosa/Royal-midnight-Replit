@@ -7,4 +7,4 @@ export {
   useGetRecentBookings,
   useGetRevenueStats,
 } from "./admin-hooks";
-export type { FullRevenueStats } from "./admin-hooks";
+export type { FullRevenueStats, RevenueStatsParams } from "./admin-hooks";
