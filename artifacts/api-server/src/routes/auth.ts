@@ -37,9 +37,15 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 
   const { name, email, password, phone, role } = parsed.data;
 
-  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
-  if (existing) {
+  const [existingUser] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email));
+  if (existingUser) {
     res.status(400).json({ error: "Email already registered" });
+    return;
+  }
+  // Prevent a driver's email from being used to open a passenger/admin account
+  const [existingDriver] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.email, email));
+  if (existingDriver) {
+    res.status(400).json({ error: "This email is already associated with a driver account. Each email can only be used for one portal." });
     return;
   }
 
@@ -206,9 +212,17 @@ router.post("/auth/driver-register", async (req, res): Promise<void> => {
 
   const { name, email, phone, password, ...driverFields } = parsed.data;
 
-  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
-  if (existing) {
-    res.status(400).json({ error: "Email already registered" });
+  const [existingUser] = await db.select({ id: usersTable.id, role: usersTable.role }).from(usersTable).where(eq(usersTable.email, email));
+  if (existingUser) {
+    const msg = existingUser.role === "driver"
+      ? "A driver account with this email already exists."
+      : "This email is already registered as a passenger or admin account. Each email can only be used for one portal.";
+    res.status(400).json({ error: msg });
+    return;
+  }
+  const [existingDriverRecord] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.email, email));
+  if (existingDriverRecord) {
+    res.status(400).json({ error: "A driver record with this email already exists. Please contact support." });
     return;
   }
 
