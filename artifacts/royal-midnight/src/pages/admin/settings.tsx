@@ -63,6 +63,15 @@ const SETTING_FIELDS: SettingField[] = [
     max: 100,
     step: 1,
   },
+  {
+    key: "cc_fee_pct",
+    label: "Credit Card Processing Fee",
+    description: "Percentage charged on top of subtotal + taxes to cover Stripe/card processing costs (e.g., 3 means 3%). Used in financial reports.",
+    suffix: "%",
+    min: 0,
+    max: 10,
+    step: 0.1,
+  },
 ];
 
 type AdminForm = { name: string; email: string; password: string; confirmPassword: string; phone: string };

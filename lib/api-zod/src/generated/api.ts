@@ -1148,6 +1148,14 @@ export const GetRevenueStatsResponse = zod.object({
   totalCompanyRevenue: zod.number(),
   commissionPct: zod.number(),
   completedRides: zod.number(),
+  // Extended financial breakdown
+  totalGrossIncome: zod.number().optional(),
+  totalTaxesCollected: zod.number().optional(),
+  totalFeesCollected: zod.number().optional(),
+  totalDriverCommissions: zod.number().optional(),
+  companyNetIncome: zod.number().optional(),
+  taxRatePct: zod.number().optional(),
+  ccFeePct: zod.number().optional(),
 });
 
 /**

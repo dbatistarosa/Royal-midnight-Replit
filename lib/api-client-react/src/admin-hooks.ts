@@ -11,6 +11,19 @@ export interface FullRevenueStats {
   totalCompanyRevenue: number;
   commissionPct: number;
   completedRides: number;
+  // Extended financial breakdown
+  totalGrossIncome?: number;
+  totalTaxesCollected?: number;
+  totalFeesCollected?: number;
+  totalDriverCommissions?: number;
+  companyNetIncome?: number;
+  taxRatePct?: number;
+  ccFeePct?: number;
+}
+
+export interface RevenueStatsParams {
+  startDate?: string; // ISO date string
+  endDate?: string;   // ISO date string
 }
 
 export function useGetAdminStats<TError = unknown>(
@@ -36,11 +49,16 @@ export function useGetRecentBookings<TError = unknown>(
 }
 
 export function useGetRevenueStats<TError = unknown>(
+  params?: RevenueStatsParams,
   options?: { query?: UseQueryOptions<FullRevenueStats, TError> }
 ): UseQueryResult<FullRevenueStats, TError> {
+  const qs = new URLSearchParams();
+  if (params?.startDate) qs.set("startDate", params.startDate);
+  if (params?.endDate) qs.set("endDate", params.endDate);
+  const query = qs.toString() ? `?${qs.toString()}` : "";
   return useQuery<FullRevenueStats, TError>({
-    queryKey: ["revenueStats"],
-    queryFn: () => customFetch<FullRevenueStats>("/api/admin/revenue"),
+    queryKey: ["revenueStats", params],
+    queryFn: () => customFetch<FullRevenueStats>(`/api/admin/revenue${query}`),
     ...(options?.query ?? {}),
   });
 }
