@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import Stripe from "stripe";
-import { eq, desc, and, or, isNull, ne, sql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, ne, sql, inArray } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
@@ -370,7 +370,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
         .where(
           userIds.length === 1
             ? eq(usersTable.id, userIds[0]!)
-            : sql`${usersTable.id} = ANY(ARRAY[${sql.join(userIds.map(id => sql`${id}`), sql`, `)}])`
+            : inArray(usersTable.id, userIds)
         );
       for (const p of prefRows) {
         const { id, ...prefs } = p;
