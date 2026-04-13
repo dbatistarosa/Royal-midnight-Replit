@@ -221,47 +221,71 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   let isDriverOpenPoolQuery = false;
 
   if (caller.role === "driver") {
-    // Primary lookup: by userId foreign key
-    let driverRow = (await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId)))[0];
-
-    // Fallback: match by email if userId link was never set (common for drivers registered before the link was enforced)
-    if (!driverRow) {
-      const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
-      if (callerUser?.email) {
-        const found = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.email, callerUser.email));
-        driverRow = found[0];
-        // Retroactively link userId so future lookups use the fast path
-        if (driverRow) {
-          db.update(driversTable).set({ userId: caller.userId }).where(eq(driversTable.id, driverRow.id))
-            .catch(err => console.error("[bookings] retroactive driver userId link error:", err));
-        }
-      }
-    }
-
-    if (!driverRow) {
-      res.json([]);
-      return;
-    }
-
     const requestedDriverId = parsed.data.driverId;
     const requestedStatus = parsed.data.status;
 
     if (requestedDriverId != null) {
-      // Driver may only query their own driverId
-      if (requestedDriverId !== driverRow.id) {
+      // When the frontend explicitly passes driverId, verify ownership directly from that
+      // driver record. This is the most reliable path and avoids userId/email mismatch bugs
+      // that occur when a driver has multiple records (onboarding + admin-created).
+      const [targetDriver] = await db
+        .select({ id: driversTable.id, userId: driversTable.userId, email: driversTable.email })
+        .from(driversTable)
+        .where(eq(driversTable.id, requestedDriverId));
+
+      if (!targetDriver) {
         res.status(403).json({ error: "Access denied" });
         return;
       }
-      // Already in conditions via parsed.data.driverId above — no extra condition needed
-    } else if (requestedStatus === "pending" || requestedStatus === "authorized") {
-      // Requesting the open/unassigned pool — includes both pending and authorized bookings.
-      // Pre-fetch this driver's busy windows so conflicting trips can be hidden below.
-      conditions.push(isNull(bookingsTable.driverId));
-      isDriverOpenPoolQuery = true;
-      driverBusyWindows = await getDriverBusyWindows(driverRow.id);
+
+      // Verify caller owns this driver record (by userId or by email match)
+      let authorized = targetDriver.userId === caller.userId;
+      if (!authorized && targetDriver.email) {
+        const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
+        authorized = !!callerUser?.email && callerUser.email.toLowerCase() === targetDriver.email.toLowerCase();
+        // Retroactively link so future requests use the fast path
+        if (authorized && !targetDriver.userId) {
+          db.update(driversTable).set({ userId: caller.userId }).where(eq(driversTable.id, targetDriver.id))
+            .catch(err => console.error("[bookings] retroactive driver userId link error:", err));
+        }
+      }
+
+      if (!authorized) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
+      // driverId condition already added at line ~209 via parsed.data.driverId
     } else {
-      // Default: own assigned bookings only
-      conditions.push(eq(bookingsTable.driverId, driverRow.id));
+      // No explicit driverId — look up the driver by caller identity
+      let driverRow = (await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId)))[0];
+
+      // Fallback: match by email if userId link was never set
+      if (!driverRow) {
+        const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
+        if (callerUser?.email) {
+          const found = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.email, callerUser.email));
+          driverRow = found[0];
+          if (driverRow) {
+            db.update(driversTable).set({ userId: caller.userId }).where(eq(driversTable.id, driverRow.id))
+              .catch(err => console.error("[bookings] retroactive driver userId link error:", err));
+          }
+        }
+      }
+
+      if (!driverRow) {
+        res.json([]);
+        return;
+      }
+
+      if (requestedStatus === "pending" || requestedStatus === "authorized") {
+        // Requesting the open/unassigned pool
+        conditions.push(isNull(bookingsTable.driverId));
+        isDriverOpenPoolQuery = true;
+        driverBusyWindows = await getDriverBusyWindows(driverRow.id);
+      } else {
+        // Default: own assigned bookings only
+        conditions.push(eq(bookingsTable.driverId, driverRow.id));
+      }
     }
   }
 
