@@ -138,6 +138,44 @@ async function runStartupMigrations(): Promise<void> {
         AND d.total_rides IS DISTINCT FROM coalesce(sub.cnt, 0)
     `);
 
+    // Re-assign bookings from duplicate driver records to the canonical record.
+    // Must run BEFORE the userId de-dup step below so we can still find siblings
+    // by matching userId.
+    // Canonical = the record with the most rides for a given user_id.
+    // Any booking assigned to a secondary/duplicate record gets moved to the canonical one.
+    await client.query(`
+      UPDATE bookings b
+      SET driver_id = mapping.canonical_id
+      FROM (
+        SELECT
+          dup.id      AS old_id,
+          canon.id    AS canonical_id
+        FROM drivers dup
+        JOIN (
+          SELECT DISTINCT ON (user_id) id, user_id
+          FROM drivers
+          WHERE user_id IS NOT NULL
+          ORDER BY user_id, total_rides DESC, id ASC
+        ) canon ON canon.user_id = dup.user_id
+        WHERE dup.id != canon.id
+          AND dup.user_id IS NOT NULL
+      ) mapping
+      WHERE b.driver_id = mapping.old_id
+    `);
+
+    // After consolidating bookings, refresh total_rides on canonical records
+    // so the dashboard stats remain accurate.
+    await client.query(`
+      UPDATE drivers d
+      SET total_rides = (
+        SELECT count(*)::int
+        FROM bookings b
+        WHERE b.driver_id = d.id
+          AND b.status = 'completed'
+      )
+      WHERE d.user_id IS NOT NULL
+    `);
+
     // De-duplicate driver userId links: when a user has multiple driver records linked
     // to the same userId, keep the link only on the record with the most rides (the
     // admin-created, historically active one) and null out the others. This prevents
