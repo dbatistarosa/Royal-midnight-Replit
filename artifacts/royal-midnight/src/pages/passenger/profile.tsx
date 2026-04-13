@@ -2,12 +2,13 @@ import { useGetUser, useUpdateUser, getGetUserQueryKey } from "@workspace/api-cl
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { useAuth } from "@/contexts/auth";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag, Users, Plus, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { API_BASE } from "@/lib/constants";
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -52,6 +53,122 @@ function TogglePill({
     >
       {children}
     </button>
+  );
+}
+
+type ManagedTraveler = { eaUserId: number; travelerId: number; travelerName: string | null; travelerEmail: string | null };
+
+function ManagedTravelersPanel({ userId, token }: { userId: number; token: string }) {
+  const { toast } = useToast();
+  const [travelers, setTravelers] = useState<ManagedTraveler[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [addEmail, setAddEmail] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/users/${userId}/managed-travelers`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() as Promise<ManagedTraveler[]> : Promise.resolve([]))
+      .then(setTravelers)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [userId, token]);
+
+  const handleAdd = async () => {
+    if (!addEmail.trim()) return;
+    setAdding(true);
+    try {
+      const res = await fetch(`${API_BASE}/users/${userId}/managed-travelers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email: addEmail.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        toast({ title: err.error || "Could not add traveler", variant: "destructive" }); return;
+      }
+      const t = await res.json() as ManagedTraveler;
+      setTravelers(prev => [...prev, t]);
+      setAddEmail("");
+      toast({ title: "Traveler linked" });
+    } catch {
+      toast({ title: "Error adding traveler", variant: "destructive" });
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleRemove = async (travelerId: number) => {
+    setRemoving(travelerId);
+    try {
+      await fetch(`${API_BASE}/users/${userId}/managed-travelers/${travelerId}`, {
+        method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+      });
+      setTravelers(prev => prev.filter(t => t.travelerId !== travelerId));
+      toast({ title: "Traveler removed" });
+    } catch {
+      toast({ title: "Error", variant: "destructive" });
+    } finally {
+      setRemoving(null);
+    }
+  };
+
+  return (
+    <div className="bg-card border border-border p-5 sm:p-7 space-y-4">
+      <div className="flex items-start gap-3 mb-2">
+        <div className="w-8 h-8 bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <Users className="w-4 h-4 text-primary" />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-white">Delegate / Travel Manager</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Link travelers whose bookings you manage. When booking you can switch who the trip is for.</p>
+        </div>
+      </div>
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Loading...</div>
+      ) : (
+        <>
+          {travelers.length > 0 && (
+            <div className="space-y-0 divide-y divide-white/5">
+              {travelers.map(t => (
+                <div key={t.travelerId} className="flex items-center justify-between py-2.5">
+                  <div>
+                    <p className="text-sm text-white">{t.travelerName ?? "—"}</p>
+                    <p className="text-xs text-muted-foreground">{t.travelerEmail ?? ""}</p>
+                  </div>
+                  <button
+                    onClick={() => handleRemove(t.travelerId)}
+                    disabled={removing === t.travelerId}
+                    className="text-gray-600 hover:text-red-400 p-1 transition-colors"
+                  >
+                    {removing === t.travelerId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Input
+              className="flex-1 rounded-none bg-white/5 border-white/10 text-white placeholder:text-gray-600"
+              placeholder="Traveler's Royal Midnight email"
+              value={addEmail}
+              onChange={e => setAddEmail(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && void handleAdd()}
+            />
+            <Button
+              onClick={handleAdd}
+              disabled={adding || !addEmail.trim()}
+              className="rounded-none bg-primary text-black hover:bg-primary/90 text-xs uppercase tracking-widest px-4"
+            >
+              {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The traveler must have an existing Royal Midnight account. Enter their exact login email.
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -305,6 +422,11 @@ function PassengerProfileInner() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Managed Travelers / Delegate panel */}
+      {authUser && token && (
+        <ManagedTravelersPanel userId={authUser.id} token={token} />
       )}
     </PortalLayout>
   );

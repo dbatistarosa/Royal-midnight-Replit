@@ -32,6 +32,12 @@ export const bookingsTable = pgTable("bookings", {
   authorizedAt: timestamp("authorized_at", { withTimezone: true }),
   checklistCompletedAt: timestamp("checklist_completed_at", { withTimezone: true }),
   preferredDriverId: integer("preferred_driver_id"),
+  // Multi-stop itinerary (Phase 3 — item 13)
+  waypoints: text("waypoints"),           // JSON array of address strings
+  charterMode: text("charter_mode"),      // "route" | "hourly"
+  charterHours: integer("charter_hours"), // only set when charterMode="hourly"
+  // Delegate/EA booking (Phase 3 — item 15)
+  bookedByUserId: integer("booked_by_user_id"), // EA who booked on behalf of traveler
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

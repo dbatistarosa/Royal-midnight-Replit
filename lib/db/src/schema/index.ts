@@ -16,3 +16,5 @@ export * from "./email-logs";
 export * from "./vehicle-catalog";
 export * from "./otp-codes";
 export * from "./user-favorite-drivers";
+export * from "./geo-zones";
+export * from "./managed-travelers";

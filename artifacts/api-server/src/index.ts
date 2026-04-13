@@ -88,6 +88,42 @@ async function runStartupMigrations(): Promise<void> {
       )
     `);
 
+    // bookings: multi-stop itinerary + charter mode + delegate booking (Phase 3)
+    await client.query(`
+      ALTER TABLE bookings
+        ADD COLUMN IF NOT EXISTS waypoints TEXT,
+        ADD COLUMN IF NOT EXISTS charter_mode TEXT,
+        ADD COLUMN IF NOT EXISTS charter_hours INTEGER,
+        ADD COLUMN IF NOT EXISTS booked_by_user_id INTEGER
+    `);
+
+    // Geofenced pricing zones table (Phase 3 — item 14)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS geo_zones (
+        id             SERIAL PRIMARY KEY,
+        name           TEXT NOT NULL,
+        description    TEXT,
+        type           TEXT NOT NULL DEFAULT 'circle',
+        geometry       TEXT NOT NULL,
+        rate_multiplier REAL NOT NULL DEFAULT 1.0,
+        is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    // Delegate / EA managed travelers junction table (Phase 3 — item 15)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS managed_travelers (
+        ea_user_id     INTEGER NOT NULL,
+        traveler_id    INTEGER NOT NULL,
+        traveler_name  TEXT,
+        traveler_email TEXT,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (ea_user_id, traveler_id)
+      )
+    `);
+
     // Backfill drivers.total_rides from completed bookings (full reconciliation — runs on every boot)
     await client.query(`
       UPDATE drivers d

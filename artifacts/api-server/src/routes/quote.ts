@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, settingsTable, pricingRulesTable } from "@workspace/db";
+import { db, settingsTable, pricingRulesTable, geoZonesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
 
@@ -20,10 +20,34 @@ const AIRPORT_ADDRESSES: Record<string, string> = {
   FLL: "Fort Lauderdale-Hollywood International Airport, 100 Terminal Dr, Fort Lauderdale, FL 33315",
   MIA: "Miami International Airport, 2100 NW 42nd Ave, Miami, FL 33142",
   PBI: "Palm Beach International Airport, 1000 James L Turnage Blvd, West Palm Beach, FL 33406",
+  MCO: "Orlando International Airport, One Jeff Fuqua Blvd, Orlando, FL 32827",
+  TPA: "Tampa International Airport, 4100 George J Bean Pkwy, Tampa, FL 33607",
+  JAX: "Jacksonville International Airport, 2400 Yankee Clipper Dr, Jacksonville, FL 32218",
+  RSW: "Southwest Florida International Airport, 11000 Terminal Access Rd, Fort Myers, FL 33913",
+  SRQ: "Sarasota Bradenton International Airport, 6000 Airport Cir, Sarasota, FL 34243",
+  PIE: "St. Pete-Clearwater International Airport, 14700 Terminal Blvd, Clearwater, FL 33762",
+  GNV: "Gainesville Regional Airport, 3880 NE 39th Ave, Gainesville, FL 32609",
+  TLH: "Tallahassee International Airport, 3300 Capital Circle SW, Tallahassee, FL 32310",
+  EYW: "Key West International Airport, 3491 S Roosevelt Blvd, Key West, FL 33040",
+  DAB: "Daytona Beach International Airport, 700 Catalina Dr, Daytona Beach, FL 32114",
+  MLB: "Melbourne Orlando International Airport, 1 Air Terminal Pkwy, Melbourne, FL 32901",
+  VPS: "Destin–Fort Walton Beach Airport, 1 Putt-Putt Place, Eglin AFB, FL 32542",
+  ECP: "Northwest Florida Beaches International Airport, 6300 West Bay Pkwy, Panama City Beach, FL 32409",
+  PNS: "Pensacola International Airport, 2430 Airport Blvd, Pensacola, FL 32504",
+  OCF: "Ocala International Airport, 1770 SW 60th Ave, Ocala, FL 34474",
+  SFB: "Orlando Sanford International Airport, 1200 Red Cleveland Blvd, Sanford, FL 32773",
 };
 
 // AIRPORT_KEYWORDS is used only to decide whether to add the airport surcharge
-const AIRPORT_KEYWORDS = ["FLL", "MIA", "PBI", "Fort Lauderdale-Hollywood", "Miami International", "Palm Beach International"];
+const AIRPORT_KEYWORDS = [
+  "FLL", "MIA", "PBI", "MCO", "TPA", "JAX", "RSW", "SRQ", "PIE",
+  "GNV", "TLH", "EYW", "DAB", "MLB", "VPS", "ECP", "PNS", "OCF", "SFB",
+  "Fort Lauderdale-Hollywood", "Miami International", "Palm Beach International",
+  "Orlando International", "Tampa International", "Jacksonville International",
+  "Southwest Florida International", "Sarasota Bradenton", "St. Pete-Clearwater",
+  "Key West International", "Daytona Beach International", "Melbourne Orlando",
+  "Tallahassee International", "Gainesville Regional", "Pensacola International",
+];
 
 function isAirportTrip(address: string): boolean {
   return AIRPORT_KEYWORDS.some((k) => address.toLowerCase().includes(k.toLowerCase()));
@@ -48,6 +72,7 @@ function resolveAddress(raw: string): string {
 async function getDirectionsDistance(
   pickup: string,
   dropoff: string,
+  waypoints?: string[],
 ): Promise<{ distance: number; duration: number } | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return null;
@@ -64,6 +89,11 @@ async function getDirectionsDistance(
     url.searchParams.set("units", "imperial");
     url.searchParams.set("key", apiKey);
 
+    if (waypoints && waypoints.length > 0) {
+      const resolved = waypoints.map(resolveAddress).join("|");
+      url.searchParams.set("waypoints", resolved);
+    }
+
     const response = await fetch(url.toString());
     const data = await response.json() as {
       status: string;
@@ -77,15 +107,16 @@ async function getDirectionsDistance(
 
     if (data.status !== "OK" || !data.routes?.length) return null;
 
-    const leg = data.routes[0].legs[0];
-    if (!leg) return null;
+    // Sum all legs (multi-stop routes have multiple legs)
+    const legs = data.routes[0].legs;
+    if (!legs?.length) return null;
 
-    const distanceMiles = leg.distance.value / 1609.344;
-    const durationMinutes = Math.round(leg.duration.value / 60);
+    const totalDistanceMeters = legs.reduce((sum, l) => sum + l.distance.value, 0);
+    const totalDurationSeconds = legs.reduce((sum, l) => sum + l.duration.value, 0);
 
     return {
-      distance: Math.round(distanceMiles * 10) / 10,
-      duration: durationMinutes,
+      distance: Math.round((totalDistanceMeters / 1609.344) * 10) / 10,
+      duration: Math.round(totalDurationSeconds / 60),
     };
   } catch {
     return null;
@@ -109,6 +140,88 @@ function fallbackDistance(pickup: string, dropoff: string): { distance: number; 
 
   // Generic South Florida point-to-point — rough estimate
   return { distance: 25, duration: 40 };
+}
+
+// ── Geo Zone helpers ──────────────────────────────────────────────────────────
+
+/** Haversine distance in km between two lat/lng points */
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** Ray-casting point-in-polygon. coords: [[lng,lat],...] (GeoJSON order) */
+function pointInPolygon(lat: number, lng: number, coords: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+    const xi = coords[i]![0]!, yi = coords[i]![1]!;
+    const xj = coords[j]![0]!, yj = coords[j]![1]!;
+    const intersect = (yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** Geocode an address to lat/lng via Google Geocoding API (best-effort) */
+async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+    url.searchParams.set("address", address);
+    url.searchParams.set("key", apiKey);
+    const res = await fetch(url.toString());
+    const data = await res.json() as { status: string; results?: Array<{ geometry: { location: { lat: number; lng: number } } }> };
+    if (data.status !== "OK" || !data.results?.length) return null;
+    const loc = data.results[0]!.geometry.location;
+    return { lat: loc.lat, lng: loc.lng };
+  } catch {
+    return null;
+  }
+}
+
+/** Find the highest rate multiplier among active zones that cover any of the given addresses */
+async function getZoneMultiplier(addresses: string[]): Promise<number> {
+  try {
+    const zones = await db.select().from(geoZonesTable).where(eq(geoZonesTable.isActive, true));
+    if (!zones.length) return 1.0;
+
+    let maxMultiplier = 1.0;
+
+    for (const address of addresses) {
+      const point = await geocodeAddress(address);
+      if (!point) continue;
+
+      for (const zone of zones) {
+        let inZone = false;
+        try {
+          const geom = JSON.parse(zone.geometry) as Record<string, unknown>;
+          if (zone.type === "circle") {
+            const center = geom["center"] as [number, number];
+            const radiusKm = geom["radiusKm"] as number;
+            inZone = haversineKm(point.lat, point.lng, center[0], center[1]) <= radiusKm;
+          } else if (zone.type === "polygon") {
+            const coords = geom["coordinates"] as number[][];
+            inZone = pointInPolygon(point.lat, point.lng, coords);
+          }
+        } catch {
+          // malformed geometry — skip
+        }
+        if (inZone && zone.rateMultiplier > maxMultiplier) {
+          maxMultiplier = zone.rateMultiplier;
+        }
+      }
+    }
+
+    return maxMultiplier;
+  } catch {
+    return 1.0;
+  }
 }
 
 async function getSetting(key: string, fallback: string): Promise<string> {
@@ -147,6 +260,12 @@ async function getPricingForClass(vc: string): Promise<{ baseFare: number; rateP
   };
 }
 
+// Hourly charter rates per vehicle class ($/hr, before tax)
+const HOURLY_RATES: Record<string, number> = {
+  business: 95,
+  suv: 125,
+};
+
 router.post("/quote", async (req, res): Promise<void> => {
   const parsed = GetQuoteBody.safeParse(req.body);
   if (!parsed.success) {
@@ -156,6 +275,14 @@ router.post("/quote", async (req, res): Promise<void> => {
 
   const { pickupAddress, dropoffAddress, vehicleClass, passengers, pickupAt } = parsed.data;
   const vc = vehicleClass as string;
+
+  // Multi-stop + charter extensions (not in generated Zod schema yet — read from raw body)
+  const rawBody = req.body as Record<string, unknown>;
+  const waypoints: string[] = Array.isArray(rawBody.waypoints)
+    ? (rawBody.waypoints as string[]).filter(w => typeof w === "string" && w.trim())
+    : [];
+  const charterMode: string = typeof rawBody.charterMode === "string" ? rawBody.charterMode : "route";
+  const charterHours: number = typeof rawBody.charterHours === "number" ? rawBody.charterHours : 0;
 
   // Validate minimum lead time
   const minHoursStr = await getSetting("min_booking_hours", "2");
@@ -180,17 +307,37 @@ router.post("/quote", async (req, res): Promise<void> => {
   // Get pricing rule from DB for this vehicle class
   const { baseFare, ratePerMile, airportFee: ruleAirportFee } = await getPricingForClass(vc);
 
-  // Driving route distance via Directions API (falls back to hardcoded estimates)
-  const mapsResult = await getDirectionsDistance(pickupAddress, dropoffAddress);
-  const { distance: estimatedDistance, duration: estimatedDuration } =
-    mapsResult ?? fallbackDistance(pickupAddress, dropoffAddress);
+  let distanceCharge: number;
+  let estimatedDistance: number;
+  let estimatedDuration: number;
+
+  if (charterMode === "hourly" && charterHours > 0) {
+    // Hourly charter — price is time-based, not distance-based
+    const hourlyRate = HOURLY_RATES[vc] ?? baseFare * 1.5;
+    distanceCharge = Math.round((hourlyRate * charterHours - baseFare) * 100) / 100;
+    if (distanceCharge < 0) distanceCharge = 0;
+    // For display purposes, estimate ~25 mph average city speed
+    estimatedDistance = charterHours * 25;
+    estimatedDuration = charterHours * 60;
+  } else {
+    // Route-based (single or multi-stop)
+    const mapsResult = await getDirectionsDistance(pickupAddress, dropoffAddress, waypoints.length > 0 ? waypoints : undefined);
+    const fallback = fallbackDistance(pickupAddress, dropoffAddress);
+    estimatedDistance = mapsResult?.distance ?? fallback.distance;
+    estimatedDuration = mapsResult?.duration ?? fallback.duration;
+    distanceCharge = Math.round(estimatedDistance * ratePerMile * 100) / 100;
+  }
 
   // Airport fee: apply from pricing rule if either endpoint is an airport
-  const isAirport = isAirportTrip(pickupAddress) || isAirportTrip(dropoffAddress);
+  const allAddresses = [pickupAddress, dropoffAddress, ...waypoints];
+  const isAirport = allAddresses.some(a => isAirportTrip(a));
   const airportFee = isAirport ? ruleAirportFee : 0;
 
-  const distanceCharge = Math.round(estimatedDistance * ratePerMile * 100) / 100;
-  const subtotal = Math.round((baseFare + distanceCharge + airportFee) * 100) / 100;
+  // Geo zone pricing modifier (checked against all route addresses)
+  const zoneMultiplier = await getZoneMultiplier(allAddresses.map(resolveAddress));
+
+  const subtotalBeforeZone = Math.round((baseFare + distanceCharge + airportFee) * 100) / 100;
+  const subtotal = Math.round(subtotalBeforeZone * zoneMultiplier * 100) / 100;
   const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
   const totalWithTax = Math.round((subtotal + taxAmount) * 100) / 100;
 

@@ -68,6 +68,7 @@ import AdminSupport from "@/pages/admin/support";
 import AdminReports from "@/pages/admin/reports";
 import AdminSettings from "@/pages/admin/settings";
 import AdminPayouts from "@/pages/admin/payouts";
+import AdminGeoZones from "@/pages/admin/geo-zones";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -308,6 +309,9 @@ function Router() {
       </Route>
       <Route path="/admin/payouts">
         <AdminRoute component={AdminPayouts} />
+      </Route>
+      <Route path="/admin/geo-zones">
+        <AdminRoute component={AdminGeoZones} />
       </Route>
       <Route path="/admin">
         <AdminRoute component={AdminDashboard} />

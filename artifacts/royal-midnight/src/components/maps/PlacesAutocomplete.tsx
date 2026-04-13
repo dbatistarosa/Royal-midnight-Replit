@@ -26,9 +26,11 @@ interface PlacesAutocompleteProps {
   placeholder?: string;
   className?: string;
   id?: string;
+  /** "pickup" (default) — South FL airports only; "dropoff" — all FL airports + statewide address bias */
+  mode?: "pickup" | "dropoff";
 }
 
-export function PlacesAutocomplete({ value, onChange, placeholder, className, id }: PlacesAutocompleteProps) {
+export function PlacesAutocomplete({ value, onChange, placeholder, className, id, mode = "pickup" }: PlacesAutocompleteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [inputValue, setInputValue] = useState(value);
@@ -47,7 +49,7 @@ export function PlacesAutocomplete({ value, onChange, placeholder, className, id
   const fetchSuggestions = useCallback(async (query: string) => {
     setLoading(true);
     try {
-      const url = `${API_BASE}/autocomplete?q=${encodeURIComponent(query)}`;
+      const url = `${API_BASE}/autocomplete?q=${encodeURIComponent(query)}&mode=${mode}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error("Network error");
       const data = await res.json() as AutocompleteResponse;
@@ -144,7 +146,7 @@ export function PlacesAutocomplete({ value, onChange, placeholder, className, id
           {hasAirports && (
             <>
               <div className="px-3 py-1.5 text-[10px] uppercase tracking-widest text-gray-500 border-b border-white/10 bg-white/3">
-                South Florida Airports
+                {mode === "dropoff" ? "Florida Airports" : "South Florida Airports"}
               </div>
               {airports.map(airport => (
                 <button

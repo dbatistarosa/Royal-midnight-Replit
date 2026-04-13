@@ -4,14 +4,14 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
-import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock, Plane, CreditCard } from "lucide-react";
+import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, MapPin, Users, Briefcase, Clock, Plane, CreditCard, Plus, X, Route } from "lucide-react";
 
 import { useGetQuote, QuoteRequestVehicleClass } from "@workspace/api-client-react";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
 import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
-import { AIRLINES_BY_AIRPORT } from "@/data/airlines";
+import { AIRLINES_BY_AIRPORT, type FloridaAirportCode } from "@/data/airlines";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,13 +78,18 @@ const STEPS = [
 
 type StepKey = 1 | 2 | 3;
 
-type AirportCode = "FLL" | "MIA" | "PBI";
+type AirportCode = FloridaAirportCode;
+
+const FL_AIRPORT_CODES: FloridaAirportCode[] = [
+  "FLL", "MIA", "PBI", "MCO", "TPA", "JAX", "RSW", "SRQ", "PIE",
+  "GNV", "TLH", "EYW", "DAB", "MLB", "VPS", "ECP", "PNS", "OCF", "SFB",
+];
 
 function detectAirportCode(address: string): AirportCode | null {
   const upper = address.toUpperCase();
-  if (/\bFLL\b/.test(upper)) return "FLL";
-  if (/\bMIA\b/.test(upper)) return "MIA";
-  if (/\bPBI\b/.test(upper)) return "PBI";
+  for (const code of FL_AIRPORT_CODES) {
+    if (new RegExp(`\\b${code}\\b`).test(upper)) return code;
+  }
   return null;
 }
 
@@ -113,6 +118,14 @@ export default function Book() {
   type FavoriteDriver = { driverId: number; driverName: string | null; vehicleMake: string | null; vehicleModel: string | null; vehicleYear: string | null; rating: string | null };
   const [favoriteDrivers, setFavoriteDrivers] = useState<FavoriteDriver[]>([]);
   const [requestPreferredDriver, setRequestPreferredDriver] = useState(false);
+  // Multi-stop itinerary state
+  const [waypoints, setWaypoints] = useState<string[]>([]);
+  const [charterMode, setCharterMode] = useState<"route" | "hourly">("route");
+  const [charterHours, setCharterHours] = useState(3);
+  // Delegate/EA: booking on behalf of another traveler
+  type ManagedTraveler = { eaUserId: number; travelerId: number; travelerName: string | null; travelerEmail: string | null };
+  const [managedTravelers, setManagedTravelers] = useState<ManagedTraveler[]>([]);
+  const [bookingForTravelerId, setBookingForTravelerId] = useState<number | null>(null);
 
   const getQuote = useGetQuote();
 
@@ -242,12 +255,16 @@ export default function Book() {
       .catch(() => {});
   }, [step, token, user]);
 
-  // Load favorite drivers when reaching step 2 (vehicle selection) for logged-in users
+  // Load favorite drivers + managed travelers when reaching step 2 for logged-in users
   useEffect(() => {
     if (step !== 2 || !token || !user) return;
     fetch(`${API_BASE}/users/${user.id}/favorite-drivers`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() as Promise<FavoriteDriver[]> : Promise.resolve([]))
       .then(data => setFavoriteDrivers(Array.isArray(data) ? data : []))
+      .catch(() => {});
+    fetch(`${API_BASE}/users/${user.id}/managed-travelers`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() as Promise<ManagedTraveler[]> : Promise.resolve([]))
+      .then(data => setManagedTravelers(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [step, token, user]);
 
@@ -288,9 +305,14 @@ export default function Book() {
 
     setIsGettingQuotes(true);
     try {
-      const [businessRes, suvRes] = await Promise.allSettled([
-        getQuote.mutateAsync({ data: { pickupAddress, dropoffAddress, vehicleClass: "business" as QuoteRequestVehicleClass, passengers: numPax, pickupAt: isoDate } }),
-        getQuote.mutateAsync({ data: { pickupAddress, dropoffAddress, vehicleClass: "suv" as QuoteRequestVehicleClass, passengers: numPax, pickupAt: isoDate } }),
+      const quoteExtras = {
+        waypoints: waypoints.filter(w => w.trim()),
+        charterMode,
+        charterHours: charterMode === "hourly" ? charterHours : undefined,
+      };
+    const [businessRes, suvRes] = await Promise.allSettled([
+        getQuote.mutateAsync({ data: { pickupAddress, dropoffAddress, vehicleClass: "business" as QuoteRequestVehicleClass, passengers: numPax, pickupAt: isoDate, ...quoteExtras } as any }),
+        getQuote.mutateAsync({ data: { pickupAddress, dropoffAddress, vehicleClass: "suv" as QuoteRequestVehicleClass, passengers: numPax, pickupAt: isoDate, ...quoteExtras } as any }),
       ]);
 
       const newQuotes = { business: null as QuoteResult | null, suv: null as QuoteResult | null };
@@ -480,9 +502,13 @@ export default function Book() {
             priceQuoted: effectiveTotal,
             promoCode: promoResult?.valid && promoCode ? promoCode.toUpperCase() : null,
             discountAmount: promoResult?.valid && promoResult.discountAmount != null ? promoResult.discountAmount : null,
-            userId: userId,
+            userId: bookingForTravelerId ?? userId,
+            bookedByUserId: bookingForTravelerId ? userId : null,
             paymentType: "standard",
             preferredDriverId: requestPreferredDriver && favoriteDrivers.length > 0 ? favoriteDrivers[0]!.driverId : null,
+            waypoints: waypoints.filter(w => w.trim()).length > 0 ? JSON.stringify(waypoints.filter(w => w.trim())) : null,
+            charterMode: charterMode !== "route" ? charterMode : null,
+            charterHours: charterMode === "hourly" ? charterHours : null,
           }),
         });
         if (!bookingRes.ok) {
@@ -682,14 +708,80 @@ export default function Book() {
                           <PlacesAutocomplete
                             value={field.value}
                             onChange={field.onChange}
-                            placeholder="Destination or Airport Code"
+                            placeholder="Anywhere in Florida — address or airport"
                             className={inputClass}
                             id="dropoffAddress"
+                            mode="dropoff"
                           />
                         </FormControl>
                         <FormMessage className="text-red-400 text-xs mt-1" />
                       </FormItem>
                     )} />
+                  </div>
+
+                  {/* Waypoints (multi-stop) */}
+                  {waypoints.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[10px] uppercase tracking-widest text-primary flex items-center gap-1.5">
+                        <Route className="w-3 h-3" /> Intermediate Stops
+                      </p>
+                      {waypoints.map((wp, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-600 w-4 shrink-0">Stop {idx + 1}</span>
+                          <PlacesAutocomplete
+                            value={wp}
+                            onChange={val => setWaypoints(prev => prev.map((w, i) => i === idx ? val : w))}
+                            placeholder="Intermediate stop address"
+                            className={`flex-1 ${inputClass}`}
+                            mode="dropoff"
+                          />
+                          <button type="button" onClick={() => setWaypoints(prev => prev.filter((_, i) => i !== idx))} className="text-gray-600 hover:text-white p-1">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add Stop + Charter Mode toggle */}
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setWaypoints(prev => [...prev, ""])}
+                      className="flex items-center gap-1.5 text-xs text-primary border border-primary/30 px-3 py-1.5 hover:bg-primary/10 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Stop
+                    </button>
+
+                    {/* Charter mode toggle */}
+                    <div className="flex items-center gap-1 bg-white/5 border border-white/10 p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setCharterMode("route")}
+                        className={`px-3 py-1.5 text-xs transition-colors ${charterMode === "route" ? "bg-primary text-black font-semibold" : "text-gray-400 hover:text-white"}`}
+                      >
+                        By Route
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCharterMode("hourly")}
+                        className={`px-3 py-1.5 text-xs transition-colors ${charterMode === "hourly" ? "bg-primary text-black font-semibold" : "text-gray-400 hover:text-white"}`}
+                      >
+                        Hourly Charter
+                      </button>
+                    </div>
+
+                    {charterMode === "hourly" && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-500 uppercase tracking-widest">Hours</label>
+                        <div className="flex items-center gap-1 border border-white/15 bg-white/5">
+                          <button type="button" onClick={() => setCharterHours(h => Math.max(1, h - 1))} className="px-2 py-1 text-gray-400 hover:text-white text-sm">−</button>
+                          <span className="px-2 text-sm text-white w-6 text-center">{charterHours}</span>
+                          <button type="button" onClick={() => setCharterHours(h => Math.min(24, h + 1))} className="px-2 py-1 text-gray-400 hover:text-white text-sm">+</button>
+                        </div>
+                        <span className="text-xs text-gray-600">hr{charterHours !== 1 ? "s" : ""}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Airline selectors — shown when airport detected */}
@@ -921,6 +1013,40 @@ export default function Book() {
                   )}
                 </div>
 
+                {/* Booking For — shown when EA has managed travelers */}
+                {managedTravelers.length > 0 && (
+                  <div className="bg-[#0a0a0a] border border-white/8 px-4 sm:px-6 py-4 space-y-2">
+                    <p className="text-[10px] uppercase tracking-widest text-primary flex items-center gap-1.5">
+                      <Users className="w-3 h-3" /> Booking For
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {/* "Myself" option */}
+                      <button
+                        type="button"
+                        onClick={() => setBookingForTravelerId(null)}
+                        className={`px-3 py-1.5 text-xs border transition-colors ${bookingForTravelerId === null ? "bg-primary text-black border-primary font-semibold" : "border-white/15 text-gray-400 hover:text-white"}`}
+                      >
+                        Myself
+                      </button>
+                      {managedTravelers.map(t => (
+                        <button
+                          key={t.travelerId}
+                          type="button"
+                          onClick={() => setBookingForTravelerId(t.travelerId)}
+                          className={`px-3 py-1.5 text-xs border transition-colors ${bookingForTravelerId === t.travelerId ? "bg-primary text-black border-primary font-semibold" : "border-white/15 text-gray-400 hover:text-white"}`}
+                        >
+                          {t.travelerName ?? t.travelerEmail ?? `Traveler #${t.travelerId}`}
+                        </button>
+                      ))}
+                    </div>
+                    {bookingForTravelerId !== null && (
+                      <p className="text-xs text-gray-600">
+                        This booking will be linked to {managedTravelers.find(t => t.travelerId === bookingForTravelerId)?.travelerName ?? "the selected traveler"}'s account.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* Preferred Driver Toggle — only shown when passenger has saved drivers */}
                 {favoriteDrivers.length > 0 && (() => {
                   const fd = favoriteDrivers[0]!;
@@ -1109,6 +1235,8 @@ export default function Book() {
                         { label: "Name", value: form.getValues("passengerName") },
                         { label: "Email", value: form.getValues("passengerEmail") },
                         { label: "Phone", value: form.getValues("passengerPhone") },
+                        ...(charterMode === "hourly" ? [{ label: "Charter", value: `${charterHours} hr${charterHours !== 1 ? "s" : ""} hourly charter` }] : []),
+                        ...waypoints.filter(w => w.trim()).map((w, i) => ({ label: `Stop ${i + 1}`, value: w })),
                         ...(form.getValues("flightNumber") ? [{ label: "Flight", value: form.getValues("flightNumber")! }] : []),
                         ...(pickupAirline ? [{ label: "Pickup Airline", value: pickupAirline }] : []),
                         ...(dropoffAirline ? [{ label: "Dropoff Airline", value: dropoffAirline }] : []),
