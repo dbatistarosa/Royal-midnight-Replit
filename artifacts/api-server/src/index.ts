@@ -138,58 +138,105 @@ async function runStartupMigrations(): Promise<void> {
         AND d.total_rides IS DISTINCT FROM coalesce(sub.cnt, 0)
     `);
 
-    // Re-assign bookings from duplicate driver records to the canonical record.
-    // Must run BEFORE the userId de-dup step below so we can still find siblings
-    // by matching userId.
-    // Canonical = the record with the most rides for a given user_id.
-    // Any booking assigned to a secondary/duplicate record gets moved to the canonical one.
+    // ── Driver record deduplication (email-based, runs on every boot) ─────────
+    //
+    // A driver may have two records: one admin-created (possibly no user_id, has bookings)
+    // and one onboarding-created (has user_id, no bookings). We need to:
+    //   1. Pick the canonical record per email = the one with the most completed bookings
+    //   2. Reassign all bookings from non-canonical records to the canonical
+    //   3. Copy user_id FROM any sibling TO the canonical (if canonical lacks one)
+    //   4. Null out user_id on all non-canonical records
+    //   5. Refresh total_rides everywhere
+    //
+    // Using email (not user_id) so we catch siblings where user_id is on a different record.
+
+    // Step 1: Reassign bookings from non-canonical to canonical (email-grouped)
     await client.query(`
-      UPDATE bookings b
-      SET driver_id = mapping.canonical_id
-      FROM (
-        SELECT
-          dup.id      AS old_id,
-          canon.id    AS canonical_id
-        FROM drivers dup
-        JOIN (
-          SELECT DISTINCT ON (user_id) id, user_id
-          FROM drivers
-          WHERE user_id IS NOT NULL
-          ORDER BY user_id, total_rides DESC, id ASC
-        ) canon ON canon.user_id = dup.user_id
-        WHERE dup.id != canon.id
-          AND dup.user_id IS NOT NULL
-      ) mapping
-      WHERE b.driver_id = mapping.old_id
+      WITH booking_counts AS (
+        SELECT d.id, d.email, COUNT(b.id)::int AS cnt
+        FROM drivers d
+        LEFT JOIN bookings b ON b.driver_id = d.id AND b.status = 'completed'
+        WHERE d.email IS NOT NULL AND d.email <> ''
+        GROUP BY d.id, d.email
+      ),
+      email_canonical AS (
+        SELECT DISTINCT ON (email) id AS canonical_id, email
+        FROM booking_counts
+        ORDER BY email, cnt DESC, id ASC
+      ),
+      dup_map AS (
+        SELECT bc.id AS old_id, ec.canonical_id
+        FROM booking_counts bc
+        JOIN email_canonical ec ON ec.email = bc.email
+        WHERE bc.id <> ec.canonical_id
+      )
+      UPDATE bookings bk
+      SET driver_id = dm.canonical_id
+      FROM dup_map dm
+      WHERE bk.driver_id = dm.old_id
     `);
 
-    // After consolidating bookings, refresh total_rides on canonical records
-    // so the dashboard stats remain accurate.
+    // Step 2: Copy user_id from any sibling onto the canonical record (if it lacks one)
+    await client.query(`
+      WITH booking_counts AS (
+        SELECT d.id, d.email, COUNT(b.id)::int AS cnt
+        FROM drivers d
+        LEFT JOIN bookings b ON b.driver_id = d.id AND b.status = 'completed'
+        WHERE d.email IS NOT NULL AND d.email <> ''
+        GROUP BY d.id, d.email
+      ),
+      email_canonical AS (
+        SELECT DISTINCT ON (email) id AS canonical_id, email
+        FROM booking_counts
+        ORDER BY email, cnt DESC, id ASC
+      )
+      UPDATE drivers d
+      SET user_id = (
+        SELECT d2.user_id
+        FROM drivers d2
+        WHERE d2.email = d.email AND d2.user_id IS NOT NULL
+        ORDER BY d2.total_rides DESC
+        LIMIT 1
+      )
+      FROM email_canonical ec
+      WHERE d.id = ec.canonical_id
+        AND d.user_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM drivers d3 WHERE d3.email = d.email AND d3.user_id IS NOT NULL
+        )
+    `);
+
+    // Step 3: Null out user_id on all non-canonical records (prevents by-user returning them)
+    await client.query(`
+      WITH booking_counts AS (
+        SELECT d.id, d.email, COUNT(b.id)::int AS cnt
+        FROM drivers d
+        LEFT JOIN bookings b ON b.driver_id = d.id AND b.status = 'completed'
+        WHERE d.email IS NOT NULL AND d.email <> ''
+        GROUP BY d.id, d.email
+      ),
+      email_canonical AS (
+        SELECT DISTINCT ON (email) id AS canonical_id, email
+        FROM booking_counts
+        ORDER BY email, cnt DESC, id ASC
+      )
+      UPDATE drivers d
+      SET user_id = NULL
+      FROM booking_counts bc
+      JOIN email_canonical ec ON ec.email = bc.email
+      WHERE d.id = bc.id
+        AND bc.id <> ec.canonical_id
+        AND d.user_id IS NOT NULL
+    `);
+
+    // Step 4: Refresh total_rides on ALL driver records after consolidation
     await client.query(`
       UPDATE drivers d
       SET total_rides = (
-        SELECT count(*)::int
+        SELECT COUNT(*)::int
         FROM bookings b
-        WHERE b.driver_id = d.id
-          AND b.status = 'completed'
+        WHERE b.driver_id = d.id AND b.status = 'completed'
       )
-      WHERE d.user_id IS NOT NULL
-    `);
-
-    // De-duplicate driver userId links: when a user has multiple driver records linked
-    // to the same userId, keep the link only on the record with the most rides (the
-    // admin-created, historically active one) and null out the others. This prevents
-    // the "no trips" bug caused by by-user returning the empty onboarding-created record.
-    await client.query(`
-      UPDATE drivers d
-      SET user_id = NULL
-      WHERE user_id IS NOT NULL
-        AND id NOT IN (
-          SELECT DISTINCT ON (user_id) id
-          FROM drivers
-          WHERE user_id IS NOT NULL
-          ORDER BY user_id, total_rides DESC, id ASC
-        )
     `);
 
     // Compliance: compliance_hold column on drivers
