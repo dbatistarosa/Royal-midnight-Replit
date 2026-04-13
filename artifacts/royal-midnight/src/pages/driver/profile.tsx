@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, Star, Building2, ShieldCheck, Eye, EyeOff, Calendar, Lock, BarChart2, Camera } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, Star, Building2, ShieldCheck, Eye, EyeOff, Calendar, Lock, BarChart2, Camera, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -21,10 +21,11 @@ type Review = {
 
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "Finished", href: "/driver/history", icon: History },
-  { label: "Earnings", href: "/driver/earnings", icon: DollarSign },
-  { label: "Stats", href: "/driver/stats", icon: BarChart2 },
-  { label: "Profile", href: "/driver/profile", icon: User },
+  { label: "Finished",  href: "/driver/history",   icon: History },
+  { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
+  { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
+  { label: "Documents", href: "/driver/documents", icon: FileText },
+  { label: "Profile",   href: "/driver/profile",   icon: User },
 ];
 
 const labelClass = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";

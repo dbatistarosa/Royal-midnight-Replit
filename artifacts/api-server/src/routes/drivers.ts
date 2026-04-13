@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq, sql } from "drizzle-orm";
-import { db, driversTable, bookingsTable, settingsTable, usersTable } from "@workspace/db";
+import { eq, sql, desc } from "drizzle-orm";
+import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
@@ -194,14 +194,23 @@ router.get("/drivers/by-user/:userId", requireAuth, async (req, res): Promise<vo
     return;
   }
 
-  // Primary lookup: by userId foreign key
-  let driver = (await db.select().from(driversTable).where(eq(driversTable.userId, userId)))[0];
+  // Primary lookup: by userId foreign key.
+  // Order by total_rides DESC so that when a driver has two records (one admin-created
+  // with bookings, one from the onboarding flow), we always return the one with activity.
+  const byUserId = await db.select().from(driversTable)
+    .where(eq(driversTable.userId, userId))
+    .orderBy(desc(driversTable.totalRides));
+  let driver = byUserId[0];
 
   // Fallback: match by email for drivers whose userId link was never set
   if (!driver) {
     const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, userId));
     if (callerUser?.email) {
-      driver = (await db.select().from(driversTable).where(eq(driversTable.email, callerUser.email)))[0];
+      // Pick the record with the most rides if multiple email-matched records exist
+      const byEmail = await db.select().from(driversTable)
+        .where(eq(driversTable.email, callerUser.email))
+        .orderBy(desc(driversTable.totalRides));
+      driver = byEmail[0];
       // Retroactively link userId so future lookups use the fast path
       if (driver) {
         db.update(driversTable).set({ userId }).where(eq(driversTable.id, driver.id))
@@ -556,6 +565,108 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
       recentPayouts,
     })
   );
+});
+
+// ─── Compliance Documents (driver self-service) ──────────────────────────────
+
+/**
+ * GET /drivers/:id/documents
+ * Returns the driver's compliance document submissions and current expiry dates.
+ */
+router.get("/drivers/:id/documents", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const [driver] = await db.select({
+    id: driversTable.id,
+    userId: driversTable.userId,
+    email: driversTable.email,
+    licenseExpiry: driversTable.licenseExpiry,
+    regExpiry: driversTable.regExpiry,
+    insuranceExpiry: driversTable.insuranceExpiry,
+    complianceHold: driversTable.complianceHold,
+  }).from(driversTable).where(eq(driversTable.id, id));
+
+  if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin") {
+    const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
+    const emailMatch = callerUser?.email?.toLowerCase() === driver.email.toLowerCase();
+    if (driver.userId !== caller.userId && !emailMatch) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+  }
+
+  // Most recent submission per doc type
+  const docs = await db.select().from(complianceDocumentsTable)
+    .where(eq(complianceDocumentsTable.driverId, id))
+    .orderBy(desc(complianceDocumentsTable.submittedAt));
+
+  res.json({
+    currentExpiries: {
+      "Driver License": driver.licenseExpiry,
+      "Vehicle Registration": driver.regExpiry,
+      "Insurance": driver.insuranceExpiry,
+    },
+    complianceHold: driver.complianceHold,
+    submissions: docs.map(d => ({
+      ...d,
+      submittedAt: d.submittedAt.toISOString(),
+      reviewedAt: d.reviewedAt ? d.reviewedAt.toISOString() : null,
+    })),
+  });
+});
+
+/**
+ * POST /drivers/:id/documents
+ * Driver submits a new compliance document for review.
+ */
+router.post("/drivers/:id/documents", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const [driver] = await db.select({
+    id: driversTable.id, userId: driversTable.userId, email: driversTable.email,
+  }).from(driversTable).where(eq(driversTable.id, id));
+
+  if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin") {
+    const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
+    const emailMatch = callerUser?.email?.toLowerCase() === driver.email.toLowerCase();
+    if (driver.userId !== caller.userId && !emailMatch) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+  }
+
+  const { docType, fileUrl, newExpiry } = req.body as { docType?: string; fileUrl?: string; newExpiry?: string };
+  const validTypes = ["Driver License", "Vehicle Registration", "Insurance"];
+  if (!docType || !validTypes.includes(docType)) {
+    res.status(400).json({ error: `docType must be one of: ${validTypes.join(", ")}` });
+    return;
+  }
+  if (!fileUrl) {
+    res.status(400).json({ error: "fileUrl is required" });
+    return;
+  }
+
+  const [newDoc] = await db.insert(complianceDocumentsTable).values({
+    driverId: id,
+    docType,
+    fileUrl,
+    newExpiry: newExpiry ?? null,
+    status: "pending_review",
+  }).returning();
+
+  res.status(201).json({
+    ...newDoc,
+    submittedAt: newDoc.submittedAt.toISOString(),
+    reviewedAt: null,
+  });
 });
 
 export default router;

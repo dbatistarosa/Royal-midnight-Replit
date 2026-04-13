@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { sql, desc, eq } from "drizzle-orm";
-import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable } from "@workspace/db";
+import { sql, desc, eq, and, isNull, or, gt } from "drizzle-orm";
+import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable, complianceDocumentsTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
@@ -558,8 +558,7 @@ router.post("/admin/test-email", requireAdmin, async (req, res): Promise<void> =
 /**
  * GET /admin/compliance
  * Returns drivers whose license, registration, or insurance is expiring within
- * the next 30 days (or is already past).  All date fields are stored as TEXT
- * in YYYY-MM-DD format.
+ * the next 30 days (or is already past), enriched with any pending review docs.
  */
 router.get("/admin/compliance", requireAdmin, async (_req, res): Promise<void> => {
   const drivers = await db.select({
@@ -567,47 +566,177 @@ router.get("/admin/compliance", requireAdmin, async (_req, res): Promise<void> =
     name: driversTable.name,
     email: driversTable.email,
     phone: driversTable.phone,
-    approvalStatus: driversTable.approvalStatus,
+    complianceHold: driversTable.complianceHold,
     licenseExpiry: driversTable.licenseExpiry,
     regExpiry: driversTable.regExpiry,
     insuranceExpiry: driversTable.insuranceExpiry,
   }).from(driversTable);
 
+  // Fetch all pending/approved docs submitted in last 90 days
+  const pendingDocs = await db.select().from(complianceDocumentsTable)
+    .where(sql`status IN ('pending_review', 'approved') AND submitted_at >= now() - interval '90 days'`);
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const threshold = new Date(today);
-  threshold.setDate(threshold.getDate() + 30);
 
-  type Alert = { driverId: number; driverName: string; driverEmail: string; type: string; expiry: string; daysRemaining: number; };
+  type Alert = {
+    driverId: number;
+    driverName: string;
+    driverEmail: string;
+    driverPhone: string;
+    type: string;
+    expiry: string;
+    daysRemaining: number;
+    complianceHold: boolean;
+    pendingDoc?: { id: number; fileUrl: string; newExpiry: string | null; submittedAt: string };
+  };
   const alerts: Alert[] = [];
 
   for (const d of drivers) {
     const checks: Array<{ label: string; val: string | null | undefined }> = [
-      { label: "Driver License",    val: d.licenseExpiry },
+      { label: "Driver License",       val: d.licenseExpiry },
       { label: "Vehicle Registration", val: d.regExpiry },
-      { label: "Insurance",        val: d.insuranceExpiry },
+      { label: "Insurance",            val: d.insuranceExpiry },
     ];
     for (const { label, val } of checks) {
       if (!val) continue;
       const expiry = new Date(val);
       if (isNaN(expiry.getTime())) continue;
       const daysRemaining = Math.floor((expiry.getTime() - today.getTime()) / 86_400_000);
-      if (daysRemaining <= 30) {
-        alerts.push({
-          driverId: d.id,
-          driverName: d.name,
-          driverEmail: d.email,
-          type: label,
-          expiry: val,
-          daysRemaining,
-        });
-      }
+      if (daysRemaining > 30) continue;
+
+      // Find the most recent pending_review doc for this driver+type
+      const pending = pendingDocs
+        .filter(p => p.driverId === d.id && p.docType === label && p.status === "pending_review")
+        .sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime())[0];
+
+      alerts.push({
+        driverId: d.id,
+        driverName: d.name,
+        driverEmail: d.email,
+        driverPhone: d.phone,
+        type: label,
+        expiry: val,
+        daysRemaining,
+        complianceHold: d.complianceHold ?? false,
+        pendingDoc: pending
+          ? { id: pending.id, fileUrl: pending.fileUrl, newExpiry: pending.newExpiry, submittedAt: pending.submittedAt.toISOString() }
+          : undefined,
+      });
     }
   }
 
-  // Sort: most urgent first
   alerts.sort((a, b) => a.daysRemaining - b.daysRemaining);
   res.json(alerts);
+});
+
+/**
+ * POST /admin/compliance/remind
+ * Send a compliance reminder email to a specific driver for a specific doc type.
+ */
+router.post("/admin/compliance/remind", requireAdmin, async (req, res): Promise<void> => {
+  const { driverId, docType } = req.body as { driverId?: number; docType?: string };
+  if (!driverId || !docType) {
+    res.status(400).json({ error: "driverId and docType are required" });
+    return;
+  }
+
+  const [driver] = await db.select({
+    id: driversTable.id,
+    name: driversTable.name,
+    email: driversTable.email,
+    licenseExpiry: driversTable.licenseExpiry,
+    regExpiry: driversTable.regExpiry,
+    insuranceExpiry: driversTable.insuranceExpiry,
+  }).from(driversTable).where(eq(driversTable.id, driverId));
+
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  const expiryMap: Record<string, string | null | undefined> = {
+    "Driver License": driver.licenseExpiry,
+    "Vehicle Registration": driver.regExpiry,
+    "Insurance": driver.insuranceExpiry,
+  };
+  const expiryDate = expiryMap[docType] ?? "";
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const daysRemaining = expiryDate
+    ? Math.floor((new Date(expiryDate).getTime() - today.getTime()) / 86_400_000)
+    : 0;
+
+  const { sendComplianceReminder } = await import("../lib/mailer.js");
+  await sendComplianceReminder({
+    to: driver.email,
+    driverName: driver.name,
+    docType,
+    expiryDate,
+    daysRemaining,
+  });
+
+  res.json({ success: true, sentTo: driver.email });
+});
+
+/**
+ * POST /admin/compliance/documents/:id/approve
+ * Approve a submitted compliance document and update the driver's expiry field.
+ * Also clears compliance_hold if all docs are now valid.
+ */
+router.post("/admin/compliance/documents/:id/approve", requireAdmin, async (req, res): Promise<void> => {
+  const docId = parseInt(req.params["id"] ?? "", 10);
+  const { newExpiry, adminNotes } = req.body as { newExpiry?: string; adminNotes?: string };
+
+  if (isNaN(docId)) {
+    res.status(400).json({ error: "Invalid document id" });
+    return;
+  }
+  if (!newExpiry) {
+    res.status(400).json({ error: "newExpiry (YYYY-MM-DD) is required" });
+    return;
+  }
+
+  const [doc] = await db.select().from(complianceDocumentsTable).where(eq(complianceDocumentsTable.id, docId));
+  if (!doc) {
+    res.status(404).json({ error: "Document not found" });
+    return;
+  }
+
+  // Mark doc as approved
+  await db.update(complianceDocumentsTable)
+    .set({ status: "approved", newExpiry, adminNotes: adminNotes ?? null, reviewedAt: new Date() })
+    .where(eq(complianceDocumentsTable.id, docId));
+
+  // Update the relevant expiry field on the driver record
+  const expiryField: Record<string, keyof typeof driversTable.$inferInsert> = {
+    "Driver License": "licenseExpiry",
+    "Vehicle Registration": "regExpiry",
+    "Insurance": "insuranceExpiry",
+  };
+  const field = expiryField[doc.docType];
+  if (field) {
+    await db.update(driversTable).set({ [field]: newExpiry } as any).where(eq(driversTable.id, doc.driverId));
+  }
+
+  // Re-check all docs — if none are expired anymore, lift compliance_hold
+  const [updatedDriver] = await db.select({
+    licenseExpiry: driversTable.licenseExpiry,
+    regExpiry: driversTable.regExpiry,
+    insuranceExpiry: driversTable.insuranceExpiry,
+  }).from(driversTable).where(eq(driversTable.id, doc.driverId));
+
+  if (updatedDriver) {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const allValid = [updatedDriver.licenseExpiry, updatedDriver.regExpiry, updatedDriver.insuranceExpiry]
+      .filter(Boolean)
+      .every(exp => (exp as string) > todayStr);
+
+    if (allValid) {
+      await db.update(driversTable).set({ complianceHold: false }).where(eq(driversTable.id, doc.driverId));
+    }
+  }
+
+  res.json({ success: true, docId, driverId: doc.driverId, newExpiry });
 });
 
 export default router;

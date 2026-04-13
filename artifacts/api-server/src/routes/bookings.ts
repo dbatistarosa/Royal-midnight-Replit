@@ -256,14 +256,23 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       }
       // driverId condition already added at line ~209 via parsed.data.driverId
     } else {
-      // No explicit driverId — look up the driver by caller identity
-      let driverRow = (await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId)))[0];
+      // No explicit driverId — look up the driver by caller identity.
+      // Order by total_rides DESC so we always get the most active record when
+      // a driver has two entries (admin-created with history + onboarding record).
+      const byUserId = await db.select({ id: driversTable.id, totalRides: driversTable.totalRides })
+        .from(driversTable)
+        .where(eq(driversTable.userId, caller.userId))
+        .orderBy(desc(driversTable.totalRides));
+      let driverRow: { id: number } | undefined = byUserId[0];
 
       // Fallback: match by email if userId link was never set
       if (!driverRow) {
         const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
         if (callerUser?.email) {
-          const found = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.email, callerUser.email));
+          const found = await db.select({ id: driversTable.id, totalRides: driversTable.totalRides })
+            .from(driversTable)
+            .where(eq(driversTable.email, callerUser.email))
+            .orderBy(desc(driversTable.totalRides));
           driverRow = found[0];
           if (driverRow) {
             db.update(driversTable).set({ userId: caller.userId }).where(eq(driversTable.id, driverRow.id))
@@ -815,13 +824,20 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
     return;
   }
 
-  const [driverRow] = await db
-    .select({ id: driversTable.id, approvalStatus: driversTable.approvalStatus })
+  const byUserId = await db
+    .select({ id: driversTable.id, approvalStatus: driversTable.approvalStatus, complianceHold: driversTable.complianceHold, totalRides: driversTable.totalRides })
     .from(driversTable)
-    .where(eq(driversTable.userId, caller.userId));
+    .where(eq(driversTable.userId, caller.userId))
+    .orderBy(desc(driversTable.totalRides));
+  const driverRow = byUserId[0];
 
   if (!driverRow || driverRow.approvalStatus !== "approved") {
     res.status(403).json({ error: "Driver not approved" });
+    return;
+  }
+
+  if (driverRow.complianceHold) {
+    res.status(403).json({ error: "compliance_hold", message: "Your account is on a compliance hold due to an expired document. Please upload a renewed document to resume accepting rides." });
     return;
   }
 

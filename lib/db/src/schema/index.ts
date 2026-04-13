@@ -18,3 +18,4 @@ export * from "./otp-codes";
 export * from "./user-favorite-drivers";
 export * from "./geo-zones";
 export * from "./managed-travelers";
+export * from "./compliance-documents";

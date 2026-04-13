@@ -664,3 +664,77 @@ export async function sendPasswordResetEmail(to: string, passengerName: string, 
 
   await send(to, "Reset Your Royal Midnight Password", html, "password_reset");
 }
+
+// ─── Compliance Emails ────────────────────────────────────────────────────────
+
+export async function sendComplianceReminder(params: {
+  to: string;
+  driverName: string;
+  docType: string;
+  expiryDate: string;
+  daysRemaining: number;
+  dashboardUrl?: string;
+}) {
+  const { to, driverName, docType, expiryDate, daysRemaining, dashboardUrl = "https://royalmidnight.com/driver/documents" } = params;
+  const urgency = daysRemaining <= 0 ? "EXPIRED" : daysRemaining <= 7 ? "CRITICAL" : "REMINDER";
+  const color = daysRemaining <= 0 ? "#ef4444" : daysRemaining <= 7 ? "#f97316" : "#c9a84c";
+  const statusText = daysRemaining <= 0
+    ? `Your ${docType} has <strong style="color:#ef4444">EXPIRED</strong>.`
+    : daysRemaining === 0
+    ? `Your ${docType} expires <strong style="color:#f97316">TODAY</strong>.`
+    : `Your ${docType} expires in <strong style="color:${color}">${daysRemaining} day${daysRemaining !== 1 ? "s" : ""}</strong> (${expiryDate}).`;
+
+  const html = wrap(`
+<h2 style="color:#ffffff;margin:0 0 8px;font-size:22px;font-weight:600">Document ${urgency}: ${docType}</h2>
+<p style="color:#9ca3af;margin:0 0 20px;font-size:14px">Royal Midnight — Compliance Notice</p>
+<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${driverName},</p>
+<p style="color:#9ca3af;font-size:14px;margin:0 0 24px">${statusText}</p>
+<p style="color:#9ca3af;font-size:14px;margin:0 0 24px">
+  To continue accepting rides, please upload a renewed copy of your ${docType} through your driver dashboard immediately.
+  ${daysRemaining <= 0 ? "<strong style=\"color:#ef4444\">Your account has been placed on hold until a valid document is approved.</strong>" : ""}
+</p>
+<p style="text-align:center;margin:0 0 24px;">
+  <a href="${dashboardUrl}" style="background:#c9a84c;color:#050505;padding:12px 32px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px;display:inline-block">UPLOAD DOCUMENT</a>
+</p>
+<p style="color:#6b7280;font-size:12px;margin:0">
+  Once your document is reviewed and approved by the Royal Midnight team, your account will be fully reinstated.
+</p>`);
+
+  await send(to, `[Action Required] Your ${docType} ${daysRemaining <= 0 ? "has expired" : `expires in ${daysRemaining} day${daysRemaining !== 1 ? "s" : ""}`}`, html, "compliance_reminder");
+}
+
+export async function sendComplianceLockoutAdmin(params: {
+  driverName: string;
+  driverEmail: string;
+  docType: string;
+  expiryDate: string;
+  ridesUnassigned: number;
+}) {
+  const { driverName, driverEmail, docType, expiryDate, ridesUnassigned } = params;
+  const html = wrap(`
+<h2 style="color:#ef4444;margin:0 0 8px;font-size:22px;font-weight:600">🚨 URGENT: Driver Account Locked Out</h2>
+<p style="color:#9ca3af;margin:0 0 20px;font-size:14px">Royal Midnight — Compliance Enforcement</p>
+<div style="background:#1c0a0a;border:1px solid #ef4444;padding:16px;margin-bottom:24px">
+  <p style="color:#ef4444;font-weight:bold;margin:0 0 8px;font-size:15px">Automatic Compliance Hold Applied</p>
+  <table style="width:100%;font-size:14px;border-collapse:collapse">
+    <tr><td style="color:#9ca3af;padding:4px 0;width:140px">Driver</td><td style="color:#e5e7eb">${driverName} &lt;${driverEmail}&gt;</td></tr>
+    <tr><td style="color:#9ca3af;padding:4px 0">Expired Document</td><td style="color:#ef4444;font-weight:bold">${docType}</td></tr>
+    <tr><td style="color:#9ca3af;padding:4px 0">Expiry Date</td><td style="color:#e5e7eb">${expiryDate}</td></tr>
+    <tr><td style="color:#9ca3af;padding:4px 0">Rides Unassigned</td><td style="color:#f97316;font-weight:bold">${ridesUnassigned} ride${ridesUnassigned !== 1 ? "s" : ""} returned to Dispatch pool</td></tr>
+  </table>
+</div>
+<p style="color:#e5e7eb;font-size:14px;margin:0 0 16px">
+  ${ridesUnassigned > 0
+    ? `<strong style="color:#f97316">${ridesUnassigned} upcoming ride${ridesUnassigned !== 1 ? "s have" : " has"} been automatically moved back to the Unassigned Dispatch pool.</strong> Please reassign them immediately.`
+    : "No upcoming rides were affected."}
+</p>
+<p style="color:#9ca3af;font-size:14px;margin:0 0 24px">
+  The driver's account will automatically unlock once you approve their renewed ${docType} in the Fleet → Compliance tab.
+</p>
+<p style="text-align:center;margin:0 0 24px;">
+  <a href="https://royalmidnight.com/admin/fleet" style="background:#ef4444;color:#ffffff;padding:12px 32px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px;display:inline-block">REVIEW COMPLIANCE</a>
+</p>`);
+
+  await send(ADMIN_EMAIL, `🚨 URGENT: ${driverName} locked out — ${docType} expired — ${ridesUnassigned} ride${ridesUnassigned !== 1 ? "s" : ""} unassigned`, html, "compliance_lockout_admin");
+}
+

@@ -53,6 +53,9 @@ export const driversTable = pgTable("drivers", {
   payoutBankName: text("payout_bank_name"),
   payoutRoutingNumber: text("payout_routing_number"),
   payoutAccountNumber: text("payout_account_number"),
+
+  // Compliance hold — set to true at Day Zero when a document expires without renewal
+  complianceHold: boolean("compliance_hold").notNull().default(false),
 });
 
 export const insertDriverSchema = createInsertSchema(driversTable).omit({ id: true, createdAt: true, updatedAt: true });

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, BarChart2 } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, BarChart2, FileText } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
@@ -8,10 +8,11 @@ import { API_BASE } from "@/lib/constants";
 
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "Finished", href: "/driver/history", icon: History },
-  { label: "Earnings", href: "/driver/earnings", icon: DollarSign },
-  { label: "Stats", href: "/driver/stats", icon: BarChart2 },
-  { label: "Profile", href: "/driver/profile", icon: User },
+  { label: "Finished",  href: "/driver/history",   icon: History },
+  { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
+  { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
+  { label: "Documents", href: "/driver/documents", icon: FileText },
+  { label: "Profile",   href: "/driver/profile",   icon: User },
 ];
 
 type EarningsData = {
