@@ -152,13 +152,21 @@ function StatusToggle({ driverId, currentStatus, authHeader }: { driverId: numbe
 
 function LocationShareToggle({ driverId, authHeader }: { driverId: number; authHeader: string }) {
   const { toast } = useToast();
-  const [sharing, setSharing] = useState<boolean>(() => {
+
+  // Whether geolocation is actively running in this session.
+  // Deliberately NOT initialised from localStorage — iOS Safari requires a
+  // user gesture before watchPosition can be called without a permission prompt.
+  const [sharing, setSharing] = useState(false);
+
+  // When localStorage says the driver had sharing ON last session, show a one-tap
+  // "Resume" banner so we can restart via a user gesture (no permission re-prompt).
+  const [pendingResume, setPendingResume] = useState<boolean>(() => {
     try { return localStorage.getItem(LOCATION_LS_KEY) === "true"; } catch { return false; }
   });
+
   const [geoError, setGeoError] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Track last known position so the heartbeat can ping even when stationary
   const lastPosRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const sendLocation = useCallback(async (lat: number, lng: number) => {
@@ -173,21 +181,15 @@ function LocationShareToggle({ driverId, authHeader }: { driverId: number; authH
     }
   }, [driverId, authHeader]);
 
+  // Must only be called from a user gesture (click handler) to satisfy iOS Safari.
   const startSharing = useCallback(() => {
     if (!navigator.geolocation) {
       setGeoError("Geolocation is not supported by this browser.");
       return;
     }
 
-    const geoOptions: PositionOptions = {
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 5000,
-    };
+    const geoOptions: PositionOptions = { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 };
 
-    // watchPosition fires continuously as the device moves, and on many mobile
-    // browsers (iOS Safari, Chrome Android) continues even when the tab is in
-    // the background or the screen is locked.
     watchIdRef.current = navigator.geolocation.watchPosition(
       ({ coords }) => {
         lastPosRef.current = { lat: coords.latitude, lng: coords.longitude };
@@ -202,14 +204,11 @@ function LocationShareToggle({ driverId, authHeader }: { driverId: number; authH
       geoOptions,
     );
 
-    // Heartbeat: send a ping every 5 seconds even when the device hasn't moved
-    // (watchPosition only fires on position changes, so we need this to keep
-    // the "last updated" timestamp fresh in the admin dispatch view).
+    // Heartbeat every 5 s so dispatch "last updated" stays fresh even when stationary.
     heartbeatRef.current = setInterval(() => {
       if (lastPosRef.current) {
         void sendLocation(lastPosRef.current.lat, lastPosRef.current.lng);
       } else {
-        // Haven't received a fix yet — ask for a one-shot position
         navigator.geolocation.getCurrentPosition(
           ({ coords: c }) => {
             lastPosRef.current = { lat: c.latitude, lng: c.longitude };
@@ -234,36 +233,57 @@ function LocationShareToggle({ driverId, authHeader }: { driverId: number; authH
     lastPosRef.current = null;
   }, []);
 
+  // Cleanup only — no auto-start on mount (iOS Safari requires user gesture).
   useEffect(() => {
-    if (sharing) startSharing();
     return () => stopSharing();
-  }, [sharing, startSharing, stopSharing]);
+  }, [stopSharing]);
 
-  const toggle = () => {
-    const next = !sharing;
-    setSharing(next);
-    localStorage.setItem(LOCATION_LS_KEY, String(next));
-    if (!next) {
-      toast({ title: "Location sharing disabled", description: "Dispatch will no longer see your position." });
-    } else {
-      toast({ title: "Location sharing enabled", description: "Your position will update every 5 seconds." });
-    }
+  const enable = () => {
+    setPendingResume(false);
+    setSharing(true);
+    startSharing();
+    localStorage.setItem(LOCATION_LS_KEY, "true");
+    toast({ title: "Location sharing enabled", description: "Your position will update every 5 seconds." });
+  };
+
+  const disable = () => {
+    stopSharing();
+    setSharing(false);
+    setPendingResume(false);
+    localStorage.setItem(LOCATION_LS_KEY, "false");
+    toast({ title: "Location sharing disabled", description: "Dispatch will no longer see your position." });
   };
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <button
-        onClick={toggle}
-        className={`flex items-center gap-2 px-4 py-2 border text-sm font-medium transition-colors ${
-          sharing
-            ? "bg-blue-500/10 border-blue-500/20 text-blue-400"
-            : "bg-white/5 border-white/10 text-muted-foreground"
-        }`}
-        title={sharing ? "Disable location sharing" : "Enable location sharing"}
-      >
-        <MapPin className={`w-4 h-4 ${sharing ? "text-blue-400" : ""}`} />
-        {sharing ? "Sharing Location · 5s" : "Share Location"}
-      </button>
+      {pendingResume && !sharing ? (
+        <button
+          onClick={enable}
+          className="flex items-center gap-2 px-4 py-2 border border-amber-400/30 bg-amber-400/10 text-amber-400 text-sm font-medium transition-colors hover:border-amber-400/60"
+          title="Tap to resume location sharing"
+        >
+          <MapPin className="w-4 h-4" />
+          Tap to Resume Sharing
+        </button>
+      ) : sharing ? (
+        <button
+          onClick={disable}
+          className="flex items-center gap-2 px-4 py-2 border border-blue-500/20 bg-blue-500/10 text-blue-400 text-sm font-medium transition-colors"
+          title="Disable location sharing"
+        >
+          <MapPin className="w-4 h-4" />
+          Sharing Location · 5s
+        </button>
+      ) : (
+        <button
+          onClick={enable}
+          className="flex items-center gap-2 px-4 py-2 border border-white/10 bg-white/5 text-muted-foreground text-sm font-medium transition-colors hover:text-white"
+          title="Enable location sharing"
+        >
+          <MapPin className="w-4 h-4" />
+          Share Location
+        </button>
+      )}
       {geoError && <span className="text-xs text-red-400 max-w-[200px] text-right">{geoError}</span>}
     </div>
   );

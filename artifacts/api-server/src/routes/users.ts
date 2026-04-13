@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, or, and, isNull } from "drizzle-orm";
-import { db, usersTable, bookingsTable, userFavoriteDriversTable, driversTable } from "@workspace/db";
+import { db, usersTable, bookingsTable, userFavoriteDriversTable, driversTable, managedTravelersTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import {
   ListUsersQueryParams,
@@ -246,6 +246,68 @@ router.delete("/users/:id/favorite-drivers/:driverId", requireAuth, async (req, 
   await db
     .delete(userFavoriteDriversTable)
     .where(and(eq(userFavoriteDriversTable.userId, userId), eq(userFavoriteDriversTable.driverId, driverId)));
+
+  res.json({ ok: true });
+});
+
+// ── Delegate / EA managed traveler routes ────────────────────────────────────
+
+// GET /users/:id/managed-travelers — list travelers this EA can book for
+router.get("/users/:id/managed-travelers", requireAuth, async (req, res): Promise<void> => {
+  const eaUserId = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(eaUserId)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== eaUserId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  const rows = await db.select().from(managedTravelersTable)
+    .where(eq(managedTravelersTable.eaUserId, eaUserId));
+
+  res.json(rows);
+});
+
+// POST /users/:id/managed-travelers — add a traveler by email
+router.post("/users/:id/managed-travelers", requireAuth, async (req, res): Promise<void> => {
+  const eaUserId = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(eaUserId)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== eaUserId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  const { email } = req.body as { email?: string };
+  if (!email?.trim()) { res.status(400).json({ error: "email is required" }); return; }
+
+  const [traveler] = await db.select().from(usersTable).where(eq(usersTable.email, email.trim().toLowerCase()));
+  if (!traveler) { res.status(404).json({ error: "No account found with that email" }); return; }
+  if (traveler.id === eaUserId) { res.status(400).json({ error: "Cannot add yourself as a traveler" }); return; }
+
+  await db.insert(managedTravelersTable).values({
+    eaUserId,
+    travelerId: traveler.id,
+    travelerName: traveler.name,
+    travelerEmail: traveler.email,
+  }).onConflictDoNothing();
+
+  res.status(201).json({ eaUserId, travelerId: traveler.id, travelerName: traveler.name, travelerEmail: traveler.email });
+});
+
+// DELETE /users/:id/managed-travelers/:travelerId — remove a traveler link
+router.delete("/users/:id/managed-travelers/:travelerId", requireAuth, async (req, res): Promise<void> => {
+  const eaUserId = parseInt(req.params["id"] ?? "", 10);
+  const travelerId = parseInt(req.params["travelerId"] ?? "", 10);
+  if (isNaN(eaUserId) || isNaN(travelerId)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== eaUserId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  await db.delete(managedTravelersTable)
+    .where(and(eq(managedTravelersTable.eaUserId, eaUserId), eq(managedTravelersTable.travelerId, travelerId)));
 
   res.json({ ok: true });
 });

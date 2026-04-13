@@ -221,7 +221,23 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   let isDriverOpenPoolQuery = false;
 
   if (caller.role === "driver") {
-    const [driverRow] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId));
+    // Primary lookup: by userId foreign key
+    let driverRow = (await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, caller.userId)))[0];
+
+    // Fallback: match by email if userId link was never set (common for drivers registered before the link was enforced)
+    if (!driverRow) {
+      const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
+      if (callerUser?.email) {
+        const found = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.email, callerUser.email));
+        driverRow = found[0];
+        // Retroactively link userId so future lookups use the fast path
+        if (driverRow) {
+          db.update(driversTable).set({ userId: caller.userId }).where(eq(driversTable.id, driverRow.id))
+            .catch(err => console.error("[bookings] retroactive driver userId link error:", err));
+        }
+      }
+    }
+
     if (!driverRow) {
       res.json([]);
       return;

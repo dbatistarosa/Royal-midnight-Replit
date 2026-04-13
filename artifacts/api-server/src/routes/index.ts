@@ -18,6 +18,7 @@ import githubRouter from "./github";
 import settingsRouter from "./settings";
 import autocompleteRouter from "./autocomplete";
 import storageRouter from "./storage";
+import geoZonesRouter from "./geo-zones";
 
 const router: IRouter = Router();
 
@@ -40,5 +41,6 @@ router.use(githubRouter);
 router.use(settingsRouter);
 router.use(autocompleteRouter);
 router.use(storageRouter);
+router.use(geoZonesRouter);
 
 export default router;
