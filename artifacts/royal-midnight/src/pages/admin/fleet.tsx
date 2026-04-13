@@ -702,7 +702,7 @@ export default function AdminFleet() {
             <div className="mb-4">
               <p className="text-xs text-muted-foreground uppercase tracking-widest mb-2">Submitted Document</p>
               <a
-                href={approveModal.doc.fileUrl}
+                href={approveModal.doc.fileUrl.startsWith("http") ? approveModal.doc.fileUrl : `${API_BASE}/storage/objects${approveModal.doc.fileUrl}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 px-3 py-2 bg-background/50 border border-border text-sm text-primary hover:border-primary/50 transition-colors"
