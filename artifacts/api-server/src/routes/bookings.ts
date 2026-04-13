@@ -206,11 +206,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
 
   const conditions = [];
   if (parsed.data.status) conditions.push(eq(bookingsTable.status, parsed.data.status));
-  // driverId condition for drivers is added BELOW with sibling-awareness.
-  // For admin/passenger/corporate, add it upfront (they can query arbitrary driver IDs).
-  if (parsed.data.driverId != null && caller.role !== "driver") {
-    conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
-  }
+  if (parsed.data.driverId != null) conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
   if (parsed.data.userId != null) conditions.push(eq(bookingsTable.userId, parsed.data.userId));
 
   // Drivers never see unconfirmed/unpaid bookings — only admin and passengers see them.
@@ -229,7 +225,9 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     const requestedStatus = parsed.data.status;
 
     if (requestedDriverId != null) {
-      // Verify the caller owns this driver record (by userId or email match).
+      // When the frontend explicitly passes driverId, verify ownership directly from that
+      // driver record. This is the most reliable path and avoids userId/email mismatch bugs
+      // that occur when a driver has multiple records (onboarding + admin-created).
       const [targetDriver] = await db
         .select({ id: driversTable.id, userId: driversTable.userId, email: driversTable.email })
         .from(driversTable)
@@ -240,13 +238,15 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
         return;
       }
 
+      // Verify caller owns this driver record (by userId or by email match)
       let authorized = targetDriver.userId === caller.userId;
       if (!authorized && targetDriver.email) {
         const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
         authorized = !!callerUser?.email && callerUser.email.toLowerCase() === targetDriver.email.toLowerCase();
+        // Retroactively link so future requests use the fast path
         if (authorized && !targetDriver.userId) {
           db.update(driversTable).set({ userId: caller.userId }).where(eq(driversTable.id, targetDriver.id))
-            .catch(err => console.error("[bookings] retroactive userId link error:", err));
+            .catch(err => console.error("[bookings] retroactive driver userId link error:", err));
         }
       }
 
@@ -254,45 +254,29 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
         res.status(403).json({ error: "Access denied" });
         return;
       }
-
-      // Sibling-aware: include bookings from ALL driver records with the same email.
-      // This handles the case where an admin-created record and an onboarding record both
-      // exist for the same driver — bookings may be split across them.
-      const siblingIds: number[] = [requestedDriverId];
-      if (targetDriver.email) {
-        const siblings = await db
-          .select({ id: driversTable.id })
-          .from(driversTable)
-          .where(eq(driversTable.email, targetDriver.email));
-        siblings.forEach(s => { if (!siblingIds.includes(s.id)) siblingIds.push(s.id); });
-      }
-
-      if (siblingIds.length === 1) {
-        conditions.push(eq(bookingsTable.driverId, siblingIds[0]!));
-      } else {
-        conditions.push(or(...siblingIds.map(id => eq(bookingsTable.driverId, id)))!);
-      }
+      // driverId condition already added at line ~209 via parsed.data.driverId
     } else {
       // No explicit driverId — look up the driver by caller identity.
-      // Order by total_rides DESC so we always return the most active record.
-      const byUserId = await db.select({ id: driversTable.id, email: driversTable.email, totalRides: driversTable.totalRides })
+      // Order by total_rides DESC so we always get the most active record when
+      // a driver has two entries (admin-created with history + onboarding record).
+      const byUserId = await db.select({ id: driversTable.id, totalRides: driversTable.totalRides })
         .from(driversTable)
         .where(eq(driversTable.userId, caller.userId))
         .orderBy(desc(driversTable.totalRides));
-      let driverRow: { id: number; email: string | null } | undefined = byUserId[0];
+      let driverRow: { id: number } | undefined = byUserId[0];
 
       // Fallback: match by email if userId link was never set
       if (!driverRow) {
         const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
         if (callerUser?.email) {
-          const found = await db.select({ id: driversTable.id, email: driversTable.email, totalRides: driversTable.totalRides })
+          const found = await db.select({ id: driversTable.id, totalRides: driversTable.totalRides })
             .from(driversTable)
             .where(eq(driversTable.email, callerUser.email))
             .orderBy(desc(driversTable.totalRides));
           driverRow = found[0];
           if (driverRow) {
             db.update(driversTable).set({ userId: caller.userId }).where(eq(driversTable.id, driverRow.id))
-              .catch(err => console.error("[bookings] retroactive userId link error:", err));
+              .catch(err => console.error("[bookings] retroactive driver userId link error:", err));
           }
         }
       }
@@ -303,26 +287,14 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       }
 
       if (requestedStatus === "pending" || requestedStatus === "authorized") {
-        // Requesting the open/unassigned pool — show only trips with no driver assigned yet
+        // Requesting the open/unassigned pool — includes both pending and authorized bookings.
+        // Pre-fetch this driver's busy windows so conflicting trips can be hidden below.
         conditions.push(isNull(bookingsTable.driverId));
         isDriverOpenPoolQuery = true;
         driverBusyWindows = await getDriverBusyWindows(driverRow.id);
       } else {
-        // Own assigned bookings — use sibling IDs so bookings on any of the driver's
-        // records all appear, regardless of which record they were originally assigned to.
-        const ownSiblingIds: number[] = [driverRow.id];
-        if (driverRow.email) {
-          const siblings = await db
-            .select({ id: driversTable.id })
-            .from(driversTable)
-            .where(eq(driversTable.email, driverRow.email));
-          siblings.forEach(s => { if (!ownSiblingIds.includes(s.id)) ownSiblingIds.push(s.id); });
-        }
-        if (ownSiblingIds.length === 1) {
-          conditions.push(eq(bookingsTable.driverId, ownSiblingIds[0]!));
-        } else {
-          conditions.push(or(...ownSiblingIds.map(id => eq(bookingsTable.driverId, id)))!);
-        }
+        // Default: own assigned bookings only
+        conditions.push(eq(bookingsTable.driverId, driverRow.id));
       }
     }
   }
@@ -1001,7 +973,7 @@ async function resolveAssignedDriver(
   // ORDER BY total_rides DESC so we always get the canonical (most-active) record
   // when a driver has multiple records linked to the same userId.
   const driverRows = await db
-    .select({ id: driversTable.id, userId: driversTable.userId, email: driversTable.email })
+    .select({ id: driversTable.id, userId: driversTable.userId })
     .from(driversTable)
     .where(eq(driversTable.userId, caller.userId))
     .orderBy(desc(driversTable.totalRides));
@@ -1012,24 +984,13 @@ async function resolveAssignedDriver(
     return null;
   }
 
-  // Collect all sibling driver IDs (same email) so trip actions work regardless
-  // of which record the booking was originally assigned to.
-  const siblingIds: number[] = [driverRow.id];
-  if (driverRow.email) {
-    const siblings = await db
-      .select({ id: driversTable.id })
-      .from(driversTable)
-      .where(eq(driversTable.email, driverRow.email));
-    siblings.forEach(s => { if (!siblingIds.includes(s.id)) siblingIds.push(s.id); });
-  }
-
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId));
   if (!booking) {
     res.status(404).json({ error: "Booking not found" });
     return null;
   }
 
-  if (!siblingIds.includes(booking.driverId ?? -1)) {
+  if (booking.driverId !== driverRow.id) {
     res.status(403).json({ error: "You are not assigned to this booking" });
     return null;
   }
