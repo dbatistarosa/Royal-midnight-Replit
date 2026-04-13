@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock, BarChart2, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag } from "lucide-react";
-import { format } from "date-fns";
+import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock, BarChart2, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag, FileText, AlertTriangle, ShieldOff, XCircle, Upload } from "lucide-react";
+import { format, differenceInDays, parseISO, isValid } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
@@ -14,11 +14,31 @@ const LOCATION_LS_KEY = "rm_driver_location_sharing";
 
 const driverNavItems = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "Finished", href: "/driver/history", icon: History },
-  { label: "Earnings", href: "/driver/earnings", icon: DollarSign },
-  { label: "Stats", href: "/driver/stats", icon: BarChart2 },
-  { label: "Profile", href: "/driver/profile", icon: User },
+  { label: "Finished",  href: "/driver/history",   icon: History },
+  { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
+  { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
+  { label: "Documents", href: "/driver/documents", icon: FileText },
+  { label: "Profile",   href: "/driver/profile",   icon: User },
 ];
+
+type DocType = "Driver License" | "Vehicle Registration" | "Insurance";
+const DOC_TYPES: DocType[] = ["Driver License", "Vehicle Registration", "Insurance"];
+
+type ComplianceDocs = {
+  currentExpiries: Record<DocType, string | null>;
+  complianceHold: boolean;
+};
+
+function daysUntilExpiry(expiry: string | null | undefined): number | null {
+  if (!expiry) return null;
+  try {
+    const d = parseISO(expiry);
+    if (!isValid(d)) return null;
+    return differenceInDays(d, new Date());
+  } catch {
+    return null;
+  }
+}
 
 type DriverAvailability = "available" | "on_break" | "unavailable";
 
@@ -1235,6 +1255,7 @@ export default function DriverDashboard() {
   const [earnings, setEarnings] = useState<EarningsData | null>(null);
   const [upcomingCount, setUpcomingCount] = useState<number | null>(null);
   const [myRidesRefreshKey, setMyRidesRefreshKey] = useState(0);
+  const [compliance, setCompliance] = useState<ComplianceDocs | null>(null);
 
   const authHeader = `Bearer ${token ?? ""}`;
 
@@ -1257,6 +1278,12 @@ export default function DriverDashboard() {
         setUpcomingCount(upcoming);
       })
       .catch(() => setUpcomingCount(0));
+
+    // Load compliance doc expiries for the warning banner
+    fetch(`${API_BASE}/drivers/${driverRecord.id}/documents`, { headers: { Authorization: header } })
+      .then(r => r.ok ? r.json() as Promise<ComplianceDocs> : Promise.resolve(null))
+      .then(data => setCompliance(data))
+      .catch(() => setCompliance(null));
   }, [driverRecord?.id, token]);
 
   if (isLoading) {
@@ -1278,8 +1305,90 @@ export default function DriverDashboard() {
     ? (currentStatus as DriverAvailability)
     : "unavailable";
 
+  // Docs expiring within 30 days (but not yet expired)
+  const expiringDocs = compliance
+    ? DOC_TYPES.filter(dt => {
+        const days = daysUntilExpiry(compliance.currentExpiries[dt]);
+        return days !== null && days >= 0 && days <= 30;
+      })
+    : [];
+
+  // Expired docs (for lockout screen detail)
+  const expiredDocs = compliance
+    ? DOC_TYPES.filter(dt => {
+        const days = daysUntilExpiry(compliance.currentExpiries[dt]);
+        return days !== null && days < 0;
+      })
+    : [];
+
   return (
     <PortalLayout title="Driver Portal" navItems={driverNavItems}>
+      {/* Compliance hold full-page lockout */}
+      {compliance?.complianceHold && (
+        <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center px-6">
+          <div className="max-w-lg w-full text-center">
+            <div className="w-16 h-16 border border-red-900/40 bg-red-900/20 flex items-center justify-center mx-auto mb-6">
+              <ShieldOff className="w-8 h-8 text-red-500" />
+            </div>
+            <h2 className="text-2xl font-serif text-white mb-2">Account on Hold</h2>
+            <p className="text-gray-400 text-sm mb-6 leading-relaxed">
+              Hello {(user?.name ?? driverRecord?.name ?? "Driver").split(" ")[0]}, your account has been placed
+              on a compliance hold because one or more required documents have expired. You cannot accept new
+              rides until your documents are reviewed and approved.
+            </p>
+            {expiredDocs.length > 0 && (
+              <div className="bg-red-900/10 border border-red-900/30 p-4 mb-6 text-left space-y-2">
+                <p className="text-xs uppercase tracking-widest text-red-500 mb-3">Expired Documents</p>
+                {expiredDocs.map(dt => (
+                  <div key={dt} className="flex items-center gap-2 text-sm text-gray-300">
+                    <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                    {dt}
+                    {compliance.currentExpiries[dt] && (
+                      <span className="text-gray-500 text-xs ml-auto">Expired {compliance.currentExpiries[dt]}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <a
+              href="/driver/documents"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-black text-sm font-semibold uppercase tracking-widest hover:bg-primary/90 transition-colors"
+            >
+              <Upload className="w-4 h-4" />
+              Upload Documents Now
+            </a>
+            <p className="text-xs text-gray-600 mt-4">
+              Your hold will be lifted once an admin approves your renewed documents.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Expiry warning banner (≤30 days, not yet expired) */}
+      {!compliance?.complianceHold && expiringDocs.length > 0 && (
+        <div className="mb-6 border border-amber-500/30 bg-amber-500/10 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex items-center gap-2 flex-1">
+            <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-300">Document Expiry Warning</p>
+              <p className="text-xs text-amber-400/80 mt-0.5">
+                {expiringDocs.map(dt => {
+                  const days = daysUntilExpiry(compliance!.currentExpiries[dt]);
+                  return `${dt} expires in ${days} day${days === 1 ? "" : "s"}`;
+                }).join(" · ")}
+              </p>
+            </div>
+          </div>
+          <a
+            href="/driver/documents"
+            className="self-start sm:self-auto flex items-center gap-1.5 text-xs uppercase tracking-widest text-amber-400 border border-amber-500/40 px-4 py-2 hover:bg-amber-500/10 transition-colors whitespace-nowrap"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            Upload Now
+          </a>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 sm:mb-8 gap-4">
         <div className="flex items-center gap-3 sm:gap-4">

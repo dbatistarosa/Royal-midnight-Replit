@@ -824,13 +824,20 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
     return;
   }
 
-  const [driverRow] = await db
-    .select({ id: driversTable.id, approvalStatus: driversTable.approvalStatus })
+  const byUserId = await db
+    .select({ id: driversTable.id, approvalStatus: driversTable.approvalStatus, complianceHold: driversTable.complianceHold, totalRides: driversTable.totalRides })
     .from(driversTable)
-    .where(eq(driversTable.userId, caller.userId));
+    .where(eq(driversTable.userId, caller.userId))
+    .orderBy(desc(driversTable.totalRides));
+  const driverRow = byUserId[0];
 
   if (!driverRow || driverRow.approvalStatus !== "approved") {
     res.status(403).json({ error: "Driver not approved" });
+    return;
+  }
+
+  if (driverRow.complianceHold) {
+    res.status(403).json({ error: "compliance_hold", message: "Your account is on a compliance hold due to an expired document. Please upload a renewed document to resume accepting rides." });
     return;
   }
 

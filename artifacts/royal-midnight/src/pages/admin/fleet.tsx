@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag,
   MessageSquare, BarChart, Settings, Loader2, CheckCircle, XCircle,
   Wallet, Plus, Trash2, X, ChevronDown, AlertTriangle, ShieldAlert,
+  Mail, Clock, ExternalLink, Lock, Unlock,
 } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -74,13 +75,18 @@ const YEAR_OPTIONS = Array.from({ length: currentYear - MIN_CATALOG_YEAR + 1 }, 
 
 type Tab = "vehicles" | "catalog" | "compliance";
 
+type PendingDoc = { id: number; fileUrl: string; newExpiry: string | null; submittedAt: string };
+
 type ComplianceAlert = {
   driverId: number;
   driverName: string;
   driverEmail: string;
+  driverPhone: string;
   type: string;
   expiry: string;
   daysRemaining: number;
+  complianceHold: boolean;
+  pendingDoc?: PendingDoc;
 };
 
 export default function AdminFleet() {
@@ -96,6 +102,11 @@ export default function AdminFleet() {
   // Compliance alerts
   const [compliance, setCompliance] = useState<ComplianceAlert[]>([]);
   const [complianceLoading, setComplianceLoading] = useState(false);
+  const [remindingKey, setRemindingKey] = useState<string | null>(null);
+  const [approveModal, setApproveModal] = useState<{ alert: ComplianceAlert; doc: PendingDoc } | null>(null);
+  const [approveExpiry, setApproveExpiry] = useState("");
+  const [approveNotes, setApproveNotes] = useState("");
+  const [approvingSaving, setApprovingSaving] = useState(false);
 
   // Vehicle catalog
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -238,6 +249,52 @@ export default function AdminFleet() {
       else next.add(type);
       return next;
     });
+  };
+
+  const handleSendReminder = async (alert: ComplianceAlert) => {
+    const key = `${alert.driverId}-${alert.type}`;
+    setRemindingKey(key);
+    try {
+      const res = await fetch(`${API_BASE}/admin/compliance/remind`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: authHdr },
+        body: JSON.stringify({ driverId: alert.driverId, docType: alert.type }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast({ title: "Reminder sent", description: `Email sent to ${alert.driverEmail} about their ${alert.type}.` });
+    } catch {
+      toast({ title: "Error", description: "Could not send reminder.", variant: "destructive" });
+    } finally {
+      setRemindingKey(null);
+    }
+  };
+
+  const handleApproveDoc = async () => {
+    if (!approveModal || !approveExpiry) return;
+    setApprovingSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/compliance/documents/${approveModal.doc.id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: authHdr },
+        body: JSON.stringify({ newExpiry: approveExpiry, adminNotes: approveNotes }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast({ title: "Document approved", description: `${approveModal.alert.type} updated. Compliance hold lifted if all docs are valid.` });
+      setApproveModal(null);
+      setApproveExpiry("");
+      setApproveNotes("");
+      // Refresh compliance list
+      setComplianceLoading(true);
+      fetch(`${API_BASE}/admin/compliance`, { headers: { Authorization: authHdr } })
+        .then(r => r.ok ? r.json() as Promise<ComplianceAlert[]> : Promise.resolve([]))
+        .then(data => setCompliance(Array.isArray(data) ? data : []))
+        .catch(() => setCompliance([]))
+        .finally(() => setComplianceLoading(false));
+    } catch {
+      toast({ title: "Error", description: "Could not approve document.", variant: "destructive" });
+    } finally {
+      setApprovingSaving(false);
+    }
   };
 
   return (
@@ -524,7 +581,9 @@ export default function AdminFleet() {
           <div className="mb-6">
             <p className="text-sm text-muted-foreground">
               Driver licenses, vehicle registrations, and insurance policies expiring within the next 30 days.
-              Contact each driver immediately to avoid service interruptions.
+              Click <Mail className="inline w-3.5 h-3.5" /> to email the driver. Drivers with uploaded renewals show a
+              <span className="inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 text-xs bg-amber-500/10 border border-amber-500/20 text-amber-400"><Clock className="w-3 h-3" /> Pending Review</span>
+              badge — click it to approve and set the new expiry.
             </p>
           </div>
 
@@ -547,44 +606,153 @@ export default function AdminFleet() {
                 </p>
               </div>
               <div className="bg-card border border-border overflow-hidden">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-background/50 border-b border-border">
-                    <tr>
-                      <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Driver</th>
-                      <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Document</th>
-                      <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Expiry Date</th>
-                      <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {compliance.map((alert, i) => {
-                      const isExpired = alert.daysRemaining < 0;
-                      const isCritical = alert.daysRemaining <= 7;
-                      const color = isExpired ? "text-red-400" : isCritical ? "text-orange-400" : "text-amber-400";
-                      const bg = isExpired ? "bg-red-500/5" : isCritical ? "bg-orange-500/5" : "bg-amber-500/5";
-                      return (
-                        <tr key={i} className={`${bg}`}>
-                          <td className="px-5 py-4">
-                            <p className="font-medium">{alert.driverName}</p>
-                            <p className="text-xs text-muted-foreground">{alert.driverEmail}</p>
-                          </td>
-                          <td className="px-5 py-4 text-muted-foreground">{alert.type}</td>
-                          <td className="px-5 py-4 font-mono text-sm">{alert.expiry}</td>
-                          <td className={`px-5 py-4 font-semibold ${color}`}>
-                            {isExpired
-                              ? `Expired ${Math.abs(alert.daysRemaining)} day${Math.abs(alert.daysRemaining) !== 1 ? "s" : ""} ago`
-                              : alert.daysRemaining === 0
-                              ? "Expires today"
-                              : `${alert.daysRemaining} day${alert.daysRemaining !== 1 ? "s" : ""} remaining`}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left min-w-[700px]">
+                    <thead className="bg-background/50 border-b border-border">
+                      <tr>
+                        <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Driver</th>
+                        <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Document</th>
+                        <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Expiry Date</th>
+                        <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Status</th>
+                        <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest">Submission</th>
+                        <th className="px-5 py-3 text-xs font-medium text-muted-foreground uppercase tracking-widest text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {compliance.map((alert, i) => {
+                        const isExpired = alert.daysRemaining < 0;
+                        const isCritical = alert.daysRemaining <= 7;
+                        const color = isExpired ? "text-red-400" : isCritical ? "text-orange-400" : "text-amber-400";
+                        const bg = isExpired ? "bg-red-500/5" : isCritical ? "bg-orange-500/5" : "bg-amber-500/5";
+                        const reminderKey = `${alert.driverId}-${alert.type}`;
+                        return (
+                          <tr key={i} className={bg}>
+                            <td className="px-5 py-4">
+                              <p className="font-medium flex items-center gap-1.5">
+                                {alert.driverName}
+                                {alert.complianceHold && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-red-500/10 border border-red-500/20 text-red-400">
+                                    <Lock className="w-2.5 h-2.5" /> ON HOLD
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-xs text-muted-foreground">{alert.driverEmail}</p>
+                            </td>
+                            <td className="px-5 py-4 text-muted-foreground">{alert.type}</td>
+                            <td className="px-5 py-4 font-mono text-sm">{alert.expiry}</td>
+                            <td className={`px-5 py-4 font-semibold text-xs ${color}`}>
+                              {isExpired
+                                ? `Expired ${Math.abs(alert.daysRemaining)}d ago`
+                                : alert.daysRemaining === 0
+                                ? "Expires today"
+                                : `${alert.daysRemaining}d remaining`}
+                            </td>
+                            <td className="px-5 py-4">
+                              {alert.pendingDoc ? (
+                                <button
+                                  onClick={() => { setApproveModal({ alert, doc: alert.pendingDoc! }); setApproveExpiry(alert.pendingDoc!.newExpiry ?? ""); setApproveNotes(""); }}
+                                  className="inline-flex items-center gap-1.5 px-2 py-1 text-xs bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition-colors"
+                                >
+                                  <Clock className="w-3 h-3" /> Pending Review
+                                </button>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">No upload</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-4 text-right">
+                              <button
+                                disabled={remindingKey === reminderKey}
+                                onClick={() => void handleSendReminder(alert)}
+                                title={`Email reminder to ${alert.driverEmail}`}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-border bg-background/50 hover:border-primary/50 hover:text-primary transition-colors disabled:opacity-50"
+                              >
+                                {remindingKey === reminderKey
+                                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                                  : <Mail className="w-3 h-3" />}
+                                Remind
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* ── Approve Document Modal ── */}
+      {approveModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setApproveModal(null)}>
+          <div className="bg-card border border-border w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-5">
+              <div>
+                <h2 className="font-serif text-xl">Approve Document</h2>
+                <p className="text-xs text-muted-foreground mt-1">{approveModal.alert.driverName} — {approveModal.alert.type}</p>
+              </div>
+              <button onClick={() => setApproveModal(null)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* View the uploaded file */}
+            <div className="mb-4">
+              <p className="text-xs text-muted-foreground uppercase tracking-widest mb-2">Submitted Document</p>
+              <a
+                href={approveModal.doc.fileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-3 py-2 bg-background/50 border border-border text-sm text-primary hover:border-primary/50 transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" />
+                View uploaded file
+              </a>
+              <p className="text-xs text-muted-foreground mt-1">
+                Submitted: {new Date(approveModal.doc.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <label className="text-xs text-muted-foreground uppercase tracking-widest block mb-2">
+                New Expiry Date <span className="text-red-400">*</span>
+              </label>
+              <Input
+                type="date"
+                value={approveExpiry}
+                onChange={e => setApproveExpiry(e.target.value)}
+                className="rounded-none"
+              />
+            </div>
+            <div className="mb-6">
+              <label className="text-xs text-muted-foreground uppercase tracking-widest block mb-2">Admin Notes (optional)</label>
+              <Input
+                value={approveNotes}
+                onChange={e => setApproveNotes(e.target.value)}
+                placeholder="e.g. Approved via email copy"
+                className="rounded-none"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => void handleApproveDoc()}
+                disabled={!approveExpiry || approvingSaving}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-500 text-white text-sm font-medium hover:bg-green-600 disabled:opacity-50 transition-colors"
+              >
+                {approvingSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                Approve & Update Expiry
+              </button>
+              <button
+                onClick={() => setApproveModal(null)}
+                className="px-4 py-2.5 border border-border text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </PortalLayout>
