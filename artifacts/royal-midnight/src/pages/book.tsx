@@ -486,7 +486,10 @@ export default function Book() {
         const isoDate = new Date(`${format(values.pickupDate, "yyyy-MM-dd")}T${values.pickupTime}:00`).toISOString();
         const bookingRes = await fetch(`${API_BASE}/bookings`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({
             passengerName: values.passengerName,
             passengerEmail: values.passengerEmail,
@@ -531,7 +534,10 @@ export default function Book() {
       // Step 4: Create a payment intent tied to this booking
       const intentRes = await fetch(`${API_BASE}/payments/create-intent`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ amount: effectiveTotal, bookingId }),
       });
       if (!intentRes.ok) {

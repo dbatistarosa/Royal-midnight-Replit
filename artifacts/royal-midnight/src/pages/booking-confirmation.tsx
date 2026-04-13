@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRoute, Link } from "wouter";
 import { API_BASE } from "@/lib/constants";
+import { useAuth } from "@/contexts/auth";
 import { format } from "date-fns";
 import { CheckCircle2, Loader2, Calendar, MapPin, User, Mail, CreditCard, Car, Users, Plane, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,12 @@ async function fetchBooking(id: number): Promise<PublicBooking> {
 export default function BookingConfirmation() {
   const [, params] = useRoute("/booking-confirmation/:id");
   const id = params?.id ? parseInt(params.id) : 0;
+  const { user } = useAuth();
+  const viewBookingsHref = user?.role === "admin"
+    ? "/admin/bookings"
+    : user?.role === "driver"
+    ? "/driver/dashboard"
+    : "/passenger/rides";
 
   const [booking, setBooking] = useState<PublicBooking | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -113,7 +120,7 @@ export default function BookingConfirmation() {
         <h1 className="text-3xl font-serif text-white mb-4">Booking Not Found</h1>
         <p className="text-gray-400 mb-8">We couldn't locate this reservation. It may still be processing.</p>
         <div className="flex flex-col sm:flex-row gap-4">
-          <Link href="/passenger/rides">
+          <Link href={viewBookingsHref}>
             <Button className="bg-primary text-black rounded-none uppercase tracking-widest text-xs">View My Bookings</Button>
           </Link>
           <Link href="/">
