@@ -138,19 +138,19 @@ async function runStartupMigrations(): Promise<void> {
         AND d.total_rides IS DISTINCT FROM coalesce(sub.cnt, 0)
     `);
 
-    // ── Driver record deduplication (email-based, runs on every boot) ─────────
+    // ── Driver record deduplication (runs on every boot, idempotent) ──────────
     //
     // A driver may have two records: one admin-created (possibly no user_id, has bookings)
-    // and one onboarding-created (has user_id, no bookings). We need to:
-    //   1. Pick the canonical record per email = the one with the most completed bookings
-    //   2. Reassign all bookings from non-canonical records to the canonical
-    //   3. Copy user_id FROM any sibling TO the canonical (if canonical lacks one)
-    //   4. Null out user_id on all non-canonical records
-    //   5. Refresh total_rides everywhere
+    // and one onboarding-created (has user_id, no bookings). We need to ensure the record
+    // returned by /drivers/by-user has the bookings on it.
     //
-    // Using email (not user_id) so we catch siblings where user_id is on a different record.
+    // Strategy A: Email-based — when two records share the same email (unique constraint
+    //   may not be enforced on older deployments), consolidate by booking count.
+    // Strategy B: Name-based — when same-named driver has a user_id=NULL record with
+    //   bookings AND a user_id-linked record with 0 bookings, transfer the user_id to
+    //   the record with bookings so by-user always returns the right one.
 
-    // Step 1: Reassign bookings from non-canonical to canonical (email-grouped)
+    // Step 1 (email-based): Reassign bookings from non-canonical to canonical per email
     await client.query(`
       WITH booking_counts AS (
         SELECT d.id, d.email, COUNT(b.id)::int AS cnt
@@ -176,7 +176,7 @@ async function runStartupMigrations(): Promise<void> {
       WHERE bk.driver_id = dm.old_id
     `);
 
-    // Step 2: Copy user_id from any sibling onto the canonical record (if it lacks one)
+    // Step 2 (email-based): Copy user_id from any same-email sibling onto the canonical
     await client.query(`
       WITH booking_counts AS (
         SELECT d.id, d.email, COUNT(b.id)::int AS cnt
@@ -206,7 +206,7 @@ async function runStartupMigrations(): Promise<void> {
         )
     `);
 
-    // Step 3: Null out user_id on all non-canonical records (prevents by-user returning them)
+    // Step 3 (email-based): Null out user_id on non-canonical same-email records
     await client.query(`
       WITH booking_counts AS (
         SELECT d.id, d.email, COUNT(b.id)::int AS cnt
@@ -229,7 +229,70 @@ async function runStartupMigrations(): Promise<void> {
         AND d.user_id IS NOT NULL
     `);
 
-    // Step 4: Refresh total_rides on ALL driver records after consolidation
+    // Step 4 (name-based fallback): Handle the case where an admin created a driver
+    // record (different email, no user_id) but a user also registered as a driver
+    // under the same name via onboarding (has user_id, 0 rides).
+    // Transfer the user_id from the 0-ride onboarding record to the record with bookings,
+    // then null out the onboarding record's user_id so by-user returns the right record.
+    //
+    // Safety: only acts when EXACTLY ONE name-matching admin record exists (prevents
+    // accidental merges for drivers who happen to share the same name).
+    await client.query(`
+      WITH onboarding_records AS (
+        -- Driver records linked to a user account but with no completed bookings
+        SELECT d.id AS onboarding_id, d.name, d.user_id
+        FROM drivers d
+        WHERE d.user_id IS NOT NULL
+          AND (SELECT COUNT(*) FROM bookings b WHERE b.driver_id = d.id AND b.status = 'completed') = 0
+      ),
+      admin_records AS (
+        -- Driver records with no user_id but with completed bookings
+        SELECT d.id AS admin_id, d.name,
+               COUNT(*) OVER (PARTITION BY d.name) AS name_match_count
+        FROM drivers d
+        WHERE d.user_id IS NULL
+          AND (SELECT COUNT(*) FROM bookings b WHERE b.driver_id = d.id AND b.status = 'completed') > 0
+      ),
+      transfer_pairs AS (
+        SELECT o.onboarding_id, o.user_id AS the_user_id, a.admin_id
+        FROM onboarding_records o
+        JOIN admin_records a ON a.name = o.name AND a.name_match_count = 1
+      )
+      UPDATE drivers d
+      SET user_id = tp.the_user_id
+      FROM transfer_pairs tp
+      WHERE d.id = tp.admin_id
+        AND d.user_id IS NULL
+    `);
+
+    // null out user_id on onboarding records that were matched above
+    await client.query(`
+      WITH onboarding_records AS (
+        SELECT d.id AS onboarding_id, d.name, d.user_id
+        FROM drivers d
+        WHERE d.user_id IS NOT NULL
+          AND (SELECT COUNT(*) FROM bookings b WHERE b.driver_id = d.id AND b.status = 'completed') = 0
+      ),
+      admin_records AS (
+        SELECT d.id AS admin_id, d.name,
+               COUNT(*) OVER (PARTITION BY d.name) AS name_match_count
+        FROM drivers d
+        WHERE d.user_id IS NULL
+          AND (SELECT COUNT(*) FROM bookings b WHERE b.driver_id = d.id AND b.status = 'completed') > 0
+      ),
+      transfer_pairs AS (
+        SELECT o.onboarding_id
+        FROM onboarding_records o
+        JOIN admin_records a ON a.name = o.name AND a.name_match_count = 1
+      )
+      UPDATE drivers d
+      SET user_id = NULL
+      FROM transfer_pairs tp
+      WHERE d.id = tp.onboarding_id
+        AND d.user_id IS NOT NULL
+    `);
+
+    // Step 5: Refresh total_rides on ALL driver records after consolidation
     await client.query(`
       UPDATE drivers d
       SET total_rides = (
