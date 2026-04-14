@@ -1,0 +1,58 @@
+This is the exact right move. We need to synthesize everything into three master "Command Prompts"—one for each portal. This will give Claude and Replit a unified, crystal-clear blueprint of the entire architecture, bug fixes, and luxury features, ensuring nothing gets lost or overwritten.
+Here are your three Master Prompts. Copy and paste each one individually into your Replit/Claude chat to systematically rebuild and perfect each portal.
+### 1. The Passenger Portal (Master Command)
+**Copy & Paste this to Replit/Claude:**
+> **Master Specification: Passenger Portal (Web)**
+> Please audit and update all files related to the Passenger Portal (support.tsx, addresses.tsx, dashboard.tsx, ride-detail.tsx, reports.tsx, rides.tsx, profile.tsx, and the Stripe checkout flow). Implement the following architecture and feature requirements:
+> **1. File & Component Isolation:** Rename all exported components to include the Passenger prefix (e.g., export default function PassengerDashboard) to prevent routing collisions with Admin/Driver files.
+> **2. Fix the Stripe "Awaiting Payment" Bug:**
+>  * Audit the checkout handshake. Ensure that when a passenger hits "Pay", the frontend successfully calls stripe.confirmCardPayment() or stripe.confirmPayment().
+>  * If successful, the frontend MUST await the response and trigger a backend call to update the database status to confirmed BEFORE redirecting the user to the success screen. Do not redirect blindly.
+> **3. Private Aviation (FBO) Booking Integration:**
+>  * On the booking form, add a toggle for "Commercial" vs. "Private Charter".
+>  * If "Private Charter" is selected, hide the commercial flight number input and replace it with Tail_Number and an FBO_Location dropdown (e.g., Signature, Atlantic).
+> **4. "First-Class" Profile Preferences:**
+>  * Update profile.tsx to allow passengers to save permanent preferences: Cabin Temperature, Music/Audio, and Beverage choice. These must be saved to the database and automatically attached to all their future bookings.
+> **5. Data Hydration Safety:** Ensure all useEffect fetches for passenger rides have a fallback. If the API returns an object instead of an array, extract the array safely so the app doesn't crash on .map().
+> 
+### 2. The Driver Portal (Master Command)
+**Copy & Paste this to Replit/Claude:**
+> **Master Specification: Driver Portal (Mobile/Expo)**
+> Please audit and update all files related to the Driver Portal (documents.tsx, earnings.tsx, stats.tsx, history.tsx, onboarding.tsx, dashboard.tsx, profile.tsx). Implement the following architecture and feature requirements:
+> **1. File & Component Isolation:** Rename all exported components to include the Driver prefix (e.g., export default function DriverDashboard).
+> **2. Fix the "Strict Array" Data Hydration Bug:**
+>  * In history.tsx and dashboard.tsx, the frontend is failing to render trips. Update all API fetch .then() blocks to safely extract arrays (e.g., if (data?.bookings) return data.bookings;) before applying .filter() or .map().
+>  * Ensure status string matching is case-insensitive (e.g., status.toLowerCase() === 'completed').
+>  * Ensure all API fetches include the Authorization: Bearer token.
+> **3. The "Day Zero" Compliance Lockout:**
+>  * Implement a global check upon app load. If compliance_hold === true in the driver's database profile, completely block access to the Dashboard, Earnings, and Pool.
+>  * Render a full-screen lockout view directing them to documents.tsx to upload their renewals.
+> **4. Luxury Trip Execution (Automation):**
+>  * **Pre-Flight Checklist:** Before tapping "On Way", force the driver to check off that the cabin matches the passenger's saved preferences.
+>  * **Auto-Arrival:** Use expo-location geofencing. When the driver breaches a 150-meter radius of the pickup, auto-trigger the "Arrived" status.
+>  * **Wait-Time Clock:** On arrival, start a visual timer based on the ride's grace_period. Automatically calculate wait-time fees if they exceed the grace period.
+>  * **Digital Signage:** Add a button to the active trip screen that flips the phone into landscape mode, showing the passenger's Last Name in large, high-contrast text for airport meet-and-greets.
+> 
+### 3. The Admin Command Center (Master Command)
+**Copy & Paste this to Replit/Claude:**
+> **Master Specification: Admin Command Center (Web)**
+> Please audit and update all files related to the Admin Portal (reports.tsx, drivers.tsx, dispatch.tsx, settings.tsx, pricing.tsx, bookings.tsx, passengers.tsx, fleet.tsx, payouts.tsx). Implement the following architecture and feature requirements:
+> **1. File Isolation & RBAC Security:** > * Rename all exported components with an Admin prefix (e.g., AdminReports).
+>  * Ensure every route is protected by a strict Admin Auth guard.
+> **2. Strict Scheduling & Punctuality Algorithm:**
+>  * Create a backend utility: checkDriverAvailability(driverId, newBookingId).
+>  * **Rules:** No exact overlaps; no accepting rides within 60 mins prior to an existing ride; back-to-back rides MUST allow enough transit time + a 15-minute early arrival buffer.
+>  * Apply this filter to the GET /bookings?status=pending endpoint so drivers only see rides they can legally and punctually execute.
+> **3. Financial Math Integrity (CRITICAL):**
+>  * In payouts.tsx and reports.tsx, enforce this exact logic:
+>    * Subtotal = Base fare (rate * distance/time).
+>    * CC Processing Fee = % calculated from (Subtotal + Taxes).
+>    * Gross Total = Subtotal + Taxes + CC Fee.
+>    * Driver Commission MUST BE calculated ONLY from the Subtotal. Do not include taxes or fees in the driver's cut.
+> **4. Compliance Enforcement Logic:**
+>  * In fleet.tsx, allow admins to click an email icon to send a Resend warning for expiring documents.
+>  * Create a backend cron job/trigger: At midnight, if a document expires, set the driver's compliance_hold = true.
+>  * **Auto-Unassign:** Automatically find all future scheduled rides for that locked driver and revert them to Unassigned so they return to the dispatch pool. Send a high-priority alert to the Admin dashboard.
+> **5. Dispatch Map Performance:** Ensure dispatch.tsx is not causing infinite HTTP polling loops. Use WebSockets/Supabase Realtime for live driver tracking, or throttle the requests heavily.
+> 
+Once you feed these into your workspace, your AI will have the exact context and rules required to build a flawless, high-end system. Which portal are you going to execute first?

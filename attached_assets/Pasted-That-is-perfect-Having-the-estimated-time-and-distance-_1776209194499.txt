@@ -1,0 +1,21 @@
+That is perfect. Having the estimated time and distance already saved in the database when the passenger books is excellent architecture. It saves you money on Google Maps API calls and makes your app run much faster because it doesn't have to guess the duration of the first trip on the fly.
+Since we already have that data, we can simplify the instructions for Replit and Claude. We just need to tell the backend to use your saved data for Trip A, and only query Google Maps to calculate the *empty driving time* between Dropoff A and Pickup B.
+Here is the refined prompt to give to Claude to build this perfectly:
+### Copy & Paste this to Claude/Replit:
+**Project Update: Strict Driver Scheduling — Using Pre-Calculated Estimates**
+I need to implement the strict time-validation algorithm for drivers accepting trips using our existing database fields. We already save the estimated trip duration and distance when a booking is created.
+**Do NOT rewrite the frontend UI. Please build this strictly as a backend utility function.**
+**1. Create the checkDriverAvailability Utility Function**
+Create a backend function checkDriverAvailability(driverId, newBookingId) that queries the database for all upcoming rides assigned to this driver on that specific date. Evaluate the new booking against these three rules:
+ * **Rule 1: No Exact Overlaps.** The driver cannot accept a new ride with the exact same pickup_time as an already accepted ride.
+ * **Rule 2: The 1-Hour Pre-Ride Block.** A driver cannot accept a new ride if its pickup_time falls within exactly 60 minutes *before* the pickup_time of an already accepted ride.
+ * **Rule 3: Back-to-Back Buffer Calculation.** * Calculate the end time of the existing trip (Trip A) by adding our pre-saved estimated trip duration to Trip A's pickup_time.
+   * Use the Google Maps Distance Matrix API to calculate the *transit time* from Trip A's dropoff_address to Trip B's pickup_address.
+   * **Validation Formula:** Trip A End Time + Transit Time + 15 Minutes (Early Arrival Buffer) MUST BE <= Trip B Pickup Time.
+**2. Protect the Accept Endpoint (POST /bookings/:id/accept)**
+ * Inject this function into the accept ride endpoint. If it returns false, reject with a 400 Bad Request and message: *"Schedule conflict: You will not have enough time to arrive 15 minutes early for your next trip."*
+**3. Filter the Available Dispatch Board (GET /bookings?status=pending)**
+ * Run the pending trips through this utility function before sending the response to the driver's app. Silently filter out any trips that violate the 3 rules so the driver only sees rides they can legally and punctually complete.
+Please write the checkDriverAvailability utility function and the required Google Maps API call for the transit time.
+By keeping this logic on the backend, your frontend dashboard.tsx file stays exactly as beautiful as it is now; it will just magically stop showing overlapping rides.
+If a chauffeur is stuck in terrible traffic and realizes they *aren't* going to make that 15-minute buffer for their next trip, do you want to build a "Request Coverage" button on their app so the Admin gets a high-priority alert to swap the driver, or should they just call dispatch directly?
