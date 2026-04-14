@@ -208,8 +208,16 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   if (parsed.data.status) conditions.push(eq(bookingsTable.status, parsed.data.status));
   if (parsed.data.driverId != null) conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
   if (parsed.data.userId != null) conditions.push(eq(bookingsTable.userId, parsed.data.userId));
-  if (parsed.data.startDate) conditions.push(sql`${bookingsTable.createdAt} >= ${new Date(parsed.data.startDate)}`);
-  if (parsed.data.endDate) conditions.push(sql`${bookingsTable.createdAt} <= ${new Date(parsed.data.endDate)}`);
+  if (parsed.data.startDate) {
+    const d = new Date(parsed.data.startDate);
+    if (isNaN(d.getTime())) { res.status(400).json({ error: "Invalid startDate — must be a parseable ISO date string." }); return; }
+    conditions.push(sql`${bookingsTable.createdAt} >= ${d}`);
+  }
+  if (parsed.data.endDate) {
+    const d = new Date(parsed.data.endDate);
+    if (isNaN(d.getTime())) { res.status(400).json({ error: "Invalid endDate — must be a parseable ISO date string." }); return; }
+    conditions.push(sql`${bookingsTable.createdAt} <= ${d}`);
+  }
 
   // Drivers never see unconfirmed/unpaid bookings — only admin and passengers see them.
   // Passengers see their own (scoped below), admin sees all, drivers see none.

@@ -501,11 +501,21 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
 
   const commissionPct = await fetchCommissionPct();
 
-  // Optional date range filter from query params
+  // Optional date range filter from query params (validated)
   const rawStart = req.query["startDate"] as string | undefined;
   const rawEnd = req.query["endDate"] as string | undefined;
-  const filterStart = rawStart ? new Date(rawStart) : null;
-  const filterEnd = rawEnd ? new Date(rawEnd) : null;
+  const filterStartRaw = rawStart ? new Date(rawStart) : null;
+  const filterEndRaw = rawEnd ? new Date(rawEnd) : null;
+  if (filterStartRaw !== null && isNaN(filterStartRaw.getTime())) {
+    res.status(400).json({ error: "Invalid startDate — must be a parseable ISO date string." });
+    return;
+  }
+  if (filterEndRaw !== null && isNaN(filterEndRaw.getTime())) {
+    res.status(400).json({ error: "Invalid endDate — must be a parseable ISO date string." });
+    return;
+  }
+  const filterStart = filterStartRaw;
+  const filterEnd = filterEndRaw;
 
   // Track fare and tips separately — commission applies only to fares, tips pass through 100%
   const [stats] = await db
@@ -528,9 +538,12 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
     .where(eq(bookingsTable.driverId, driverId));
 
   // Daily chart: commission on fare + 100% of tip
-  // When a date range is provided, scope the chart to that window; otherwise show last 30 days.
-  const dailyWhere = filterStart && filterEnd
-    ? sql`driver_id = ${driverId} and status = 'completed' and created_at >= ${filterStart} and created_at <= ${filterEnd}`
+  // Honor one-sided or two-sided bounds; fall back to last 30 days when no bounds are given.
+  const hasAnyBound = filterStart !== null || filterEnd !== null;
+  const dailyWhere = hasAnyBound
+    ? sql`driver_id = ${driverId} and status = 'completed'
+          and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`})
+          and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`})`
     : sql`driver_id = ${driverId} and status = 'completed' and created_at >= now() - interval '30 days'`;
 
   const dailyRaw = await db
