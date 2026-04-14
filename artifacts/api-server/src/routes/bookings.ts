@@ -228,7 +228,9 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
 
   // Non-admin drivers: either see their own assigned bookings, or unassigned open pool.
   // isDriverOpenPoolQuery flags that we need to post-filter for scheduling conflicts.
+  // openPoolDriverId is set to the driver's internal ID when isDriverOpenPoolQuery is true.
   let isDriverOpenPoolQuery = false;
+  let openPoolDriverId: number | null = null;
 
   if (caller.role === "driver") {
     const requestedDriverId = parsed.data.driverId;
@@ -301,6 +303,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
         // Conflicting trips are filtered below using checkDriverAvailability.
         conditions.push(isNull(bookingsTable.driverId));
         isDriverOpenPoolQuery = true;
+        openPoolDriverId = driverRow.id;
       } else {
         // Default: own assigned bookings only
         conditions.push(eq(bookingsTable.driverId, driverRow.id));
@@ -355,9 +358,10 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     let driverBookings = parsed2;
 
     // For the open pool, hide trips that violate the strict 3-rule scheduling check.
-    if (isDriverOpenPoolQuery) {
+    if (isDriverOpenPoolQuery && openPoolDriverId !== null) {
+      const resolvedDriverId = openPoolDriverId;
       const availabilityResults = await Promise.all(
-        parsed2.map(b => checkDriverAvailability(driverRow.id, b.id)),
+        parsed2.map(b => checkDriverAvailability(resolvedDriverId, b.id)),
       );
       driverBookings = parsed2.filter((_, i) => availabilityResults[i]);
     }
