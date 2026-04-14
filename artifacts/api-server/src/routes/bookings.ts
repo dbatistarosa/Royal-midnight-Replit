@@ -208,6 +208,8 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   if (parsed.data.status) conditions.push(eq(bookingsTable.status, parsed.data.status));
   if (parsed.data.driverId != null) conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
   if (parsed.data.userId != null) conditions.push(eq(bookingsTable.userId, parsed.data.userId));
+  if (parsed.data.startDate) conditions.push(sql`${bookingsTable.createdAt} >= ${new Date(parsed.data.startDate)}`);
+  if (parsed.data.endDate) conditions.push(sql`${bookingsTable.createdAt} <= ${new Date(parsed.data.endDate)}`);
 
   // Drivers never see unconfirmed/unpaid bookings — only admin and passengers see them.
   // Passengers see their own (scoped below), admin sees all, drivers see none.

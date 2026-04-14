@@ -3,7 +3,7 @@ import { useGetUserBookings } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { useAuth } from "@/contexts/auth";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, ChevronDown, ChevronUp, Users, Briefcase, Plane, Phone, DollarSign, Clock, Star } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, ChevronDown, ChevronUp, Users, Briefcase, Plane, Phone, DollarSign, Clock, Star, BarChart2 } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
@@ -11,6 +11,7 @@ import { API_BASE } from "@/lib/constants";
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
   { label: "My Rides", href: "/passenger/rides", icon: Car },
+  { label: "Reports", href: "/passenger/reports", icon: BarChart2 },
   { label: "Saved Addresses", href: "/passenger/addresses", icon: MapPin },
   { label: "Profile", href: "/passenger/profile", icon: User },
   { label: "Support", href: "/passenger/support", icon: MessageSquare },

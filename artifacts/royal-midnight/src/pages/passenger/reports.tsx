@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
-import { format, startOfMonth, endOfMonth, isWithinInterval, parseISO } from "date-fns";
+import { format, startOfMonth, endOfMonth } from "date-fns";
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -76,26 +76,23 @@ export default function PassengerReports() {
   useEffect(() => {
     if (!user?.id || !token) return;
     setIsLoading(true);
-    fetch(`${API_BASE}/bookings?userId=${user.id}`, {
+    const params = new URLSearchParams();
+    params.set("userId", String(user.id));
+    if (dateRange) {
+      params.set("startDate", dateRange.startDate.toISOString());
+      params.set("endDate", dateRange.endDate.toISOString());
+    }
+    fetch(`${API_BASE}/bookings?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
       .then(data => setAllBookings(Array.isArray(data) ? data : []))
       .catch(() => setAllBookings([]))
       .finally(() => setIsLoading(false));
-  }, [user?.id, token]);
+  }, [user?.id, token, dateRange]);
 
-  // Filter by date range client-side
-  const filteredBookings = dateRange
-    ? allBookings.filter(b => {
-        try {
-          const d = typeof b.createdAt === "string" ? parseISO(b.createdAt) : new Date(b.createdAt);
-          return isWithinInterval(d, { start: dateRange.startDate, end: dateRange.endDate });
-        } catch {
-          return false;
-        }
-      })
-    : allBookings;
+  // Server already filtered by date range — no additional client-side filtering needed
+  const filteredBookings = allBookings;
 
   const completedTrips = filteredBookings.filter(b => b.status === "completed");
   const totalSpent = completedTrips.reduce((sum, b) => sum + (b.priceQuoted ?? 0), 0);

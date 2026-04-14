@@ -2,7 +2,7 @@ import { useGetUser, useUpdateUser, getGetUserQueryKey } from "@workspace/api-cl
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { useAuth } from "@/contexts/auth";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag, Users, Plus, Trash2, Loader2 } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag, Users, Plus, Trash2, Loader2, BarChart2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -13,6 +13,7 @@ import { API_BASE } from "@/lib/constants";
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
   { label: "My Rides", href: "/passenger/rides", icon: Car },
+  { label: "Reports", href: "/passenger/reports", icon: BarChart2 },
   { label: "Saved Addresses", href: "/passenger/addresses", icon: MapPin },
   { label: "Profile", href: "/passenger/profile", icon: User },
   { label: "Support", href: "/passenger/support", icon: MessageSquare },

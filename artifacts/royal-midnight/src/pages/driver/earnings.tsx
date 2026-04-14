@@ -36,6 +36,7 @@ type EarningsData = {
   periodEarnings?: number;
   periodRides?: number;
   periodTips?: number;
+  commissionPct?: number;
   recentPayouts: { date: string; amount: number; rides: number }[];
 };
 
@@ -103,7 +104,7 @@ export default function DriverEarnings() {
         periodEarnings: earnings.periodEarnings ?? earnings.thisMonth,
         periodTips: earnings.periodTips ?? earnings.tipsThisWeek ?? 0,
         periodRides: earnings.periodRides ?? 0,
-        commissionPct: 0.7,
+        commissionPct: earnings.commissionPct ?? 0.7,
         avgPerRide: earnings.avgPerRide,
         recentPayouts: earnings.recentPayouts,
       });

@@ -586,6 +586,7 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
       periodEarnings,
       periodRides,
       periodTips,
+      commissionPct,
       recentPayouts,
     })
   );

@@ -112,6 +112,8 @@ export const ListBookingsQueryParams = zod.object({
   status: zod.coerce.string().nullish(),
   userId: zod.coerce.number().nullish(),
   driverId: zod.coerce.number().nullish(),
+  startDate: zod.coerce.string().nullish(),
+  endDate: zod.coerce.string().nullish(),
 });
 
 export const ListBookingsResponseItem = zod.object({
@@ -641,6 +643,7 @@ export const GetDriverEarningsResponse = zod.object({
   periodEarnings: zod.number().default(0),
   periodRides: zod.number().default(0),
   periodTips: zod.number().default(0),
+  commissionPct: zod.number().default(0.7),
   recentPayouts: zod.array(
     zod.object({
       date: zod.string(),
