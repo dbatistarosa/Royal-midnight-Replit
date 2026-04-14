@@ -667,7 +667,7 @@ export default function Book() {
 
       <div className="container mx-auto px-4 max-w-5xl pb-24">
         <Form {...form}>
-          <form className="space-y-0">
+          <div className="space-y-0">
 
             {/* ─── STEP 1: TRIP DETAILS ─── */}
             {step === 1 && (
@@ -1435,7 +1435,7 @@ export default function Book() {
                 </div>
               </div>
             )}
-          </form>
+          </div>
         </Form>
       </div>
     </div>

@@ -61,8 +61,7 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [stripeReady, setStripeReady] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handlePayClick = async () => {
     if (!stripe || !elements) return;
 
     onError("");
@@ -119,7 +118,7 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <div className="space-y-6">
       {isTestMode && (
         <div className="rounded-none border border-amber-500/60 bg-amber-500/10 px-4 py-3 text-sm text-amber-300 leading-snug">
           <span className="font-semibold uppercase tracking-wide text-amber-400">Test mode active</span>
@@ -139,7 +138,8 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
           Secured by Stripe
         </div>
         <Button
-          type="submit"
+          type="button"
+          onClick={handlePayClick}
           disabled={!stripe || !stripeReady || isProcessing}
           className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm px-10 py-6 rounded-none"
         >
@@ -152,7 +152,7 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
           )}
         </Button>
       </div>
-    </form>
+    </div>
   );
 }
 
