@@ -10,18 +10,16 @@
  *  Rule 2 — 60-minute pre-ride block
  *    The new pickup time cannot fall within 60 minutes before an existing
  *    trip's pickup time.  (Guarantees the driver can be 15 min early for
- *    the existing trip they already have.)
+ *    the trip they already have.)
  *
- *  Rule 3 — Back-to-back buffer (both directions)
+ *  Rule 3 — Back-to-back buffer (existing trip → new trip)
  *    When an existing trip ends before the new trip starts, the formula is:
  *      existingTripEnd + transitTime(existingDropoff → newPickup) + 15 min ≤ newPickupAt
- *    When the new trip ends before an existing trip starts, the formula is:
- *      newTripEnd + transitTime(newDropoff → existingPickup) + 15 min ≤ existingPickupAt
  *    Transit time is fetched from the Google Maps Distance Matrix API
  *    (GOOGLE_MAPS_API_KEY env var); falls back to DEFAULT_TRANSIT_MINUTES if unavailable.
  */
 
-import { and, eq, gte, ne, or } from "drizzle-orm";
+import { and, eq, gte, lt, ne, or } from "drizzle-orm";
 import { db, bookingsTable } from "@workspace/db";
 import { DEFAULT_DURATION_MINUTES } from "./maps.js";
 
@@ -36,8 +34,8 @@ const DEFAULT_TRANSIT_MINUTES = 30;
  * between two addresses.  Falls back to DEFAULT_TRANSIT_MINUTES when the API
  * key is absent or the request fails.
  *
- * Called exclusively for Rule 3 (back-to-back sequencing) to avoid unnecessary
- * API charges for Rules 1 and 2, which are pure arithmetic.
+ * Called exclusively for Rule 3 to avoid unnecessary API charges for Rules 1
+ * and 2, which are pure arithmetic.
  */
 async function getTransitMinutes(origin: string, destination: string): Promise<number> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -76,8 +74,9 @@ async function getTransitMinutes(origin: string, destination: string): Promise<n
  * Returns true when the driver is available to take the new booking, false
  * when any of the three scheduling rules would be violated.
  *
- * Only considers same-day and future active trips to avoid spurious conflicts
- * from old historical records and to keep Distance Matrix API calls minimal.
+ * Only considers active trips on the same calendar day as the new booking to
+ * keep Distance Matrix API calls minimal and align with the spec requirement
+ * of "upcoming confirmed/active bookings for the same date".
  *
  * @param driverId     - Internal driver row ID (driversTable.id)
  * @param newBookingId - The booking the driver wants to accept
@@ -100,24 +99,19 @@ export async function checkDriverAvailability(
 
   if (!newBooking) return false;
 
-  // Constrain to same-day and upcoming trips only — start of the new booking's
-  // calendar day in UTC.  Trips earlier than this cannot conflict with the new
-  // booking and would inflate Maps API call counts unnecessarily.
-  const newPickupDate = newBooking.pickupAt;
+  // Constrain to the same calendar day (UTC) as the new booking.
+  const d = newBooking.pickupAt;
   const startOfDay = new Date(
-    Date.UTC(
-      newPickupDate.getUTCFullYear(),
-      newPickupDate.getUTCMonth(),
-      newPickupDate.getUTCDate(),
-      0, 0, 0, 0,
-    ),
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0),
+  );
+  const endOfDay = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999),
   );
 
   const existingTrips = await db
     .select({
       id: bookingsTable.id,
       pickupAt: bookingsTable.pickupAt,
-      pickupAddress: bookingsTable.pickupAddress,
       dropoffAddress: bookingsTable.dropoffAddress,
       estimatedDurationMinutes: bookingsTable.estimatedDurationMinutes,
     })
@@ -127,6 +121,7 @@ export async function checkDriverAvailability(
         eq(bookingsTable.driverId, driverId),
         ne(bookingsTable.id, newBookingId),
         gte(bookingsTable.pickupAt, startOfDay),
+        lt(bookingsTable.pickupAt, endOfDay),
         or(...ACTIVE_STATUSES.map(s => eq(bookingsTable.status, s))),
       ),
     );
@@ -134,8 +129,6 @@ export async function checkDriverAvailability(
   if (existingTrips.length === 0) return true;
 
   const newPickup = newBooking.pickupAt.getTime();
-  const newDurationMs = (newBooking.estimatedDurationMinutes ?? DEFAULT_DURATION_MINUTES) * 60_000;
-  const newEnd = newPickup + newDurationMs;
 
   for (const trip of existingTrips) {
     const existingPickup = trip.pickupAt.getTime();
@@ -148,28 +141,17 @@ export async function checkDriverAvailability(
     }
 
     // ── Rule 2: new ride pickup within 60 min before an existing ride ─────────
-    // Range: [existingPickup − 60 min, existingPickup)
+    // Conflict range: [existingPickup − 60 min, existingPickup)
     if (newPickup < existingPickup && newPickup >= existingPickup - RULE2_BUFFER_MS) {
       return false;
     }
 
-    // ── Rule 3a: existing trip is first, new trip comes after ─────────────────
+    // ── Rule 3: existing trip ends before new trip starts ────────────────────
     // Formula: existingEnd + transitTime(existingDropoff → newPickup) + 15 min ≤ newPickup
     if (existingPickup < newPickup) {
       const transitMinutes = await getTransitMinutes(trip.dropoffAddress, newBooking.pickupAddress);
       const transitMs = transitMinutes * 60_000;
       if (existingEnd + transitMs + EARLY_ARRIVAL_BUFFER_MS > newPickup) {
-        return false;
-      }
-    }
-
-    // ── Rule 3b: new trip is first, existing trip comes after ─────────────────
-    // Only checked when newPickup is already outside the Rule 2 window.
-    // Formula: newEnd + transitTime(newDropoff → existingPickup) + 15 min ≤ existingPickup
-    if (newPickup < existingPickup - RULE2_BUFFER_MS) {
-      const transitMinutes = await getTransitMinutes(newBooking.dropoffAddress, trip.pickupAddress);
-      const transitMs = transitMinutes * 60_000;
-      if (newEnd + transitMs + EARLY_ARRIVAL_BUFFER_MS > existingPickup) {
         return false;
       }
     }

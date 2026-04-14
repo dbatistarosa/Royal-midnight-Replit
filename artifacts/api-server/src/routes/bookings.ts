@@ -35,58 +35,7 @@ import {
 
 const router: IRouter = Router();
 
-// ─── Driver availability helpers ─────────────────────────────────────────────
-
-/**
- * The statuses that mean a driver is actively committed to a trip.
- * These are the only statuses that should block availability for new trips.
- */
-const ACTIVE_TRIP_STATUSES = ["confirmed", "in_progress", "on_way", "on_location"] as const;
-
-/** 1-hour buffer on each side of an active trip (in milliseconds). */
-const BUFFER_MS = 60 * 60 * 1000;
-
-type BusyWindow = { start: Date; end: Date };
-
-/**
- * Returns an array of time windows during which a driver is unavailable.
- * Each window is:
- *   start = pickupAt − 1 hour
- *   end   = pickupAt + estimatedDurationMinutes + 1 hour
- * If estimatedDurationMinutes is missing we fall back to DEFAULT_DURATION_MINUTES
- * so the buffer is always conservative.
- */
-async function getDriverBusyWindows(driverId: number): Promise<BusyWindow[]> {
-  const activeTrips = await db
-    .select({
-      pickupAt: bookingsTable.pickupAt,
-      estimatedDurationMinutes: bookingsTable.estimatedDurationMinutes,
-    })
-    .from(bookingsTable)
-    .where(
-      and(
-        eq(bookingsTable.driverId, driverId),
-        or(...ACTIVE_TRIP_STATUSES.map(s => eq(bookingsTable.status, s))),
-      ),
-    );
-
-  return activeTrips.map(trip => {
-    const duration = trip.estimatedDurationMinutes ?? DEFAULT_DURATION_MINUTES;
-    const pickup = trip.pickupAt.getTime();
-    return {
-      start: new Date(pickup - BUFFER_MS),
-      end: new Date(pickup + (duration * 60 * 1000) + BUFFER_MS),
-    };
-  });
-}
-
-/**
- * Returns true if the given pickup time falls inside ANY of the busy windows.
- */
-function hasConflict(pickupAt: Date, windows: BusyWindow[]): boolean {
-  const t = pickupAt.getTime();
-  return windows.some(w => t >= w.start.getTime() && t <= w.end.getTime());
-}
+// Driver scheduling is handled by checkDriverAvailability in ../lib/driverScheduling.ts
 
 function parseBooking(b: typeof bookingsTable.$inferSelect) {
   return {
