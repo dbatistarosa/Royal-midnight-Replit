@@ -501,6 +501,12 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
 
   const commissionPct = await fetchCommissionPct();
 
+  // Optional date range filter from query params
+  const rawStart = req.query["startDate"] as string | undefined;
+  const rawEnd = req.query["endDate"] as string | undefined;
+  const filterStart = rawStart ? new Date(rawStart) : null;
+  const filterEnd = rawEnd ? new Date(rawEnd) : null;
+
   // Track fare and tips separately — commission applies only to fares, tips pass through 100%
   const [stats] = await db
     .select({
@@ -513,11 +519,20 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
       tipsThisMonth: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
       tipsThisWeek: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and created_at >= date_trunc('week', now())), 0)::float`,
       tipsToday: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and created_at::date = current_date), 0)::float`,
+      // Period-scoped aggregates (only populated when date range is provided)
+      farePeriod: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`})), 0)::float`,
+      tipsPeriod: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`})), 0)::float`,
+      ridesPeriod: sql<number>`count(*) filter (where status = 'completed' and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`}))::int`,
     })
     .from(bookingsTable)
     .where(eq(bookingsTable.driverId, driverId));
 
   // Daily chart: commission on fare + 100% of tip
+  // When a date range is provided, scope the chart to that window; otherwise show last 30 days.
+  const dailyWhere = filterStart && filterEnd
+    ? sql`driver_id = ${driverId} and status = 'completed' and created_at >= ${filterStart} and created_at <= ${filterEnd}`
+    : sql`driver_id = ${driverId} and status = 'completed' and created_at >= now() - interval '30 days'`;
+
   const dailyRaw = await db
     .select({
       date: sql<string>`date(created_at)::text`,
@@ -526,7 +541,7 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
       rides: sql<number>`count(*)::int`,
     })
     .from(bookingsTable)
-    .where(sql`driver_id = ${driverId} and status = 'completed' and created_at >= now() - interval '30 days'`)
+    .where(dailyWhere)
     .groupBy(sql`date(created_at)`)
     .orderBy(sql`date(created_at)`);
 
@@ -536,6 +551,12 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
   const tipsTotal = Math.round((stats?.tipsTotal ?? 0) * 100) / 100;
   const tipsThisWeek = Math.round((stats?.tipsThisWeek ?? 0) * 100) / 100;
   const tipsToday = Math.round((stats?.tipsToday ?? 0) * 100) / 100;
+
+  // Period-scoped totals
+  const periodCommission = Math.round((stats?.farePeriod ?? 0) * commissionPct * 100) / 100;
+  const periodTips = Math.round((stats?.tipsPeriod ?? 0) * 100) / 100;
+  const periodEarnings = Math.round((periodCommission + periodTips) * 100) / 100;
+  const periodRides = stats?.ridesPeriod ?? 0;
 
   // Total driver payout = commission (% of fare) + tips (100%)
   const totalEarnings = Math.round((commissionAllTime + tipsTotal) * 100) / 100;
@@ -562,6 +583,9 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
       tipsTotal,
       tipsThisWeek,
       tipsToday,
+      periodEarnings,
+      periodRides,
+      periodTips,
       recentPayouts,
     })
   );

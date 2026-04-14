@@ -40,6 +40,7 @@ import PassengerRideDetail from "@/pages/passenger/ride-detail";
 import PassengerAddresses from "@/pages/passenger/addresses";
 import PassengerProfile from "@/pages/passenger/profile";
 import PassengerSupport from "@/pages/passenger/support";
+import PassengerReports from "@/pages/passenger/reports";
 
 // Driver Portal
 import DriverOnboarding from "@/pages/driver/onboarding";
@@ -235,6 +236,9 @@ function Router() {
       </Route>
       <Route path="/passenger/support">
         <PassengerRoute component={PassengerSupport} />
+      </Route>
+      <Route path="/passenger/reports">
+        <PassengerRoute component={PassengerReports} />
       </Route>
 
       {/* Corporate Portal */}
