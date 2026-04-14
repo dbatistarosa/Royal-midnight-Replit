@@ -16,7 +16,12 @@
  *    When an existing trip ends before the new trip starts, the formula is:
  *      existingTripEnd + transitTime(existingDropoff → newPickup) + 15 min ≤ newPickupAt
  *    Transit time is fetched from the Google Maps Distance Matrix API
- *    (GOOGLE_MAPS_API_KEY env var); falls back to DEFAULT_TRANSIT_MINUTES if unavailable.
+ *    (GOOGLE_MAPS_API_KEY env var).
+ *
+ *    FAIL-CLOSED: if GOOGLE_MAPS_API_KEY is absent or the Maps request fails,
+ *    the driver is treated as unavailable for Rule 3 cases.  This ensures
+ *    the strict scheduling guarantee is never silently degraded to an
+ *    approximation.
  */
 
 import { and, eq, gte, lt, ne, or } from "drizzle-orm";
@@ -27,19 +32,21 @@ const ACTIVE_STATUSES = ["confirmed", "in_progress", "on_way", "on_location"] as
 
 const RULE2_BUFFER_MS = 60 * 60 * 1000;        // 60 minutes
 const EARLY_ARRIVAL_BUFFER_MS = 15 * 60 * 1000; // 15 minutes
-const DEFAULT_TRANSIT_MINUTES = 30;
 
 /**
- * Uses the Google Maps Distance Matrix API to get the driving time in minutes
- * between two addresses.  Falls back to DEFAULT_TRANSIT_MINUTES when the API
- * key is absent or the request fails.
+ * Calls the Google Maps Distance Matrix API for the driving duration between
+ * two addresses.  Returns the duration in minutes, or null when the API key
+ * is absent or the request fails.
  *
- * Called exclusively for Rule 3 to avoid unnecessary API charges for Rules 1
- * and 2, which are pure arithmetic.
+ * Callers MUST treat null as a conflict (fail-closed) — never fall back to an
+ * approximate value.
  */
-async function getTransitMinutes(origin: string, destination: string): Promise<number> {
+export async function getTransitMinutes(
+  origin: string,
+  destination: string,
+): Promise<number | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return DEFAULT_TRANSIT_MINUTES;
+  if (!apiKey) return null;
 
   try {
     const url = new URL("https://maps.googleapis.com/maps/api/distancematrix/json");
@@ -60,13 +67,13 @@ async function getTransitMinutes(origin: string, destination: string): Promise<n
       }>;
     };
 
-    if (data.status !== "OK" || !data.rows?.length) return DEFAULT_TRANSIT_MINUTES;
+    if (data.status !== "OK" || !data.rows?.length) return null;
     const element = data.rows[0]?.elements[0];
-    if (!element || element.status !== "OK") return DEFAULT_TRANSIT_MINUTES;
+    if (!element || element.status !== "OK") return null;
 
     return Math.max(1, Math.round(element.duration.value / 60));
   } catch {
-    return DEFAULT_TRANSIT_MINUTES;
+    return null;
   }
 }
 
@@ -74,9 +81,9 @@ async function getTransitMinutes(origin: string, destination: string): Promise<n
  * Returns true when the driver is available to take the new booking, false
  * when any of the three scheduling rules would be violated.
  *
- * Only considers active trips on the same calendar day as the new booking to
- * keep Distance Matrix API calls minimal and align with the spec requirement
- * of "upcoming confirmed/active bookings for the same date".
+ * Only considers active trips on the same calendar day (UTC) as the new booking
+ * to limit Distance Matrix API calls and match the spec requirement of
+ * "upcoming confirmed/active bookings for the same date".
  *
  * @param driverId     - Internal driver row ID (driversTable.id)
  * @param newBookingId - The booking the driver wants to accept
@@ -99,7 +106,7 @@ export async function checkDriverAvailability(
 
   if (!newBooking) return false;
 
-  // Constrain to the same calendar day (UTC) as the new booking.
+  // Constrain query to same calendar day (UTC).
   const d = newBooking.pickupAt;
   const startOfDay = new Date(
     Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0),
@@ -148,8 +155,12 @@ export async function checkDriverAvailability(
 
     // ── Rule 3: existing trip ends before new trip starts ────────────────────
     // Formula: existingEnd + transitTime(existingDropoff → newPickup) + 15 min ≤ newPickup
+    // FAIL-CLOSED: null transit time (Maps unavailable) → treat as conflict.
     if (existingPickup < newPickup) {
       const transitMinutes = await getTransitMinutes(trip.dropoffAddress, newBooking.pickupAddress);
+      if (transitMinutes === null) {
+        return false;
+      }
       const transitMs = transitMinutes * 60_000;
       if (existingEnd + transitMs + EARLY_ARRIVAL_BUFFER_MS > newPickup) {
         return false;
