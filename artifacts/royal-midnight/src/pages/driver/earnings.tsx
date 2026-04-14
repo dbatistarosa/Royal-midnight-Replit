@@ -22,21 +22,12 @@ const driverNavItems = [
 ];
 
 type EarningsData = {
-  today: number;
-  thisWeek: number;
-  thisMonth: number;
-  totalEarnings: number;
   totalRides: number;
   avgPerRide: number;
-  commissionAllTime?: number;
-  commissionThisWeek?: number;
-  tipsTotal?: number;
-  tipsThisWeek?: number;
-  tipsToday?: number;
-  periodEarnings?: number;
-  periodRides?: number;
-  periodTips?: number;
   commissionPct?: number;
+  periodEarnings: number;
+  periodRides: number;
+  periodTips: number;
   recentPayouts: { date: string; amount: number; rides: number }[];
 };
 
@@ -94,6 +85,11 @@ export default function DriverEarnings() {
     ? `${format(dateRange.startDate, "MMM d, yyyy")} – ${format(dateRange.endDate, "MMM d, yyyy")}`
     : "All Time";
 
+  const commissionPct = earnings?.commissionPct ?? 0.7;
+  const periodFareCommission = Math.max(0, (earnings?.periodEarnings ?? 0) - (earnings?.periodTips ?? 0));
+  const periodRides = earnings?.periodRides ?? 0;
+  const periodAvg = periodRides > 0 ? (earnings?.periodEarnings ?? 0) / periodRides : 0;
+
   const handleDownloadPdf = async () => {
     if (!earnings) return;
     setPdfLoading(true);
@@ -101,11 +97,11 @@ export default function DriverEarnings() {
       await generateDriverReportPdf({
         driverName: driverRecord?.name ?? "Driver",
         dateRangeLabel,
-        periodEarnings: earnings.periodEarnings ?? earnings.thisMonth,
-        periodTips: earnings.periodTips ?? earnings.tipsThisWeek ?? 0,
-        periodRides: earnings.periodRides ?? 0,
-        commissionPct: earnings.commissionPct ?? 0.7,
-        avgPerRide: earnings.avgPerRide,
+        periodEarnings: earnings.periodEarnings,
+        periodTips: earnings.periodTips,
+        periodRides: earnings.periodRides,
+        commissionPct,
+        avgPerRide: periodAvg,
         recentPayouts: earnings.recentPayouts,
       });
     } finally {
@@ -140,81 +136,56 @@ export default function DriverEarnings() {
       ) : (
         <div className="space-y-6 sm:space-y-8">
 
-          {/* ── Period Summary Cards ─────────────────────────────────── */}
+          {/* ── All stats scoped to the selected date range ──────────── */}
           <div>
             <h2 className="font-serif text-lg mb-4">{dateRangeLabel}</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <StatCard
-                label="Period Earnings"
-                value={fmt$(earnings?.periodEarnings ?? earnings?.thisMonth ?? 0)}
+                label="Total Earnings"
+                value={fmt$(earnings?.periodEarnings ?? 0)}
                 sub="Fare share + tips"
                 color="text-primary"
                 borderColor="border-primary/20"
               />
               <StatCard
-                label="Period Rides"
-                value={String(earnings?.periodRides ?? 0)}
-                sub="Completed trips"
-                color="text-blue-400"
+                label="Fare Commission"
+                value={fmt$(periodFareCommission)}
+                sub={`${(commissionPct * 100).toFixed(0)}% of fares`}
+                color="text-green-400"
               />
               <StatCard
-                label="Period Tips"
+                label="Tips Received"
                 value={fmt$(earnings?.periodTips ?? 0)}
                 sub="100% yours"
                 color="text-amber-400"
               />
               <StatCard
-                label="Avg / Ride"
-                value={fmt$(earnings?.avgPerRide ?? 0)}
-                sub="All-time average"
-                color="text-foreground"
+                label="Completed Rides"
+                value={String(periodRides)}
+                sub="In selected period"
+                color="text-blue-400"
+              />
+              <StatCard
+                label="Avg Earnings / Ride"
+                value={fmt$(periodAvg)}
+                sub="Period average"
+              />
+              <StatCard
+                label="All-Time Rides"
+                value={String(earnings?.totalRides ?? 0)}
+                sub="Career total"
+                color="text-muted-foreground"
               />
             </div>
           </div>
 
-          {/* ── All-Time Summary ────────────────────────────────────── */}
-          <div>
-            <h2 className="font-serif text-lg mb-4">All-Time Snapshot</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <StatCard label="Today" value={fmt$(earnings?.today ?? 0)} />
-              <StatCard label="This Week" value={fmt$(earnings?.thisWeek ?? 0)} />
-              <StatCard label="This Month" value={fmt$(earnings?.thisMonth ?? 0)} />
-              <StatCard label="All-Time Total" value={fmt$(earnings?.totalEarnings ?? 0)} sub={`${earnings?.totalRides ?? 0} rides`} />
-            </div>
-          </div>
-
-          {/* ── Tips breakdown ──────────────────────────────────────── */}
-          {((earnings?.tipsThisWeek ?? 0) > 0 || (earnings?.tipsTotal ?? 0) > 0) && (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <StatCard label="Tips Today" value={fmt$(earnings?.tipsToday ?? 0)} color="text-primary" borderColor="border-primary/20" />
-              <StatCard label="Tips This Week" value={fmt$(earnings?.tipsThisWeek ?? 0)} color="text-primary" borderColor="border-primary/20" />
-              <StatCard label="Total Tips" value={fmt$(earnings?.tipsTotal ?? 0)} color="text-primary" borderColor="border-primary/20" />
-            </div>
-          )}
-
-          {/* ── Commission cards ───────────────────────────────────── */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-card border border-border rounded-none p-5">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">This Week Commission</p>
-              <p className="text-[10px] text-muted-foreground/60 mb-3">Your fare share this week (excl. tips)</p>
-              <p className="text-2xl font-serif text-foreground">{fmt$(earnings?.commissionThisWeek ?? 0)}</p>
-            </div>
-            <div className="bg-card border border-border rounded-none p-5">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">All-Time Commission</p>
-              <p className="text-[10px] text-muted-foreground/60 mb-3">Total fare share earned (excl. tips)</p>
-              <p className="text-2xl font-serif text-foreground">{fmt$(earnings?.commissionAllTime ?? 0)}</p>
-            </div>
-          </div>
-
-          {/* ── Daily Chart ─────────────────────────────────────────── */}
+          {/* ── Daily Chart (scoped to selected period) ─────────────── */}
           <div className="bg-card border border-border rounded-none p-4 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 sm:mb-6 gap-1">
-              <h2 className="font-serif text-xl">
-                {dateRange ? "Earnings — Selected Period" : "Earnings (Last 30 Days)"}
-              </h2>
+              <h2 className="font-serif text-xl">Daily Earnings — {dateRangeLabel}</h2>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground uppercase tracking-widest">
                 <Star className="w-3.5 h-3.5 text-primary fill-primary" />
-                {earnings?.totalRides ?? 0} trips all-time
+                {periodRides} trips in period
               </div>
             </div>
             {earnings?.recentPayouts && earnings.recentPayouts.length > 0 ? (
@@ -227,7 +198,7 @@ export default function DriverEarnings() {
                     <Tooltip
                       contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: 0 }}
                       itemStyle={{ color: "hsl(var(--foreground))" }}
-                      formatter={(val: number) => [`$${val.toFixed(2)}`, "Your earnings"]}
+                      formatter={(val: number) => [`$${val.toFixed(2)}`, "Earnings"]}
                     />
                     <Bar dataKey="amount" fill="hsl(var(--primary))" radius={[2, 2, 0, 0]} />
                   </BarChart>
@@ -238,29 +209,6 @@ export default function DriverEarnings() {
                 No completed trips in the selected period.
               </div>
             )}
-          </div>
-
-          {/* ── Period Trend cards ──────────────────────────────────── */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <StatCard
-              label="Period Fare Commission"
-              value={fmt$(Math.max(0, (earnings?.periodEarnings ?? 0) - (earnings?.periodTips ?? 0)))}
-              sub="Your cut of fare revenue"
-              color="text-green-400"
-            />
-            <StatCard
-              label="Period Tips"
-              value={fmt$(earnings?.periodTips ?? 0)}
-              sub="Gratuities received"
-              color="text-amber-400"
-            />
-            <StatCard
-              label="Period Total"
-              value={fmt$(earnings?.periodEarnings ?? 0)}
-              sub="Fare + tips combined"
-              color="text-primary"
-              borderColor="border-primary/20"
-            />
           </div>
 
         </div>
