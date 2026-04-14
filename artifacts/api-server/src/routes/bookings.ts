@@ -4,6 +4,7 @@ import { eq, desc, and, or, isNull, ne, sql, inArray } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
+import { checkDriverAvailability } from "../lib/driverScheduling.js";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -225,9 +226,8 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     conditions.push(ne(bookingsTable.status, "awaiting_payment"));
   }
 
-  // Non-admin drivers: either see their own assigned bookings, or unassigned open pool
-  // driverBusyWindows is populated here and used later to filter the open pool results.
-  let driverBusyWindows: BusyWindow[] = [];
+  // Non-admin drivers: either see their own assigned bookings, or unassigned open pool.
+  // isDriverOpenPoolQuery flags that we need to post-filter for scheduling conflicts.
   let isDriverOpenPoolQuery = false;
 
   if (caller.role === "driver") {
@@ -298,10 +298,9 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
 
       if (requestedStatus === "pending" || requestedStatus === "authorized") {
         // Requesting the open/unassigned pool — includes both pending and authorized bookings.
-        // Pre-fetch this driver's busy windows so conflicting trips can be hidden below.
+        // Conflicting trips are filtered below using checkDriverAvailability.
         conditions.push(isNull(bookingsTable.driverId));
         isDriverOpenPoolQuery = true;
-        driverBusyWindows = await getDriverBusyWindows(driverRow.id);
       } else {
         // Default: own assigned bookings only
         conditions.push(eq(bookingsTable.driverId, driverRow.id));
@@ -355,9 +354,12 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     const commissionPct = await getCommissionPct();
     let driverBookings = parsed2;
 
-    // For the open pool, hide trips that conflict with the driver's existing schedule.
-    if (isDriverOpenPoolQuery && driverBusyWindows.length > 0) {
-      driverBookings = parsed2.filter(b => !hasConflict(new Date(b.pickupAt), driverBusyWindows));
+    // For the open pool, hide trips that violate the strict 3-rule scheduling check.
+    if (isDriverOpenPoolQuery) {
+      const availabilityResults = await Promise.all(
+        parsed2.map(b => checkDriverAvailability(driverRow.id, b.id)),
+      );
+      driverBookings = parsed2.filter((_, i) => availabilityResults[i]);
     }
 
     // Attach passenger preferences so the driver can stage the vehicle correctly.
@@ -870,14 +872,14 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
     return;
   }
 
-  // ── Scheduling conflict check ────────────────────────────────────────────────
-  // Re-check busy windows even though the open-pool query already filtered them.
-  // This guards against race conditions where a driver accepts another trip between
-  // loading the list and tapping Accept.
-  const busyWindows = await getDriverBusyWindows(driverRow.id);
-  if (hasConflict(booking.pickupAt, busyWindows)) {
-    res.status(409).json({
-      error: "This trip conflicts with your existing schedule. You have another booking within 1 hour of this pickup time.",
+  // ── Scheduling conflict check (3-rule strict algorithm) ─────────────────────
+  // Re-run even though the open-pool query already filtered: guards against race
+  // conditions where a driver accepts another trip between viewing the list and
+  // tapping Accept.
+  const available = await checkDriverAvailability(driverRow.id, id);
+  if (!available) {
+    res.status(400).json({
+      error: "Schedule conflict: You will not have enough time to arrive 15 minutes early for your next trip.",
       code: "SCHEDULE_CONFLICT",
     });
     return;
