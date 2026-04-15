@@ -111,8 +111,9 @@ export async function checkDriverAvailability(
   const startOfDay = new Date(
     Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0),
   );
+  // Next-day midnight exclusive — avoids the 23:59:59.999 edge case
   const endOfDay = new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999),
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0, 0, 0),
   );
 
   const existingTrips = await db
