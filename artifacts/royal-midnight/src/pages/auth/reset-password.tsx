@@ -72,7 +72,7 @@ export default function ResetPassword() {
       <div className="w-full max-w-md">
         <div className="text-center mb-12">
           <Link href="/" className="block mb-8">
-            <img src="/royal-midnight-logo-original.png" alt="Royal Midnight" className="h-28 w-auto mx-auto max-w-xs object-contain" />
+            <img src="/royal-midnight-logo-original.png" alt="Royal Midnight" className="h-28 w-auto mx-auto max-w-xs object-contain" style={{ mixBlendMode: "screen" }} />
           </Link>
           <h1 className="text-3xl font-serif text-white mb-2">Set New Password</h1>
           <p className="text-gray-400 text-sm">Choose a secure password for your account</p>

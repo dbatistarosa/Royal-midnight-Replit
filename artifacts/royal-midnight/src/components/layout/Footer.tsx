@@ -7,7 +7,7 @@ export function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
           <div className="col-span-1 md:col-span-2">
             <Link href="/" className="block mb-6">
-              <img src="/royal-midnight-logo-original.png" alt="Royal Midnight" className="h-28 w-auto max-w-xs object-contain object-left" />
+              <img src="/royal-midnight-logo-original.png" alt="Royal Midnight" className="h-28 w-auto max-w-xs object-contain object-left" style={{ mixBlendMode: "screen" }} />
             </Link>
             <p className="text-gray-400 text-sm max-w-sm leading-relaxed mb-8">
               South Florida's premier black car service. Discretion, reliability, and first-class comfort. Covering FLL, MIA, and PBI airports.
