@@ -322,6 +322,45 @@ async function runStartupMigrations(): Promise<void> {
         submitted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+
+    // Row-Level Security — enable on every table and create a permissive policy
+    // for the application database role so the API continues to work unaffected.
+    // Any other database user that connects directly will see nothing.
+    await client.query(`
+      DO $$
+      DECLARE
+        app_role TEXT;
+        tbl      TEXT;
+        tables   TEXT[] := ARRAY[
+          'users', 'drivers', 'bookings', 'vehicles', 'saved_addresses',
+          'reviews', 'support_tickets', 'ticket_messages', 'notifications',
+          'promo_codes', 'pricing_rules', 'settings', 'sessions',
+          'password_reset_tokens', 'email_logs', 'vehicle_catalog', 'otp_codes',
+          'user_favorite_drivers', 'geo_zones', 'managed_travelers',
+          'compliance_documents'
+        ];
+      BEGIN
+        SELECT current_user INTO app_role;
+
+        FOREACH tbl IN ARRAY tables LOOP
+          -- Enable RLS on the table (idempotent)
+          EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
+
+          -- Create a permissive full-access policy for the app role if absent
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'public'
+              AND tablename  = tbl
+              AND policyname = 'app_full_access'
+          ) THEN
+            EXECUTE format(
+              'CREATE POLICY app_full_access ON %I AS PERMISSIVE FOR ALL TO %I USING (true) WITH CHECK (true)',
+              tbl, app_role
+            );
+          END IF;
+        END LOOP;
+      END $$
+    `);
   } finally {
     client.release();
   }
