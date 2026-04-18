@@ -323,15 +323,14 @@ async function runStartupMigrations(): Promise<void> {
       )
     `);
 
-    // Row-Level Security — enable on every table and create a permissive policy
-    // for the application database role so the API continues to work unaffected.
-    // Any other database user that connects directly will see nothing.
+    // Row-Level Security — enable on every table and create a permissive PUBLIC
+    // policy so all database roles (including Replit's production role) retain
+    // full access. RLS is a guard rail against future role-scoped restrictions.
     await client.query(`
       DO $$
       DECLARE
-        app_role TEXT;
-        tbl      TEXT;
-        tables   TEXT[] := ARRAY[
+        tbl    TEXT;
+        tables TEXT[] := ARRAY[
           'users', 'drivers', 'bookings', 'vehicles', 'saved_addresses',
           'reviews', 'support_tickets', 'ticket_messages', 'notifications',
           'promo_codes', 'pricing_rules', 'settings', 'sessions',
@@ -340,13 +339,12 @@ async function runStartupMigrations(): Promise<void> {
           'compliance_documents'
         ];
       BEGIN
-        SELECT current_user INTO app_role;
-
         FOREACH tbl IN ARRAY tables LOOP
           -- Enable RLS on the table (idempotent)
           EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
 
-          -- Create a permissive full-access policy for the app role if absent
+          -- Create a permissive full-access policy for all roles if absent.
+          -- Using PUBLIC avoids hard-coding a role name that may differ across environments.
           IF NOT EXISTS (
             SELECT 1 FROM pg_policies
             WHERE schemaname = 'public'
@@ -354,8 +352,8 @@ async function runStartupMigrations(): Promise<void> {
               AND policyname = 'app_full_access'
           ) THEN
             EXECUTE format(
-              'CREATE POLICY app_full_access ON %I AS PERMISSIVE FOR ALL TO %I USING (true) WITH CHECK (true)',
-              tbl, app_role
+              'CREATE POLICY app_full_access ON %I AS PERMISSIVE FOR ALL TO PUBLIC USING (true) WITH CHECK (true)',
+              tbl
             );
           END IF;
         END LOOP;
