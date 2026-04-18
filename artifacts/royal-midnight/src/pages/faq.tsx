@@ -5,6 +5,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Link } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 
 const faqs = [
   {
@@ -32,6 +33,11 @@ const faqs = [
 export default function FAQ() {
   return (
     <div className="py-24 min-h-screen">
+      <PageSeo
+        title="FAQ | Royal Midnight Luxury Black Car Service South Florida"
+        description="Answers to common questions about Royal Midnight's luxury black car service in South Florida. Learn about flat-rate pricing, vehicle classes, booking, cancellation policy, and airport pickups."
+        path="/faq"
+      />
       <div className="container mx-auto max-w-3xl px-4">
         <div className="text-center mb-16">
           <h1 className="font-serif text-3xl sm:text-4xl md:text-6xl mb-6">Frequently Asked Questions</h1>

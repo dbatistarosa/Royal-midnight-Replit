@@ -1,6 +1,13 @@
+import { PageSeo } from "@/components/PageSeo";
+
 export default function Terms() {
   return (
     <div className="py-24 min-h-screen">
+      <PageSeo
+        title="Terms of Service | Royal Midnight"
+        description="Terms and conditions governing use of Royal Midnight's luxury black car service in South Florida. Booking, cancellation, payment, and liability policies."
+        path="/terms"
+      />
       <div className="container mx-auto max-w-4xl px-4">
         <h1 className="font-serif text-4xl md:text-5xl mb-8">Terms of Service</h1>
         

@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 
 const pricingTiers = [
   {
@@ -42,6 +43,11 @@ const pricingTiers = [
 export default function Pricing() {
   return (
     <div className="py-24">
+      <PageSeo
+        title="Pricing & Rates | Flat-Rate Luxury Black Car Service South Florida"
+        description="Transparent flat-rate pricing for Royal Midnight's luxury black car service in South Florida. No surge pricing, no hidden fees. See exact rates for airport transfers and hourly chauffeur."
+        path="/pricing"
+      />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="text-center mb-16">
           <h1 className="font-serif text-4xl md:text-6xl mb-6">Transparent Pricing</h1>

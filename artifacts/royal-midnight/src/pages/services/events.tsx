@@ -1,9 +1,15 @@
 import { GlassWater, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 
 export default function Events() {
   return (
     <div className="py-24">
+      <PageSeo
+        title="Luxury Event Transportation South Florida | Weddings, Galas & More"
+        description="Arrive in style with Royal Midnight's luxury event transportation. Premium black cars for weddings, galas, concerts, and special occasions across Miami, Fort Lauderdale, and Palm Beach."
+        path="/services/events"
+      />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="max-w-3xl mb-16">
           <Link href="/services" className="text-primary hover:underline mb-6 inline-block">&larr; Back to Services</Link>

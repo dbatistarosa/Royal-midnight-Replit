@@ -1,6 +1,13 @@
+import { PageSeo } from "@/components/PageSeo";
+
 export default function Privacy() {
   return (
     <div className="py-24 min-h-screen">
+      <PageSeo
+        title="Privacy Policy | Royal Midnight"
+        description="Royal Midnight's privacy policy. How we collect, use, and protect your personal data when using our luxury black car and chauffeur service in South Florida."
+        path="/privacy"
+      />
       <div className="container mx-auto max-w-4xl px-4">
         <h1 className="font-serif text-4xl md:text-5xl mb-8">Privacy Policy</h1>
         

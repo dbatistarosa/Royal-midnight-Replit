@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { AIRPORTS, VEHICLE_CLASSES } from "@/lib/constants";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
+import { PageSeo } from "@/components/PageSeo";
 
 export default function Home() {
   const [, setLocation] = useLocation();
@@ -19,6 +20,11 @@ export default function Home() {
 
   return (
     <div className="w-full">
+      <PageSeo
+        title="Royal Midnight — Luxury Black Car Service South Florida"
+        description="South Florida's premier luxury black car service. Flat-rate airport transfers at FLL, MIA &amp; PBI, hourly chauffeur, and executive transportation. No surge pricing. Book online 24/7."
+        path="/"
+      />
       {/* Hero Section */}
       <section className="relative h-screen min-h-[700px] flex items-center pt-20">
         <div className="absolute inset-0 z-0">

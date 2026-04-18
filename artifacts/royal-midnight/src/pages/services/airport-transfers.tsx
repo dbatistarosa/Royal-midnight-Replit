@@ -1,9 +1,15 @@
 import { Plane, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 
 export default function AirportTransfers() {
   return (
     <div className="py-24">
+      <PageSeo
+        title="Airport Transfers FLL, MIA & PBI | Luxury Black Car South Florida"
+        description="Luxury airport transfers serving Fort Lauderdale (FLL), Miami (MIA), and Palm Beach (PBI). Flat-rate pricing, real-time flight tracking, professional meet & greet. Book your South Florida airport transfer."
+        path="/services/airport-transfers"
+      />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="max-w-3xl mb-16">
           <Link href="/services" className="text-primary hover:underline mb-6 inline-block">&larr; Back to Services</Link>

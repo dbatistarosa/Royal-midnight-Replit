@@ -27,6 +27,7 @@ import Contact from "@/pages/contact";
 import FAQ from "@/pages/faq";
 import Terms from "@/pages/terms";
 import Privacy from "@/pages/privacy";
+import Pricing from "@/pages/pricing";
 
 // Auth
 import Login from "@/pages/auth/login";
@@ -361,6 +362,9 @@ function Router() {
       </Route>
       <Route path="/privacy">
         <Layout><Privacy /></Layout>
+      </Route>
+      <Route path="/pricing">
+        <Layout><Pricing /></Layout>
       </Route>
       <Route path="/book">
         <Layout><Book /></Layout>

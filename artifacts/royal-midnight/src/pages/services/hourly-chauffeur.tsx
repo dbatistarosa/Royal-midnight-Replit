@@ -1,9 +1,15 @@
 import { Clock, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
+import { PageSeo } from "@/components/PageSeo";
 
 export default function HourlyChauffeur() {
   return (
     <div className="py-24">
+      <PageSeo
+        title="Hourly Chauffeur Service South Florida | By-the-Hour Luxury Car"
+        description="Hire a professional chauffeur by the hour in South Florida. Flexible luxury transportation for business meetings, shopping, events, and multi-stop trips. Executive sedans and premium SUVs."
+        path="/services/hourly-chauffeur"
+      />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="max-w-3xl mb-16">
           <Link href="/services" className="text-primary hover:underline mb-6 inline-block">&larr; Back to Services</Link>
