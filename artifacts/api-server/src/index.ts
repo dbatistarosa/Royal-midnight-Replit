@@ -323,9 +323,12 @@ async function runStartupMigrations(): Promise<void> {
       )
     `);
 
-    // Row-Level Security — enable on every table and create a permissive PUBLIC
-    // policy so all database roles (including Replit's production role) retain
-    // full access. RLS is a guard rail against future role-scoped restrictions.
+    // Row-Level Security — enable on every table so that direct DB connections
+    // made under a different role see no rows.  The application's DB user is the
+    // table owner and bypasses RLS automatically (no explicit policy needed).
+    // We also drop any stale role-specific "app_full_access" policies that a
+    // previous migration may have created, because those embed a role name that
+    // differs between environments and break cross-environment deployments.
     await client.query(`
       DO $$
       DECLARE
@@ -340,22 +343,10 @@ async function runStartupMigrations(): Promise<void> {
         ];
       BEGIN
         FOREACH tbl IN ARRAY tables LOOP
-          -- Enable RLS on the table (idempotent)
+          -- Remove stale role-specific policy from earlier migration attempt
+          EXECUTE format('DROP POLICY IF EXISTS app_full_access ON %I', tbl);
+          -- Enable RLS (idempotent — safe to run every startup)
           EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
-
-          -- Create a permissive full-access policy for all roles if absent.
-          -- Using PUBLIC avoids hard-coding a role name that may differ across environments.
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_policies
-            WHERE schemaname = 'public'
-              AND tablename  = tbl
-              AND policyname = 'app_full_access'
-          ) THEN
-            EXECUTE format(
-              'CREATE POLICY app_full_access ON %I AS PERMISSIVE FOR ALL TO PUBLIC USING (true) WITH CHECK (true)',
-              tbl
-            );
-          END IF;
         END LOOP;
       END $$
     `);
