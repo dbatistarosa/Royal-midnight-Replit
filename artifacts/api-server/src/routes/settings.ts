@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "../middleware/auth.js";
+import { settingsCache, pricingCache } from "../lib/serverCache.js";
 
 const router: IRouter = Router();
 
@@ -56,6 +57,11 @@ async function bulkPatchSettings(body: unknown, res: import("express").Response)
       .values({ key, value })
       .onConflictDoUpdate({ target: settingsTable.key, set: { value, updatedAt: new Date() } });
     result[key] = value;
+    settingsCache.invalidate(key);
+    // Pricing-related settings also affect pricing cache
+    if (key.startsWith("pricing_") || key === "driver_commission_pct") {
+      pricingCache.clear();
+    }
   }
   res.json(result);
 }
@@ -69,14 +75,7 @@ router.patch("/admin/settings", requireAdmin, async (req, res): Promise<void> =>
 });
 
 // Admin: update a single setting (aliased at both /settings/:key and /admin/settings/:key)
-router.patch("/settings/:key", requireAdmin, async (req, res): Promise<void> => {
-  const key = req.params["key"];
-  const value = req.body?.value;
-  if (typeof value !== "string" || !value.trim()) {
-    res.status(400).json({ error: "Invalid value" });
-    return;
-  }
-
+async function patchSingleSetting(key: string, value: string, res: import("express").Response): Promise<void> {
   await db
     .insert(settingsTable)
     .values({ key, value })
@@ -84,8 +83,21 @@ router.patch("/settings/:key", requireAdmin, async (req, res): Promise<void> => 
       target: settingsTable.key,
       set: { value, updatedAt: new Date() },
     });
-
+  settingsCache.invalidate(key);
+  if (key.startsWith("pricing_") || key === "driver_commission_pct") {
+    pricingCache.clear();
+  }
   res.json({ key, value });
+}
+
+router.patch("/settings/:key", requireAdmin, async (req, res): Promise<void> => {
+  const key = req.params["key"];
+  const value = req.body?.value;
+  if (typeof value !== "string" || !value.trim()) {
+    res.status(400).json({ error: "Invalid value" });
+    return;
+  }
+  await patchSingleSetting(key, value, res);
 });
 
 router.patch("/admin/settings/:key", requireAdmin, async (req, res): Promise<void> => {
@@ -95,16 +107,7 @@ router.patch("/admin/settings/:key", requireAdmin, async (req, res): Promise<voi
     res.status(400).json({ error: "Invalid value" });
     return;
   }
-
-  await db
-    .insert(settingsTable)
-    .values({ key, value })
-    .onConflictDoUpdate({
-      target: settingsTable.key,
-      set: { value, updatedAt: new Date() },
-    });
-
-  res.json({ key, value });
+  await patchSingleSetting(key, value, res);
 });
 
 export default router;

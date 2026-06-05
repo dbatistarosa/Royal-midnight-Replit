@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, geoZonesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
+import { geoZonesCache } from "../lib/serverCache.js";
 
 const router: IRouter = Router();
 
@@ -46,6 +47,7 @@ router.post("/admin/geo-zones", requireAuth, requireAdmin, async (req, res): Pro
     isActive: true,
   }).returning();
 
+  geoZonesCache.invalidate("all");
   res.status(201).json({ ...created, geometry: JSON.parse(created.geometry) });
 });
 
@@ -70,6 +72,7 @@ router.patch("/admin/geo-zones/:id", requireAuth, requireAdmin, async (req, res)
   const [updated] = await db.update(geoZonesTable).set(update).where(eq(geoZonesTable.id, id)).returning();
   if (!updated) { res.status(404).json({ error: "Zone not found" }); return; }
 
+  geoZonesCache.invalidate("all");
   res.json({ ...updated, geometry: JSON.parse(updated.geometry) });
 });
 
@@ -79,6 +82,7 @@ router.delete("/admin/geo-zones/:id", requireAuth, requireAdmin, async (req, res
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
 
   await db.delete(geoZonesTable).where(eq(geoZonesTable.id, id));
+  geoZonesCache.invalidate("all");
   res.json({ ok: true });
 });
 

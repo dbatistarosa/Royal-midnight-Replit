@@ -2,6 +2,13 @@ import { Router, type IRouter } from "express";
 import { db, settingsTable, pricingRulesTable, geoZonesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
+import {
+  settingsCache,
+  pricingCache,
+  geoZonesCache,
+  geocodeCache,
+  directionsCache,
+} from "../lib/serverCache.js";
 
 const router: IRouter = Router();
 
@@ -79,48 +86,49 @@ async function getDirectionsDistance(
 
   const origin = resolveAddress(pickup);
   const destination = resolveAddress(dropoff);
+  const cacheKey = [origin, destination, ...(waypoints?.map(resolveAddress) ?? [])].join("|");
 
-  try {
-    // Directions API — returns actual driving route distance & duration
-    const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
-    url.searchParams.set("origin", origin);
-    url.searchParams.set("destination", destination);
-    url.searchParams.set("mode", "driving");
-    url.searchParams.set("units", "imperial");
-    url.searchParams.set("key", apiKey);
+  return directionsCache.getOrSet(cacheKey, async () => {
+    try {
+      const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
+      url.searchParams.set("origin", origin);
+      url.searchParams.set("destination", destination);
+      url.searchParams.set("mode", "driving");
+      url.searchParams.set("units", "imperial");
+      url.searchParams.set("key", apiKey);
 
-    if (waypoints && waypoints.length > 0) {
-      const resolved = waypoints.map(resolveAddress).join("|");
-      url.searchParams.set("waypoints", resolved);
-    }
+      if (waypoints && waypoints.length > 0) {
+        const resolved = waypoints.map(resolveAddress).join("|");
+        url.searchParams.set("waypoints", resolved);
+      }
 
-    const response = await fetch(url.toString());
-    const data = await response.json() as {
-      status: string;
-      routes?: Array<{
-        legs: Array<{
-          distance: { value: number; text: string };
-          duration: { value: number; text: string };
+      const response = await fetch(url.toString());
+      const data = await response.json() as {
+        status: string;
+        routes?: Array<{
+          legs: Array<{
+            distance: { value: number; text: string };
+            duration: { value: number; text: string };
+          }>;
         }>;
-      }>;
-    };
+      };
 
-    if (data.status !== "OK" || !data.routes?.length) return null;
+      if (data.status !== "OK" || !data.routes?.length) return null;
 
-    // Sum all legs (multi-stop routes have multiple legs)
-    const legs = data.routes[0].legs;
-    if (!legs?.length) return null;
+      const legs = data.routes[0].legs;
+      if (!legs?.length) return null;
 
-    const totalDistanceMeters = legs.reduce((sum, l) => sum + l.distance.value, 0);
-    const totalDurationSeconds = legs.reduce((sum, l) => sum + l.duration.value, 0);
+      const totalDistanceMeters = legs.reduce((sum, l) => sum + l.distance.value, 0);
+      const totalDurationSeconds = legs.reduce((sum, l) => sum + l.duration.value, 0);
 
-    return {
-      distance: Math.round((totalDistanceMeters / 1609.344) * 10) / 10,
-      duration: Math.round(totalDurationSeconds / 60),
-    };
-  } catch {
-    return null;
-  }
+      return {
+        distance: Math.round((totalDistanceMeters / 1609.344) * 10) / 10,
+        duration: Math.round(totalDurationSeconds / 60),
+      };
+    } catch {
+      return null;
+    }
+  });
 }
 
 // Fallback distances (road miles) — only used if Google API is unavailable
@@ -167,28 +175,33 @@ function pointInPolygon(lat: number, lng: number, coords: number[][]): boolean {
   return inside;
 }
 
-/** Geocode an address to lat/lng via Google Geocoding API (best-effort) */
+/** Geocode an address to lat/lng via Google Geocoding API (best-effort, cached 24 h) */
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return null;
-  try {
-    const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-    url.searchParams.set("address", address);
-    url.searchParams.set("key", apiKey);
-    const res = await fetch(url.toString());
-    const data = await res.json() as { status: string; results?: Array<{ geometry: { location: { lat: number; lng: number } } }> };
-    if (data.status !== "OK" || !data.results?.length) return null;
-    const loc = data.results[0]!.geometry.location;
-    return { lat: loc.lat, lng: loc.lng };
-  } catch {
-    return null;
-  }
+
+  return geocodeCache.getOrSet(address, async () => {
+    try {
+      const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+      url.searchParams.set("address", address);
+      url.searchParams.set("key", apiKey);
+      const res = await fetch(url.toString());
+      const data = await res.json() as { status: string; results?: Array<{ geometry: { location: { lat: number; lng: number } } }> };
+      if (data.status !== "OK" || !data.results?.length) return null;
+      const loc = data.results[0]!.geometry.location;
+      return { lat: loc.lat, lng: loc.lng };
+    } catch {
+      return null;
+    }
+  });
 }
 
 /** Find the highest rate multiplier among active zones that cover any of the given addresses */
 async function getZoneMultiplier(addresses: string[]): Promise<number> {
   try {
-    const zones = await db.select().from(geoZonesTable).where(eq(geoZonesTable.isActive, true));
+    const zones = (await geoZonesCache.getOrSet("all", () =>
+      db.select().from(geoZonesTable).where(eq(geoZonesTable.isActive, true))
+    )) as (typeof geoZonesTable.$inferSelect)[];
     if (!zones.length) return 1.0;
 
     let maxMultiplier = 1.0;
@@ -225,39 +238,42 @@ async function getZoneMultiplier(addresses: string[]): Promise<number> {
 }
 
 async function getSetting(key: string, fallback: string): Promise<string> {
-  try {
-    const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, key));
-    return row?.value ?? fallback;
-  } catch {
-    return fallback;
-  }
+  return settingsCache.getOrSet(key, async () => {
+    try {
+      const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, key));
+      return row?.value ?? fallback;
+    } catch {
+      return fallback;
+    }
+  });
 }
 
-/** Fetch active pricing rule for a given vehicle class from the DB.
- *  Falls back to hardcoded defaults if none found. */
+/** Fetch active pricing rule for a given vehicle class (cached 60 min). */
 async function getPricingForClass(vc: string): Promise<{ baseFare: number; ratePerMile: number; airportFee: number }> {
-  try {
-    const [rule] = await db
-      .select()
-      .from(pricingRulesTable)
-      .where(and(eq(pricingRulesTable.vehicleClass, vc), eq(pricingRulesTable.isActive, true)));
+  return pricingCache.getOrSet(vc, async () => {
+    try {
+      const [rule] = await db
+        .select()
+        .from(pricingRulesTable)
+        .where(and(eq(pricingRulesTable.vehicleClass, vc), eq(pricingRulesTable.isActive, true)));
 
-    if (rule) {
-      return {
-        baseFare: parseFloat(rule.baseFare ?? "0") || (DEFAULT_BASE_FARES[vc] ?? 35),
-        ratePerMile: parseFloat(rule.ratePerMile ?? "0") || (DEFAULT_RATE_PER_MILE[vc] ?? 2.5),
-        airportFee: parseFloat(rule.airportSurcharge ?? "0") || 0,
-      };
+      if (rule) {
+        return {
+          baseFare: parseFloat(rule.baseFare ?? "0") || (DEFAULT_BASE_FARES[vc] ?? 35),
+          ratePerMile: parseFloat(rule.ratePerMile ?? "0") || (DEFAULT_RATE_PER_MILE[vc] ?? 2.5),
+          airportFee: parseFloat(rule.airportSurcharge ?? "0") || 0,
+        };
+      }
+    } catch {
+      // fall through to defaults
     }
-  } catch {
-    // fall through to defaults
-  }
 
-  return {
-    baseFare: DEFAULT_BASE_FARES[vc] ?? 35,
-    ratePerMile: DEFAULT_RATE_PER_MILE[vc] ?? 2.5,
-    airportFee: 0,
-  };
+    return {
+      baseFare: DEFAULT_BASE_FARES[vc] ?? 35,
+      ratePerMile: DEFAULT_RATE_PER_MILE[vc] ?? 2.5,
+      airportFee: 0,
+    };
+  });
 }
 
 // Hourly charter rates per vehicle class ($/hr, before tax)

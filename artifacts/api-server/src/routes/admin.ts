@@ -430,13 +430,10 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
     };
   });
 
-  let emailsSent = 0;
-  for (const p of payouts) {
-    try {
-      await sendWeeklyDriverPayout({ ...p, weekLabel });
-      emailsSent++;
-    } catch {}
-  }
+  const results = await Promise.all(
+    payouts.map(p => sendWeeklyDriverPayout({ ...p, weekLabel }).then(() => true).catch(() => false))
+  );
+  const emailsSent = results.filter(Boolean).length;
 
   try {
     await sendWeeklyPayoutAdminReport({

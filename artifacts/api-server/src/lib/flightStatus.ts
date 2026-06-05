@@ -3,6 +3,7 @@
  * Requires AVIATIONSTACK_API_KEY env var (free tier: 100 calls/month, HTTP only).
  * https://aviationstack.com/documentation
  */
+import { flightStatusCache } from "./serverCache.js";
 
 const API_KEY = process.env.AVIATIONSTACK_API_KEY;
 // Free tier uses HTTP; paid tier supports HTTPS
@@ -47,6 +48,9 @@ export async function getFlightStatus(flightIata: string): Promise<FlightStatus 
   const fl = flightIata.replace(/\s+/g, "").toUpperCase();
   if (!fl) return null;
 
+  const cached = flightStatusCache.get(fl);
+  if (cached !== undefined) return cached as FlightStatus | null;
+
   try {
     const url = `${BASE_URL}/flights?access_key=${API_KEY}&flight_iata=${encodeURIComponent(fl)}&limit=1`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
@@ -74,7 +78,7 @@ export async function getFlightStatus(flightIata: string): Promise<FlightStatus 
       ? (rawStatus as FlightStatus["status"])
       : "unknown";
 
-    return {
+    const result: FlightStatus = {
       flightNumber: data.flight?.iata ?? fl,
       airline: data.airline?.name ?? "",
       status,
@@ -96,6 +100,8 @@ export async function getFlightStatus(flightIata: string): Promise<FlightStatus 
       },
       delayMinutes: typeof data.arrival?.delay === "number" ? data.arrival.delay : null,
     };
+    flightStatusCache.set(fl, result);
+    return result;
   } catch (err: any) {
     console.error(`[flightStatus] Request failed for ${fl}:`, err.message);
     return null;
