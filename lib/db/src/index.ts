@@ -13,4 +13,7 @@ if (!process.env.DATABASE_URL) {
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 export const db = drizzle(pool, { schema });
 
+// Expose drizzle constructor so API server can create per-request instances
+export { drizzle as createDrizzle } from "drizzle-orm/node-postgres";
+
 export * from "./schema";

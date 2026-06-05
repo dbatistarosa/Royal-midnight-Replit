@@ -323,12 +323,31 @@ async function runStartupMigrations(): Promise<void> {
       )
     `);
 
-    // Row-Level Security — enable on every table so that direct DB connections
-    // made under a different role see no rows.  The application's DB user is the
-    // table owner and bypasses RLS automatically (no explicit policy needed).
-    // We also drop any stale role-specific "app_full_access" policies that a
-    // previous migration may have created, because those embed a role name that
-    // differs between environments and break cross-environment deployments.
+    // ── Row-Level Security ────────────────────────────────────────────────
+    // Enable RLS + FORCE on every table so that even the table-owner role
+    // (used by this application) is subject to policies.  Policies use two
+    // session-local settings that the auth middleware injects per-request:
+    //   app.current_user_id   – authenticated user's integer PK
+    //   app.current_user_role – 'passenger' | 'driver' | 'admin'
+    // When neither setting is present (empty string) the helper functions
+    // return NULL / 'service', granting unrestricted access — this covers
+    // internal operations (migrations, seeding, background tasks) that run
+    // before any per-request context is set.
+
+    // Helper functions (idempotent)
+    await client.query(`
+      CREATE OR REPLACE FUNCTION current_app_user_id()
+      RETURNS INTEGER LANGUAGE sql STABLE AS $$
+        SELECT NULLIF(current_setting('app.current_user_id', TRUE), '')::INTEGER
+      $$;
+
+      CREATE OR REPLACE FUNCTION current_app_user_role()
+      RETURNS TEXT LANGUAGE sql STABLE AS $$
+        SELECT COALESCE(NULLIF(current_setting('app.current_user_role', TRUE), ''), 'service')
+      $$;
+    `);
+
+    // Enable RLS + FORCE, drop any stale policies, then create fresh ones
     await client.query(`
       DO $$
       DECLARE
@@ -343,12 +362,299 @@ async function runStartupMigrations(): Promise<void> {
         ];
       BEGIN
         FOREACH tbl IN ARRAY tables LOOP
-          -- Remove stale role-specific policy from earlier migration attempt
           EXECUTE format('DROP POLICY IF EXISTS app_full_access ON %I', tbl);
-          -- Enable RLS (idempotent — safe to run every startup)
+          EXECUTE format('DROP POLICY IF EXISTS rls_policy ON %I', tbl);
           EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tbl);
+          EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tbl);
         END LOOP;
       END $$
+    `);
+
+    // ── Per-table policies ────────────────────────────────────────────────
+
+    // users — self or admin; service role has full access
+    await client.query(`
+      DROP POLICY IF EXISTS users_select ON users;
+      DROP POLICY IF EXISTS users_insert ON users;
+      DROP POLICY IF EXISTS users_update ON users;
+      DROP POLICY IF EXISTS users_delete ON users;
+
+      CREATE POLICY users_select ON users FOR SELECT USING (
+        current_app_user_role() = 'service'
+        OR id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+      CREATE POLICY users_insert ON users FOR INSERT WITH CHECK (
+        current_app_user_role() IN ('service', 'admin')
+      );
+      CREATE POLICY users_update ON users FOR UPDATE USING (
+        current_app_user_role() = 'service'
+        OR id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+      CREATE POLICY users_delete ON users FOR DELETE USING (
+        current_app_user_role() IN ('service', 'admin')
+      );
+    `);
+
+    // sessions — owner or admin
+    await client.query(`
+      DROP POLICY IF EXISTS sessions_select ON sessions;
+      DROP POLICY IF EXISTS sessions_insert ON sessions;
+      DROP POLICY IF EXISTS sessions_update ON sessions;
+      DROP POLICY IF EXISTS sessions_delete ON sessions;
+
+      CREATE POLICY sessions_select ON sessions FOR SELECT USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+      CREATE POLICY sessions_insert ON sessions FOR INSERT WITH CHECK (
+        current_app_user_role() IN ('service', 'admin')
+        OR user_id = current_app_user_id()
+      );
+      CREATE POLICY sessions_update ON sessions FOR UPDATE USING (
+        current_app_user_role() IN ('service', 'admin')
+      );
+      CREATE POLICY sessions_delete ON sessions FOR DELETE USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+    `);
+
+    // drivers — own profile or admin; passengers can read (for booking display)
+    await client.query(`
+      DROP POLICY IF EXISTS drivers_select ON drivers;
+      DROP POLICY IF EXISTS drivers_insert ON drivers;
+      DROP POLICY IF EXISTS drivers_update ON drivers;
+      DROP POLICY IF EXISTS drivers_delete ON drivers;
+
+      CREATE POLICY drivers_select ON drivers FOR SELECT USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() IN ('admin', 'passenger')
+      );
+      CREATE POLICY drivers_insert ON drivers FOR INSERT WITH CHECK (
+        current_app_user_role() IN ('service', 'admin')
+      );
+      CREATE POLICY drivers_update ON drivers FOR UPDATE USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+      CREATE POLICY drivers_delete ON drivers FOR DELETE USING (
+        current_app_user_role() IN ('service', 'admin')
+      );
+    `);
+
+    // bookings — passenger owner, EA who booked, assigned driver, or admin
+    await client.query(`
+      DROP POLICY IF EXISTS bookings_select ON bookings;
+      DROP POLICY IF EXISTS bookings_insert ON bookings;
+      DROP POLICY IF EXISTS bookings_update ON bookings;
+      DROP POLICY IF EXISTS bookings_delete ON bookings;
+
+      CREATE POLICY bookings_select ON bookings FOR SELECT USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR booked_by_user_id = current_app_user_id()
+        OR driver_id IN (SELECT id FROM drivers WHERE user_id = current_app_user_id())
+        OR current_app_user_role() = 'admin'
+      );
+      CREATE POLICY bookings_insert ON bookings FOR INSERT WITH CHECK (
+        current_app_user_role() IN ('service', 'admin')
+        OR user_id = current_app_user_id()
+        OR booked_by_user_id = current_app_user_id()
+      );
+      CREATE POLICY bookings_update ON bookings FOR UPDATE USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR booked_by_user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+      CREATE POLICY bookings_delete ON bookings FOR DELETE USING (
+        current_app_user_role() IN ('service', 'admin')
+      );
+    `);
+
+    // saved_addresses — owner or admin
+    await client.query(`
+      DROP POLICY IF EXISTS saved_addresses_all ON saved_addresses;
+
+      CREATE POLICY saved_addresses_all ON saved_addresses FOR ALL USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      ) WITH CHECK (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+    `);
+
+    // notifications — owner or admin
+    await client.query(`
+      DROP POLICY IF EXISTS notifications_all ON notifications;
+
+      CREATE POLICY notifications_all ON notifications FOR ALL USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      ) WITH CHECK (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+    `);
+
+    // support_tickets — owner or admin
+    await client.query(`
+      DROP POLICY IF EXISTS support_tickets_all ON support_tickets;
+
+      CREATE POLICY support_tickets_all ON support_tickets FOR ALL USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      ) WITH CHECK (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+    `);
+
+    // ticket_messages — message author, ticket owner, or admin
+    await client.query(`
+      DROP POLICY IF EXISTS ticket_messages_all ON ticket_messages;
+
+      CREATE POLICY ticket_messages_all ON ticket_messages FOR ALL USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR ticket_id IN (
+          SELECT id FROM support_tickets WHERE user_id = current_app_user_id()
+        )
+        OR current_app_user_role() = 'admin'
+      ) WITH CHECK (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR ticket_id IN (
+          SELECT id FROM support_tickets WHERE user_id = current_app_user_id()
+        )
+        OR current_app_user_role() = 'admin'
+      );
+    `);
+
+    // reviews — public read; write by author or admin
+    await client.query(`
+      DROP POLICY IF EXISTS reviews_select ON reviews;
+      DROP POLICY IF EXISTS reviews_insert ON reviews;
+      DROP POLICY IF EXISTS reviews_update ON reviews;
+      DROP POLICY IF EXISTS reviews_delete ON reviews;
+
+      CREATE POLICY reviews_select ON reviews FOR SELECT USING (TRUE);
+      CREATE POLICY reviews_insert ON reviews FOR INSERT WITH CHECK (
+        current_app_user_role() IN ('service', 'admin')
+        OR user_id = current_app_user_id()
+      );
+      CREATE POLICY reviews_update ON reviews FOR UPDATE USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+      CREATE POLICY reviews_delete ON reviews FOR DELETE USING (
+        current_app_user_role() IN ('service', 'admin')
+      );
+    `);
+
+    // password_reset_tokens & otp_codes — service only (never directly queryable by app users)
+    await client.query(`
+      DROP POLICY IF EXISTS password_reset_tokens_all ON password_reset_tokens;
+      DROP POLICY IF EXISTS otp_codes_all ON otp_codes;
+
+      CREATE POLICY password_reset_tokens_all ON password_reset_tokens FOR ALL USING (
+        current_app_user_role() IN ('service', 'admin')
+      ) WITH CHECK (
+        current_app_user_role() IN ('service', 'admin')
+      );
+
+      CREATE POLICY otp_codes_all ON otp_codes FOR ALL USING (
+        current_app_user_role() IN ('service', 'admin')
+      ) WITH CHECK (
+        current_app_user_role() IN ('service', 'admin')
+      );
+    `);
+
+    // compliance_documents — the driver who owns the document or admin
+    await client.query(`
+      DROP POLICY IF EXISTS compliance_documents_all ON compliance_documents;
+
+      CREATE POLICY compliance_documents_all ON compliance_documents FOR ALL USING (
+        current_app_user_role() = 'service'
+        OR driver_id IN (SELECT id FROM drivers WHERE user_id = current_app_user_id())
+        OR current_app_user_role() = 'admin'
+      ) WITH CHECK (
+        current_app_user_role() = 'service'
+        OR driver_id IN (SELECT id FROM drivers WHERE user_id = current_app_user_id())
+        OR current_app_user_role() = 'admin'
+      );
+    `);
+
+    // managed_travelers — EA or traveler can see; admin full access
+    await client.query(`
+      DROP POLICY IF EXISTS managed_travelers_all ON managed_travelers;
+
+      CREATE POLICY managed_travelers_all ON managed_travelers FOR ALL USING (
+        current_app_user_role() = 'service'
+        OR ea_user_id = current_app_user_id()
+        OR traveler_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      ) WITH CHECK (
+        current_app_user_role() = 'service'
+        OR ea_user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+    `);
+
+    // user_favorite_drivers — owner or admin
+    await client.query(`
+      DROP POLICY IF EXISTS user_favorite_drivers_all ON user_favorite_drivers;
+
+      CREATE POLICY user_favorite_drivers_all ON user_favorite_drivers FOR ALL USING (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      ) WITH CHECK (
+        current_app_user_role() = 'service'
+        OR user_id = current_app_user_id()
+        OR current_app_user_role() = 'admin'
+      );
+    `);
+
+    // Public-read / admin-write tables
+    await client.query(`
+      DROP POLICY IF EXISTS pricing_rules_select ON pricing_rules;
+      DROP POLICY IF EXISTS pricing_rules_write  ON pricing_rules;
+      DROP POLICY IF EXISTS settings_select      ON settings;
+      DROP POLICY IF EXISTS settings_write       ON settings;
+      DROP POLICY IF EXISTS geo_zones_select     ON geo_zones;
+      DROP POLICY IF EXISTS geo_zones_write      ON geo_zones;
+      DROP POLICY IF EXISTS vehicle_catalog_select ON vehicle_catalog;
+      DROP POLICY IF EXISTS vehicle_catalog_write  ON vehicle_catalog;
+      DROP POLICY IF EXISTS vehicles_select      ON vehicles;
+      DROP POLICY IF EXISTS vehicles_write       ON vehicles;
+      DROP POLICY IF EXISTS email_logs_all       ON email_logs;
+
+      CREATE POLICY pricing_rules_select  ON pricing_rules  FOR SELECT USING (TRUE);
+      CREATE POLICY pricing_rules_write   ON pricing_rules  FOR ALL    USING (current_app_user_role() IN ('service','admin')) WITH CHECK (current_app_user_role() IN ('service','admin'));
+      CREATE POLICY settings_select       ON settings       FOR SELECT USING (TRUE);
+      CREATE POLICY settings_write        ON settings       FOR ALL    USING (current_app_user_role() IN ('service','admin')) WITH CHECK (current_app_user_role() IN ('service','admin'));
+      CREATE POLICY geo_zones_select      ON geo_zones      FOR SELECT USING (TRUE);
+      CREATE POLICY geo_zones_write       ON geo_zones      FOR ALL    USING (current_app_user_role() IN ('service','admin')) WITH CHECK (current_app_user_role() IN ('service','admin'));
+      CREATE POLICY vehicle_catalog_select ON vehicle_catalog FOR SELECT USING (TRUE);
+      CREATE POLICY vehicle_catalog_write  ON vehicle_catalog FOR ALL   USING (current_app_user_role() IN ('service','admin')) WITH CHECK (current_app_user_role() IN ('service','admin'));
+      CREATE POLICY vehicles_select       ON vehicles       FOR SELECT USING (TRUE);
+      CREATE POLICY vehicles_write        ON vehicles       FOR ALL    USING (current_app_user_role() IN ('service','admin')) WITH CHECK (current_app_user_role() IN ('service','admin'));
+      CREATE POLICY email_logs_all        ON email_logs     FOR ALL    USING (current_app_user_role() IN ('service','admin')) WITH CHECK (current_app_user_role() IN ('service','admin'));
     `);
   } finally {
     client.release();

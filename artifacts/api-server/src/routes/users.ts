@@ -63,7 +63,7 @@ router.get("/users/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, params.data.id));
+  const [user] = await req.db!.select().from(usersTable).where(eq(usersTable.id, params.data.id));
   if (!user) {
     res.status(404).json({ error: "User not found" });
     return;
@@ -108,7 +108,7 @@ router.patch("/users/:id", requireAuth, async (req, res): Promise<void> => {
     updateData.vipNotes = body["vipNotes"] ?? null;
   }
 
-  const [user] = await db
+  const [user] = await req.db!
     .update(usersTable)
     .set(updateData)
     .where(eq(usersTable.id, params.data.id))
@@ -137,7 +137,7 @@ router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> =
   }
 
   // Fetch the user so we can also match bookings by passengerEmail
-  const [user] = await db.select({ id: usersTable.id, email: usersTable.email })
+  const [user] = await req.db!.select({ id: usersTable.id, email: usersTable.email })
     .from(usersTable)
     .where(eq(usersTable.id, params.data.id));
   if (!user) {
@@ -146,7 +146,7 @@ router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> =
   }
 
   // Return bookings linked by userId OR unlinked bookings matched by passengerEmail
-  const bookings = await db
+  const bookings = await req.db!
     .select()
     .from(bookingsTable)
     .where(

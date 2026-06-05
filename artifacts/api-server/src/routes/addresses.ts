@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { and, eq } from "drizzle-orm";
-import { db, savedAddressesTable } from "@workspace/db";
+import { savedAddressesTable } from "@workspace/db";
 import {
   ListAddressesQueryParams,
   ListAddressesResponse,
@@ -24,7 +24,7 @@ router.get("/addresses", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const addresses = await db
+  const addresses = await req.db!
     .select()
     .from(savedAddressesTable)
     .where(eq(savedAddressesTable.userId, parsed.data.userId));
@@ -49,7 +49,7 @@ router.post("/addresses", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const [address] = await db.insert(savedAddressesTable).values(parsed.data).returning();
+  const [address] = await req.db!.insert(savedAddressesTable).values(parsed.data).returning();
   res.status(201).json({ ...address, createdAt: address.createdAt.toISOString() });
 });
 
@@ -67,7 +67,7 @@ router.patch("/addresses/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const [existing] = await db.select().from(savedAddressesTable).where(eq(savedAddressesTable.id, id));
+  const [existing] = await req.db!.select().from(savedAddressesTable).where(eq(savedAddressesTable.id, id));
   if (!existing) {
     res.status(404).json({ error: "Address not found" });
     return;
@@ -83,7 +83,7 @@ router.patch("/addresses/:id", requireAuth, async (req, res): Promise<void> => {
   if (label) updateData.label = label;
   if (address) updateData.address = address;
 
-  const [updated] = await db
+  const [updated] = await req.db!
     .update(savedAddressesTable)
     .set(updateData)
     .where(eq(savedAddressesTable.id, id))
@@ -116,7 +116,7 @@ router.delete("/addresses/:id", requireAuth, async (req, res): Promise<void> => 
     return;
   }
 
-  await db.delete(savedAddressesTable).where(eq(savedAddressesTable.id, params.data.id));
+  await req.db!.delete(savedAddressesTable).where(eq(savedAddressesTable.id, params.data.id));
   res.sendStatus(204);
 });
 

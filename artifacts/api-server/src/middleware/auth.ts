@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { eq } from "drizzle-orm";
 import { db, sessionsTable, usersTable } from "@workspace/db";
+import { bindRLSContext } from "./rlsContext.js";
 
 export interface AuthUser {
   userId: number;
@@ -36,6 +37,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   }
 
   req.currentUser = { userId: session.userId, role: session.role };
+  await bindRLSContext(session.userId, session.role, req, res);
   next();
 }
 
@@ -55,6 +57,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 
   req.currentUser = { userId: session.userId, role: session.role };
+  await bindRLSContext(session.userId, session.role, req, res);
   next();
 }
 

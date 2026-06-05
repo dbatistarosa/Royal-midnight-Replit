@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, asc } from "drizzle-orm";
 import { db, supportTicketsTable, ticketMessagesTable } from "@workspace/db";
+// req.db is used for user-scoped routes so RLS policies filter by the caller's identity
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import {
   ListTicketsQueryParams,
@@ -40,7 +41,7 @@ router.get("/support", requireAuth, async (req, res): Promise<void> => {
     conditions.push(eq(supportTicketsTable.userId, caller.userId));
   }
 
-  const tickets = await db
+  const tickets = await req.db!
     .select()
     .from(supportTicketsTable)
     .where(conditions.length > 0 ? and(...conditions) : undefined);
@@ -104,7 +105,7 @@ router.get("/support/:id/messages", requireAuth, async (req, res): Promise<void>
     return;
   }
 
-  const [ticket] = await db.select().from(supportTicketsTable).where(eq(supportTicketsTable.id, id));
+  const [ticket] = await req.db!.select().from(supportTicketsTable).where(eq(supportTicketsTable.id, id));
   if (!ticket) {
     res.status(404).json({ error: "Ticket not found" });
     return;
@@ -116,7 +117,7 @@ router.get("/support/:id/messages", requireAuth, async (req, res): Promise<void>
     return;
   }
 
-  const messages = await db
+  const messages = await req.db!
     .select()
     .from(ticketMessagesTable)
     .where(eq(ticketMessagesTable.ticketId, id))
@@ -139,7 +140,7 @@ router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void
     return;
   }
 
-  const [ticket] = await db.select().from(supportTicketsTable).where(eq(supportTicketsTable.id, id));
+  const [ticket] = await req.db!.select().from(supportTicketsTable).where(eq(supportTicketsTable.id, id));
   if (!ticket) {
     res.status(404).json({ error: "Ticket not found" });
     return;
@@ -158,7 +159,7 @@ router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void
 
   const authorRole = caller.role === "admin" ? "admin" : "passenger";
 
-  const [msg] = await db
+  const [msg] = await req.db!
     .insert(ticketMessagesTable)
     .values({ ticketId: id, userId: caller.userId, authorRole, message })
     .returning();

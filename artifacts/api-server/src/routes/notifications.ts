@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
-import { db, notificationsTable } from "@workspace/db";
+import { notificationsTable } from "@workspace/db";
 import { requireAuth } from "../middleware/auth.js";
 import {
   ListNotificationsQueryParams,
@@ -24,7 +24,7 @@ router.get("/notifications", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const notifications = await db
+  const notifications = await req.db!
     .select()
     .from(notificationsTable)
     .where(eq(notificationsTable.userId, parsed.data.userId));
@@ -44,7 +44,7 @@ router.patch("/notifications/:id/read", requireAuth, async (req, res): Promise<v
   }
 
   // Fetch first to verify ownership before updating
-  const [existing] = await db.select().from(notificationsTable).where(eq(notificationsTable.id, params.data.id));
+  const [existing] = await req.db!.select().from(notificationsTable).where(eq(notificationsTable.id, params.data.id));
   if (!existing) {
     res.status(404).json({ error: "Notification not found" });
     return;
@@ -55,7 +55,7 @@ router.patch("/notifications/:id/read", requireAuth, async (req, res): Promise<v
     return;
   }
 
-  const [notification] = await db
+  const [notification] = await req.db!
     .update(notificationsTable)
     .set({ isRead: true })
     .where(eq(notificationsTable.id, params.data.id))
