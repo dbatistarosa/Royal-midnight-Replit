@@ -147,8 +147,8 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - 6 bookings in various statuses
 - 5 pricing rules (one per vehicle class)
 - 3 promo codes (ROYAL10/10% off, WELCOME25/$25 off, CORPORATE15/15% off)
-- Test passenger: alex@example.com / password123 (userId=1, role=passenger)
-- Test admin: admin@royalmidnight.com / admin2024! (userId=2, role=admin)
+- Test passenger: see local credentials file (not committed)
+- Test admin: see local credentials file (not committed)
 
 ## Booking Flow Features
 - 3-step booking: Route & Vehicle → Passenger Details → Review & Confirm
