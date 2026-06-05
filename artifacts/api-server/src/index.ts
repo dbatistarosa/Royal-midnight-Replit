@@ -363,14 +363,17 @@ async function seedDatabase(): Promise<void> {
     if (!existing) {
       const seedPassword = process.env.ADMIN_SEED_PASSWORD;
       if (!seedPassword) {
-        logger.warn("ADMIN_SEED_PASSWORD is not set — using default seed password. Set this env var in production.");
+        throw new Error(
+          "ADMIN_SEED_PASSWORD environment variable is required but not set. " +
+          "Set it to a strong password before starting the server for the first time."
+        );
       }
       await db.insert(usersTable).values({
         name: "Royal Midnight Admin",
         email: adminEmail,
         phone: null,
         role: "admin",
-        passwordHash: await hashPassword(seedPassword || "admin2024!"),
+        passwordHash: await hashPassword(seedPassword),
       });
       logger.info("Admin user seeded successfully");
     } else {

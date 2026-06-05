@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, sql, desc } from "drizzle-orm";
 import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
+import { publicDriverLimiter } from "../middleware/rateLimits.js";
 import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
 import {
@@ -87,7 +88,7 @@ router.get("/drivers/:id", requireAuth, async (req, res): Promise<void> => {
 });
 
 // Public endpoint — returns only passenger-safe driver info for confirmed bookings
-router.get("/drivers/:id/public", async (req, res): Promise<void> => {
+router.get("/drivers/:id/public", publicDriverLimiter, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });

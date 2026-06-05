@@ -44,12 +44,37 @@ app.use(
   }),
 );
 
-const ALLOWED_ORIGINS = new Set(
-  (process.env.ALLOWED_ORIGINS ?? "https://royalmidnight.com")
+function parseAllowedOrigins(): Set<string> {
+  const raw = (process.env.ALLOWED_ORIGINS ?? "https://royalmidnight.com")
     .split(",")
     .map(o => o.trim())
-    .filter(Boolean),
-);
+    .filter(Boolean);
+
+  const validated = raw.filter(origin => {
+    try {
+      const url = new URL(origin);
+      if (url.protocol !== "https:" && !origin.startsWith("http://localhost")) {
+        logger.warn({ origin }, "CORS: rejected non-HTTPS origin");
+        return false;
+      }
+      if (origin.includes("*")) {
+        logger.warn({ origin }, "CORS: rejected wildcard origin");
+        return false;
+      }
+      return true;
+    } catch {
+      logger.warn({ origin }, "CORS: rejected malformed origin");
+      return false;
+    }
+  });
+
+  if (validated.length === 0) {
+    throw new Error("No valid ALLOWED_ORIGINS configured. At least one HTTPS origin is required.");
+  }
+  return new Set(validated);
+}
+
+const ALLOWED_ORIGINS = parseAllowedOrigins();
 
 app.use(
   cors({

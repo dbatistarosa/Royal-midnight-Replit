@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { db } from "@workspace/db";
 import { bookingsTable as bookings, driversTable, settingsTable, usersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
+import { paymentIntentLimiter } from "../middleware/rateLimits.js";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -24,16 +25,8 @@ function getStripe(): Stripe {
   return new Stripe(key, { apiVersion: "2024-06-20" as const });
 }
 
-async function getWebhookSecret(): Promise<string | null> {
-  // Prefer explicit env var (most secure)
-  if (process.env.STRIPE_WEBHOOK_SECRET) return process.env.STRIPE_WEBHOOK_SECRET;
-  // Fall back to DB-persisted secret (set during auto-registration)
-  const [row] = await db
-    .select({ value: settingsTable.value })
-    .from(settingsTable)
-    .where(eq(settingsTable.key, "stripe_webhook_secret"))
-    .limit(1);
-  return row?.value ?? null;
+function getWebhookSecret(): string | null {
+  return process.env.STRIPE_WEBHOOK_SECRET ?? null;
 }
 
 async function getCommissionPct(): Promise<number> {
@@ -97,7 +90,7 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
   res.json({ publishableKey });
 });
 
-router.post("/payments/create-intent", async (req, res): Promise<void> => {
+router.post("/payments/create-intent", paymentIntentLimiter, async (req, res): Promise<void> => {
   const { bookingId, amount } = req.body as { bookingId?: number; amount: number };
   if (!amount || amount <= 0) {
     res.status(400).json({ error: "amount is required" });

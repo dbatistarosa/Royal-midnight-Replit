@@ -3,20 +3,14 @@ import crypto from "crypto";
 const ALGORITHM = "aes-256-gcm";
 const KEY_ENV = "FIELD_ENCRYPTION_KEY";
 
-let _warnedMissingKey = false;
-
-function getKey(): Buffer | null {
+function getKey(): Buffer {
   const hex = process.env[KEY_ENV];
   if (!hex) {
-    if (!_warnedMissingKey) {
-      _warnedMissingKey = true;
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[security] ${KEY_ENV} is not set. Sensitive driver fields (SSN, routing, account) ` +
-        `will be stored as plaintext. Set a 64-hex-char key to enable encryption.`
-      );
-    }
-    return null;
+    throw new Error(
+      `[security] ${KEY_ENV} is required but not set. ` +
+      `Generate a key with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" ` +
+      `and add it to your environment.`
+    );
   }
   const buf = Buffer.from(hex, "hex");
   if (buf.length !== 32) {
@@ -28,11 +22,10 @@ function getKey(): Buffer | null {
 /**
  * Encrypt a plaintext string with AES-256-GCM.
  * Returns a portable "enc:<iv>:<authTag>:<ciphertext>" string.
- * If FIELD_ENCRYPTION_KEY is not set, returns the plaintext unchanged (with a startup warning).
+ * FIELD_ENCRYPTION_KEY must be set — throws if missing.
  */
 export function encryptField(plaintext: string): string {
   const key = getKey();
-  if (!key) return plaintext;
 
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
@@ -44,17 +37,12 @@ export function encryptField(plaintext: string): string {
 
 /**
  * Decrypt an "enc:..." string produced by encryptField.
- * Passes through plaintext values transparently (backwards compatibility).
+ * Passes through plaintext values transparently (backwards compatibility during migration).
  */
 export function decryptField(stored: string): string {
   if (!stored.startsWith("enc:")) return stored;
 
   const key = getKey();
-  if (!key) {
-    throw new Error(
-      `Cannot decrypt field: ${KEY_ENV} is not set but an encrypted value was found in the database.`
-    );
-  }
 
   const parts = stored.split(":");
   if (parts.length !== 4) throw new Error("Invalid encrypted field format.");

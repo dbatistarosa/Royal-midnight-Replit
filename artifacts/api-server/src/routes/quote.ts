@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, settingsTable, pricingRulesTable, geoZonesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
+import { quoteLimiter } from "../middleware/rateLimits.js";
 
 const router: IRouter = Router();
 
@@ -266,7 +267,7 @@ const HOURLY_RATES: Record<string, number> = {
   suv: 125,
 };
 
-router.post("/quote", async (req, res): Promise<void> => {
+router.post("/quote", quoteLimiter, async (req, res): Promise<void> => {
   const parsed = GetQuoteBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json(parsed.error.errors);

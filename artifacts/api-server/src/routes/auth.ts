@@ -5,9 +5,10 @@ import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/
 import crypto from "crypto";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/auth.js";
-import { hashPassword, verifyPassword } from "../lib/hash.js";
+import { hashPassword, verifyPassword, isLegacyHash } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
+import { otpSendLimiter, otpVerifyLimiter, forgotPasswordLimiter } from "../middleware/rateLimits.js";
 
 const router: IRouter = Router();
 
@@ -96,6 +97,11 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
+  // Upgrade legacy SHA-256 hashes to bcrypt on successful login
+  if (isLegacyHash(user.passwordHash)) {
+    await db.update(usersTable).set({ passwordHash: hashPassword(password) }).where(eq(usersTable.id, user.id));
+  }
+
   const token = generateToken(user.id);
   await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
 
@@ -119,7 +125,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/auth/send-otp", async (req, res): Promise<void> => {
+router.post("/auth/send-otp", otpSendLimiter, async (req, res): Promise<void> => {
   const parsed = SendOtpBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -135,7 +141,7 @@ router.post("/auth/send-otp", async (req, res): Promise<void> => {
   res.json({ message: "OTP sent successfully" });
 });
 
-router.post("/auth/verify-otp", async (req, res): Promise<void> => {
+router.post("/auth/verify-otp", otpVerifyLimiter, async (req, res): Promise<void> => {
   const parsed = VerifyOtpBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -368,8 +374,18 @@ router.get("/auth/corporate-accounts", requireAdmin, async (req, res): Promise<v
   res.json(accounts.map(a => ({ ...a, createdAt: a.createdAt.toISOString() })));
 });
 
+// POST /auth/logout — invalidate the current session token immediately
+router.post("/auth/logout", async (req, res): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    await db.delete(sessionsTable).where(eq(sessionsTable.token, token));
+  }
+  res.json({ message: "Logged out successfully" });
+});
+
 // POST /auth/forgot-password — generate reset token and return link
-router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+router.post("/auth/forgot-password", forgotPasswordLimiter, async (req, res): Promise<void> => {
   const email = (req.body?.email as string | undefined)?.trim().toLowerCase();
   if (!email) {
     res.status(400).json({ error: "email is required" });
@@ -433,10 +449,14 @@ router.post("/auth/reset-password", async (req, res): Promise<void> => {
       .update(usersTable)
       .set({ passwordHash: hashPassword(password) })
       .where(eq(usersTable.id, resetToken.userId));
+    // Delete token immediately — one-time use, cannot be replayed
     await tx
-      .update(passwordResetTokensTable)
-      .set({ usedAt: new Date() })
+      .delete(passwordResetTokensTable)
       .where(eq(passwordResetTokensTable.id, resetToken.id));
+    // Invalidate all existing sessions so old devices are logged out
+    await tx
+      .delete(sessionsTable)
+      .where(eq(sessionsTable.userId, resetToken.userId));
   });
 
   res.json({ message: "Password updated successfully. You can now sign in." });
