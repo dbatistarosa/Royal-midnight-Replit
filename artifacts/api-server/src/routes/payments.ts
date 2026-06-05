@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import rateLimit from "express-rate-limit";
 import Stripe from "stripe";
 import { db } from "@workspace/db";
 import { bookingsTable as bookings, driversTable, settingsTable, usersTable } from "@workspace/db/schema";
@@ -86,6 +87,14 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
   ]);
 }
 
+const paymentIntentRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many payment requests — please try again in a minute." },
+});
+
 // ─── Public endpoints ───────────────────────────────────────────────────────
 
 router.get("/payments/config", async (_req, res): Promise<void> => {
@@ -97,7 +106,7 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
   res.json({ publishableKey });
 });
 
-router.post("/payments/create-intent", async (req, res): Promise<void> => {
+router.post("/payments/create-intent", paymentIntentRateLimit, async (req, res): Promise<void> => {
   const { bookingId, amount } = req.body as { bookingId?: number; amount: number };
   if (!amount || amount <= 0) {
     res.status(400).json({ error: "amount is required" });
@@ -112,6 +121,14 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
     if (bookingId) {
       const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
       if (booking) {
+        // Validate that the requested amount matches the booking price (prevent undercharging)
+        const bookingPrice = parseFloat(String(booking.priceQuoted));
+        const requestedAmount = Math.round(amount * 100);
+        const expectedAmount = Math.round(bookingPrice * 100);
+        if (Math.abs(requestedAmount - expectedAmount) > 1) {
+          res.status(400).json({ error: "Amount does not match booking price" });
+          return;
+        }
         metadata = {
           bookingId: String(bookingId),
           passengerName: booking.passengerName,
@@ -188,7 +205,7 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
 
 // Lookup which booking a PaymentIntent belongs to (via PI metadata) — used by
 // the frontend 3DS recovery path when sessionStorage is unavailable.
-router.get("/payments/find-booking", async (req, res): Promise<void> => {
+router.get("/payments/find-booking", paymentIntentRateLimit, async (req, res): Promise<void> => {
   const { paymentIntentId } = req.query as { paymentIntentId?: string };
   if (!paymentIntentId) {
     res.status(400).json({ error: "paymentIntentId is required" });
@@ -567,7 +584,7 @@ router.post("/admin/payments/cancel-auth/:bookingId", requireAdmin, async (req, 
 
 // ─── Admin: send a Stripe Invoice to the passenger's email for manual bookings
 
-router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<void> => {
+router.post("/payments/create-invoice/:bookingId", requireAdmin, async (req, res): Promise<void> => {
   const bId = parseInt(req.params["bookingId"] ?? "", 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 

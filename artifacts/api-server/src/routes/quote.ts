@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import rateLimit from "express-rate-limit";
 import { db, settingsTable, pricingRulesTable, geoZonesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
@@ -266,7 +267,15 @@ const HOURLY_RATES: Record<string, number> = {
   suv: 125,
 };
 
-router.post("/quote", async (req, res): Promise<void> => {
+const quoteRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many quote requests — please try again in a minute." },
+});
+
+router.post("/quote", quoteRateLimit, async (req, res): Promise<void> => {
   const parsed = GetQuoteBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json(parsed.error.errors);

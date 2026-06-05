@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { sql, desc, eq, and, isNull, or, gt } from "drizzle-orm";
 import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable, complianceDocumentsTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
+import { encryptField } from "../lib/encrypt.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
 import {
@@ -458,15 +459,31 @@ router.patch("/admin/drivers/:id/bank", requireAdmin, async (req, res): Promise<
   const { bankName, routingNumber, accountNumber, legalName, payoutEmail } = req.body as {
     bankName?: string; routingNumber?: string; accountNumber?: string; legalName?: string; payoutEmail?: string;
   };
+
+  const updates: Record<string, string | null> = {
+    payoutBankName: bankName !== undefined ? (bankName.trim() || null) : undefined as any,
+    payoutLegalName: legalName !== undefined ? (legalName.trim() || null) : undefined as any,
+    payoutEmail: payoutEmail !== undefined ? (payoutEmail.trim() || null) : undefined as any,
+  };
+  // Encrypt sensitive fields before storage — consistent with driver self-service endpoint
+  if (routingNumber !== undefined) {
+    const digits = routingNumber.replace(/\D/g, "");
+    if (digits.length !== 9) { res.status(400).json({ error: "Routing number must be 9 digits" }); return; }
+    updates.payoutRoutingNumber = encryptField(digits);
+  }
+  if (accountNumber !== undefined) {
+    const digits = accountNumber.replace(/\D/g, "");
+    if (digits.length < 4) { res.status(400).json({ error: "Account number must be at least 4 digits" }); return; }
+    updates.payoutAccountNumber = encryptField(digits);
+  }
+  // Strip undefined keys so drizzle doesn't nullify untouched columns
+  for (const key of Object.keys(updates)) {
+    if (updates[key] === undefined) delete updates[key];
+  }
+
   const [updated] = await db
     .update(driversTable)
-    .set({
-      payoutBankName: bankName ?? null,
-      payoutRoutingNumber: routingNumber ?? null,
-      payoutAccountNumber: accountNumber ?? null,
-      payoutLegalName: legalName ?? null,
-      payoutEmail: payoutEmail ?? null,
-    })
+    .set(updates as any)
     .where(eq(driversTable.id, id))
     .returning({ id: driversTable.id });
   if (!updated) { res.status(404).json({ error: "Driver not found" }); return; }

@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import rateLimit from "express-rate-limit";
 
 const router: IRouter = Router();
 
@@ -29,7 +30,15 @@ const ALL_FLORIDA_AIRPORTS: Array<{ code: string; name: string; address: string;
   { code: "SFB", name: "Orlando Sanford International Airport", address: "1200 Red Cleveland Blvd, Sanford, FL 32773", lat: 28.7776, lng: -81.2375 },
 ];
 
-router.get("/autocomplete", async (req, res): Promise<void> => {
+const autocompleteRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many autocomplete requests — please try again in a minute." },
+});
+
+router.get("/autocomplete", autocompleteRateLimit, async (req, res): Promise<void> => {
   const rawQ = (req.query["q"] as string || "").trim();
   if (rawQ.length > 200) {
     res.status(400).json({ error: "Query parameter too long (max 200 characters)" });
