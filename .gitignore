@@ -41,6 +41,18 @@ testem.log
 .DS_Store
 Thumbs.db
 
+# Environment variables and secrets — NUNCA subir al repo
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.test
+*.pem
+*.key
+*.p12
+*.pfx
+
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
