@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql, inArray } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
+import { createBookingLimiter } from "../middleware/rateLimiter.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import {
   sendBookingConfirmationPassenger,
@@ -407,7 +408,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   res.json(parsed2);
 });
 
-router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
+router.post("/bookings", optionalAuth, createBookingLimiter, async (req, res): Promise<void> => {
   // Public endpoint — allows anonymous booking creation from the booking form.
   // Corporate account paymentType is restricted: caller must be authenticated as role=corporate (or admin).
   const parsed = CreateBookingBody.safeParse(req.body);

@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { sql, desc, eq, and, isNull, or, gt } from "drizzle-orm";
 import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable, complianceDocumentsTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
+import { adminTestEmailLimiter, adminPayoutsLimiter } from "../middleware/rateLimiter.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
 import {
@@ -199,7 +200,7 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
   }));
 });
 
-router.post("/admin/email/test-send", requireAdmin, async (req, res): Promise<void> => {
+router.post("/admin/email/test-send", requireAdmin, adminTestEmailLimiter, async (req, res): Promise<void> => {
   const { to } = req.body as { to?: string };
   if (!to || !to.includes("@")) {
     res.status(400).json({ error: "Valid 'to' email address required" });
@@ -367,7 +368,7 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
 });
 
 // POST /admin/payouts/send-weekly — send weekly payout emails to all drivers + admin
-router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promise<void> => {
+router.post("/admin/payouts/send-weekly", requireAdmin, adminPayoutsLimiter, async (req, res): Promise<void> => {
   const { weekStart: weekStartStr } = req.body as { weekStart?: string };
 
   let weekStart: Date;
@@ -527,7 +528,7 @@ router.get("/admin/mailer-status", requireAdmin, (_req, res) => {
 });
 
 // POST /admin/test-email — send a test email to verify Resend is working
-router.post("/admin/test-email", requireAdmin, async (req, res): Promise<void> => {
+router.post("/admin/test-email", requireAdmin, adminTestEmailLimiter, async (req, res): Promise<void> => {
   const to = (req.body as { to?: string }).to ?? ADMIN_EMAIL;
   const status = getMailerStatus();
   if (!status.configured) {

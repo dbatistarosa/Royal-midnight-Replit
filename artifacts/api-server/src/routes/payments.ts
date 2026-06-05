@@ -12,6 +12,11 @@ import {
 } from "../lib/mailer.js";
 import { sendBookingConfirmationSms } from "../lib/sms.js";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
+import {
+  paymentIntentLimiter,
+  paymentActionLimiter,
+  invoiceLimiter,
+} from "../middleware/rateLimiter.js";
 
 const router: IRouter = Router();
 
@@ -97,7 +102,7 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
   res.json({ publishableKey });
 });
 
-router.post("/payments/create-intent", async (req, res): Promise<void> => {
+router.post("/payments/create-intent", paymentIntentLimiter, async (req, res): Promise<void> => {
   const { bookingId, amount } = req.body as { bookingId?: number; amount: number };
   if (!amount || amount <= 0) {
     res.status(400).json({ error: "amount is required" });
@@ -232,7 +237,7 @@ router.get("/payments/intent/:piId/client-secret", requireAdmin, async (req, res
   }
 });
 
-router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
+router.post("/payments/confirm/:bookingId", paymentActionLimiter, async (req, res): Promise<void> => {
   const { bookingId } = req.params;
   const { paymentIntentId } = req.body as { paymentIntentId: string };
   const bId = parseInt(bookingId ?? "", 10);
@@ -567,7 +572,7 @@ router.post("/admin/payments/cancel-auth/:bookingId", requireAdmin, async (req, 
 
 // ─── Admin: send a Stripe Invoice to the passenger's email for manual bookings
 
-router.post("/payments/create-invoice/:bookingId", async (req, res): Promise<void> => {
+router.post("/payments/create-invoice/:bookingId", invoiceLimiter, async (req, res): Promise<void> => {
   const bId = parseInt(req.params["bookingId"] ?? "", 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
@@ -954,7 +959,7 @@ router.delete("/payments/saved-cards/:pmId", requireAuth, async (req, res): Prom
 
 // ─── Passenger: charge a tip off-session ─────────────────────────────────────
 
-router.post("/payments/tip/:bookingId", requireAuth, async (req, res): Promise<void> => {
+router.post("/payments/tip/:bookingId", requireAuth, paymentActionLimiter, async (req, res): Promise<void> => {
   const bId = parseInt(req.params["bookingId"] ?? "", 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
@@ -1028,7 +1033,7 @@ router.post("/payments/tip/:bookingId", requireAuth, async (req, res): Promise<v
 
 // ─── Passenger: create an on-session tip PaymentIntent (no saved card required) ──
 
-router.post("/payments/tip-checkout/:bookingId", requireAuth, async (req, res): Promise<void> => {
+router.post("/payments/tip-checkout/:bookingId", requireAuth, paymentActionLimiter, async (req, res): Promise<void> => {
   const bId = parseInt(req.params["bookingId"] ?? "", 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
@@ -1065,7 +1070,7 @@ router.post("/payments/tip-checkout/:bookingId", requireAuth, async (req, res): 
 
 // ─── Passenger: confirm a tip paid via on-session PaymentIntent ───────────────
 
-router.post("/payments/tip-confirm/:bookingId", requireAuth, async (req, res): Promise<void> => {
+router.post("/payments/tip-confirm/:bookingId", requireAuth, paymentActionLimiter, async (req, res): Promise<void> => {
   const bId = parseInt(req.params["bookingId"] ?? "", 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 

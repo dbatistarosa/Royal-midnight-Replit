@@ -4,6 +4,7 @@ import helmet from "helmet";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { globalLimiter } from "./middleware/rateLimiter.js";
 
 const app: Express = express();
 
@@ -73,6 +74,6 @@ app.use("/api/webhook/stripe", express.raw({ type: "application/json" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use("/api", router);
+app.use("/api", globalLimiter, router);
 
 export default app;

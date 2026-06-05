@@ -5,6 +5,13 @@ import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/
 import crypto from "crypto";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/auth.js";
+import {
+  loginLimiter,
+  registerLimiter,
+  otpSendLimiter,
+  forgotPasswordLimiter,
+  resetPasswordLimiter,
+} from "../middleware/rateLimiter.js";
 import { hashPassword, verifyPassword } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
@@ -28,7 +35,7 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-router.post("/auth/register", async (req, res): Promise<void> => {
+router.post("/auth/register", registerLimiter, async (req, res): Promise<void> => {
   const parsed = RegisterBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -76,7 +83,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/auth/login", async (req, res): Promise<void> => {
+router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
   const parsed = LoginBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -119,7 +126,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/auth/send-otp", async (req, res): Promise<void> => {
+router.post("/auth/send-otp", otpSendLimiter, async (req, res): Promise<void> => {
   const parsed = SendOtpBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -369,7 +376,7 @@ router.get("/auth/corporate-accounts", requireAdmin, async (req, res): Promise<v
 });
 
 // POST /auth/forgot-password — generate reset token and return link
-router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+router.post("/auth/forgot-password", forgotPasswordLimiter, async (req, res): Promise<void> => {
   const email = (req.body?.email as string | undefined)?.trim().toLowerCase();
   if (!email) {
     res.status(400).json({ error: "email is required" });
@@ -399,7 +406,7 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
 });
 
 // POST /auth/reset-password — validate token and set new password
-router.post("/auth/reset-password", async (req, res): Promise<void> => {
+router.post("/auth/reset-password", resetPasswordLimiter, async (req, res): Promise<void> => {
   const token = (req.body?.token as string | undefined)?.trim();
   const password = (req.body?.password as string | undefined);
 

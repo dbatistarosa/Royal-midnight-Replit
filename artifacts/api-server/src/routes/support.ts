@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, asc } from "drizzle-orm";
 import { db, supportTicketsTable, ticketMessagesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
+import { createSupportLimiter, supportMessageLimiter } from "../middleware/rateLimiter.js";
 import {
   ListTicketsQueryParams,
   ListTicketsResponse,
@@ -49,7 +50,7 @@ router.get("/support", requireAuth, async (req, res): Promise<void> => {
 });
 
 // optionalAuth: logged-in users get their ticket auto-linked; guests can still submit
-router.post("/support", optionalAuth, async (req, res): Promise<void> => {
+router.post("/support", optionalAuth, createSupportLimiter, async (req, res): Promise<void> => {
   const parsed = CreateTicketBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -126,7 +127,7 @@ router.get("/support/:id/messages", requireAuth, async (req, res): Promise<void>
 });
 
 // POST /support/:id/messages — post a reply to a ticket
-router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void> => {
+router.post("/support/:id/messages", requireAuth, supportMessageLimiter, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);
   if (!id) {
     res.status(400).json({ error: "Invalid ticket id" });
