@@ -1,18 +1,18 @@
 {
-  "buildCommand": "pnpm install && BASE_PATH=/ pnpm --filter @workspace/royal-midnight run build",
+  "installCommand": "pnpm install --no-frozen-lockfile",
+  "buildCommand": "BASE_PATH=/ pnpm --filter @workspace/royal-midnight run build && pnpm --filter @workspace/api-server run build",
   "outputDirectory": "artifacts/royal-midnight/dist/public",
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/index" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "functions": {
-    "api/index.ts": {
+    "api/index.js": {
       "maxDuration": 30,
       "memory": 1024
     }
   },
   "crons": [
-    { "path": "/api/cron/trip-reminders", "schedule": "* * * * *" },
     { "path": "/api/cron/compliance-check", "schedule": "0 0 * * *" },
     { "path": "/api/cron/weekly-payouts", "schedule": "0 8 * * 1" }
   ]
