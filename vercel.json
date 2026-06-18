@@ -9,7 +9,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 30,
-      "memory": 1024
+      "includeFiles": "artifacts/api-server/dist/**"
     }
   },
   "crons": [
