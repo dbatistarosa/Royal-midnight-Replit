@@ -82,7 +82,7 @@ if (process.env.NODE_ENV === "production") {
   const frontendDist = path.resolve(process.cwd(), "artifacts/royal-midnight/dist/public");
   if (existsSync(frontendDist)) {
     app.use(express.static(frontendDist));
-    app.get("*", (_req, res) => {
+    app.use((_req, res) => {
       res.sendFile(path.join(frontendDist, "index.html"));
     });
   } else {
