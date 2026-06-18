@@ -90,14 +90,14 @@ if (process.env.NODE_ENV === "production") {
   }
 }
 
-// Global error handler — logs unhandled route errors via pino and returns JSON
+// Global error handler — logs unhandled route errors via pino, returns generic JSON
 app.use((err: unknown, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
   const message = err instanceof Error ? err.message : String(err);
   const cause = (err as any)?.cause;
   const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : undefined;
   const stack = err instanceof Error ? err.stack : undefined;
   logger.error({ err: { message, causeMsg, stack } }, "Unhandled route error");
-  res.status(500).json({ error: "Internal server error", detail: message, cause: causeMsg });
+  res.status(500).json({ error: "Internal server error" });
 });
 
 export default app;
