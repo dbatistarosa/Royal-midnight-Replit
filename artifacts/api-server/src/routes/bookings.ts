@@ -20,6 +20,7 @@ import {
   sendTripCompletionEmail,
 } from "../lib/mailer.js";
 import { sendDriverOnWaySms, sendDriverArrivedSms, sendCancellationSms } from "../lib/sms.js";
+import { maybeRewardReferrerForCompletedRide } from "../lib/referrals.js";
 import {
   ListBookingsQueryParams,
   ListBookingsResponse,
@@ -817,6 +818,11 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
           console.error("[bookings] trip completion email error:", err);
         }
       })();
+      if (booking.userId) {
+        maybeRewardReferrerForCompletedRide(booking.userId).catch(err =>
+          console.error("[bookings] referral reward error:", err),
+        );
+      }
     }
   }
 });
@@ -1206,6 +1212,12 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
       console.error("[bookings] trip completion email error:", err);
     }
   })();
+
+  if (updated.userId) {
+    maybeRewardReferrerForCompletedRide(updated.userId).catch(err =>
+      console.error("[bookings] referral reward error:", err),
+    );
+  }
 });
 
 // Admin: unassign driver from a booking (puts it back in the open pool)

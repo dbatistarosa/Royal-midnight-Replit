@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, desc, or, and, isNull } from "drizzle-orm";
 import { db, usersTable, bookingsTable, userFavoriteDriversTable, driversTable, managedTravelersTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
+import { ensureUniqueReferralCode, fetchReferralCreditAmount } from "../lib/referrals.js";
 import {
   ListUsersQueryParams,
   ListUsersResponse,
@@ -180,6 +181,44 @@ router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> =
       }))
     )
   );
+});
+
+// ─── Referral program ─────────────────────────────────────────────────────────
+
+// GET /users/:id/referral — this user's own shareable referral code/link (self or admin)
+router.get("/users/:id/referral", requireAuth, async (req, res): Promise<void> => {
+  const userId = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(userId)) { res.status(400).json({ error: "Invalid user id" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== userId) {
+    res.status(403).json({ error: "Access denied" }); return;
+  }
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+  let referralCode = user.referralCode;
+  if (!referralCode) {
+    referralCode = await ensureUniqueReferralCode(user.name);
+    await db.update(usersTable).set({ referralCode }).where(eq(usersTable.id, userId));
+  }
+
+  const referredUsers = await db
+    .select({ id: usersTable.id, rewardedAt: usersTable.referralRewardedAt })
+    .from(usersTable)
+    .where(eq(usersTable.referredByUserId, userId));
+
+  const creditAmount = await fetchReferralCreditAmount();
+  const APP_URL = process.env.APP_URL ?? "https://royalmidnight.com";
+
+  res.json({
+    referralCode,
+    referralLink: `${APP_URL}/book?ref=${referralCode}`,
+    creditAmount,
+    referredCount: referredUsers.length,
+    rewardedCount: referredUsers.filter(r => r.rewardedAt != null).length,
+  });
 });
 
 // ─── Favorite Drivers ─────────────────────────────────────────────────────────

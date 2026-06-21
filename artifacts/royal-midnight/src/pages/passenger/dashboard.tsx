@@ -2,9 +2,69 @@ import { useGetUserBookings } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { useAuth } from "@/contexts/auth";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, Plus, BarChart2 } from "lucide-react";
+import { API_BASE } from "@/lib/constants";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, Plus, BarChart2, Gift, Copy, Check } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
+import { useEffect, useState } from "react";
+import { useToast } from "@/hooks/use-toast";
+
+type ReferralInfo = { referralCode: string; referralLink: string; creditAmount: number; referredCount: number; rewardedCount: number };
+
+function ReferralCard({ userId, token }: { userId: number; token: string | null }) {
+  const [referral, setReferral] = useState<ReferralInfo | null>(null);
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${API_BASE}/users/${userId}/referral`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => data && setReferral(data))
+      .catch(() => {});
+  }, [userId, token]);
+
+  if (!referral) return null;
+
+  function copyLink() {
+    navigator.clipboard.writeText(referral!.referralLink).then(() => {
+      setCopied(true);
+      toast({ title: "Link copied", description: "Your referral link is ready to share." });
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-lg p-6 mb-8 sm:mb-12">
+      <div className="flex items-start gap-3 mb-4">
+        <Gift className="h-5 w-5 text-primary mt-0.5" />
+        <div>
+          <h3 className="font-serif text-lg sm:text-xl">Invite &amp; Earn ${referral.creditAmount.toFixed(0)}</h3>
+          <p className="text-muted-foreground text-sm mt-1">
+            Share your link. When a friend completes their first ride, you both get ${referral.creditAmount.toFixed(0)} in ride credit.
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex-1 bg-white/5 border border-border rounded px-4 py-2.5 text-sm text-foreground truncate font-mono">
+          {referral.referralLink}
+        </div>
+        <button
+          onClick={copyLink}
+          className="inline-flex items-center justify-center gap-2 bg-primary text-black px-4 py-2.5 text-xs font-medium hover:bg-primary/90 uppercase tracking-widest min-h-[44px]"
+        >
+          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          {copied ? "Copied" : "Copy Link"}
+        </button>
+      </div>
+      {referral.referredCount > 0 && (
+        <p className="text-muted-foreground text-xs mt-3">
+          {referral.referredCount} friend{referral.referredCount !== 1 ? "s" : ""} referred &middot; {referral.rewardedCount} reward{referral.rewardedCount !== 1 ? "s" : ""} earned
+        </p>
+      )}
+    </div>
+  );
+}
 
 const passengerNavItems = [
   { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
@@ -16,7 +76,7 @@ const passengerNavItems = [
 ];
 
 function PassengerDashboardInner() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const userId = user?.id;
   const { data: bookings, isLoading } = useGetUserBookings(userId ?? 0, { query: { enabled: !!userId, queryKey: ["userBookings", userId ?? 0] } });
 
@@ -48,6 +108,8 @@ function PassengerDashboardInner() {
           <div className="text-3xl font-serif text-primary">Gold</div>
         </div>
       </div>
+
+      {userId && <ReferralCard userId={userId} token={token} />}
 
       <h2 className="font-serif text-2xl mb-6">Upcoming Rides</h2>
       

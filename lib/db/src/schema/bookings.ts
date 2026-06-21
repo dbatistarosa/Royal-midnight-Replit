@@ -29,6 +29,7 @@ export const bookingsTable = pgTable("bookings", {
   estimatedDurationMinutes: integer("estimated_duration_minutes"),
   estimatedDistanceMiles: numeric("estimated_distance_miles", { precision: 6, scale: 2 }),
   reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
+  reviewRequestSentAt: timestamp("review_request_sent_at", { withTimezone: true }),
   authorizedAt: timestamp("authorized_at", { withTimezone: true }),
   checklistCompletedAt: timestamp("checklist_completed_at", { withTimezone: true }),
   preferredDriverId: integer("preferred_driver_id"),

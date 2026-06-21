@@ -738,3 +738,65 @@ export async function sendComplianceLockoutAdmin(params: {
   await send(ADMIN_EMAIL, `🚨 URGENT: ${driverName} locked out — ${docType} expired — ${ridesUnassigned} ride${ridesUnassigned !== 1 ? "s" : ""} unassigned`, html, "compliance_lockout_admin");
 }
 
+// ─── Referral program ─────────────────────────────────────────────────────────
+
+export async function sendReferralWelcomeEmail(params: { name: string; email: string; promoCode: string; amount: number }) {
+  const { name, email, promoCode, amount } = params;
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Welcome to Royal Midnight — Here's $${amount.toFixed(0)} On Us</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${name.split(" ")[0]}, you joined through a friend's referral — thank you. Use the code below on your first booking to save $${amount.toFixed(0)}.</p>
+<div style="text-align:center;margin:20px 0">
+  <span style="display:inline-block;background:#111;border:1px dashed #c9a84c;color:#c9a84c;font-size:20px;font-weight:bold;letter-spacing:2px;padding:14px 28px">${promoCode}</span>
+</div>
+<p style="margin-top:20px">
+  <a href="${appUrl}/book" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">BOOK YOUR FIRST RIDE</a>
+</p>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  Enter this code at checkout. One-time use, no expiration.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(email, `Welcome to Royal Midnight — Your $${amount.toFixed(0)} Code Inside`, html, "referral_welcome");
+}
+
+export async function sendReferralRewardEmail(params: { referrerName: string; referrerEmail: string; refereeName: string; promoCode: string; amount: number }) {
+  const { referrerName, referrerEmail, refereeName, promoCode, amount } = params;
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">You Just Earned $${amount.toFixed(0)}</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${referrerName.split(" ")[0]}, ${refereeName.split(" ")[0]} just completed their first ride with Royal Midnight — thanks for the referral! Here is your reward code.</p>
+<div style="text-align:center;margin:20px 0">
+  <span style="display:inline-block;background:#111;border:1px dashed #c9a84c;color:#c9a84c;font-size:20px;font-weight:bold;letter-spacing:2px;padding:14px 28px">${promoCode}</span>
+</div>
+<p style="margin-top:20px">
+  <a href="${appUrl}/book" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">BOOK YOUR NEXT RIDE</a>
+</p>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  Keep sharing your referral link from your passenger dashboard to keep earning.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(referrerEmail, `You Earned $${amount.toFixed(0)} — Royal Midnight Referral Reward`, html, "referral_reward");
+}
+
+// ─── Review requests ───────────────────────────────────────────────────────────
+
+export async function sendReviewRequestEmail(b: BookingEmailData) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">How Was Your Ride?</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, thank you again for riding with Royal Midnight. Your feedback helps us keep every chauffeur and vehicle at the standard you expect — it only takes a minute.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking", bookingRef)}
+  ${row("Route", `${b.pickupAddress} → ${b.dropoffAddress}`)}
+  ${row("Date", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
+</table>
+<p style="margin-top:28px">
+  <a href="${appUrl}/passenger/rides/${b.id}" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">LEAVE A REVIEW</a>
+</p>
+<p style="margin-top:20px;color:#888;font-size:12px">
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(b.passengerEmail, `How was your ride? — Royal Midnight ${bookingRef}`, html, "review_request");
+}
+

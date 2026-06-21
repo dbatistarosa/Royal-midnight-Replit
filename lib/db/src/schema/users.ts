@@ -24,6 +24,10 @@ export const usersTable = pgTable("users", {
   // Permanent admin-only notes about this passenger (e.g. "CEO of Acme Corp").
   // Never visible to the passenger; shown discreetly on the driver trip manifest.
   vipNotes: text("vip_notes"),
+  // ── Referral Program ─────────────────────────────────────────────────────
+  referralCode: text("referral_code").unique(),         // this user's own shareable code
+  referredByUserId: integer("referred_by_user_id"),      // set at signup if they used someone else's code
+  referralRewardedAt: timestamp("referral_rewarded_at", { withTimezone: true }), // when the referrer was paid out for this user
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

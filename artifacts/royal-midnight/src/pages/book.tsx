@@ -132,6 +132,13 @@ export default function Book() {
 
   const searchParams = new URLSearchParams(window.location.search);
 
+  // Persist a referral code from a shared link (?ref=CODE) so it's still available
+  // if the visitor browses around before eventually creating an account.
+  useEffect(() => {
+    const ref = searchParams.get("ref");
+    if (ref) localStorage.setItem("rm_referral_code", ref.trim().toUpperCase());
+  }, []);
+
   // On mount: handle 3DS redirect return (payment_intent + redirect_status in URL)
   useEffect(() => {
     const pi = searchParams.get("payment_intent");

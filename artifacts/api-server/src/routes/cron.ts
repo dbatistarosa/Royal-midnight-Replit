@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { sendTripReminders, runWeeklyPayoutIfNeeded, runComplianceEnforcement } from "../lib/cron-jobs.js";
+import { sendTripReminders, runWeeklyPayoutIfNeeded, runComplianceEnforcement, sendReviewRequests } from "../lib/cron-jobs.js";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -35,6 +35,13 @@ router.post("/cron/compliance-check", async (req, res) => {
   logger.info("Cron: compliance-check triggered");
   res.json({ ok: true });
   await runComplianceEnforcement();
+});
+
+router.post("/cron/review-requests", async (req, res) => {
+  if (!verifyCronRequest(req, res)) return;
+  logger.info("Cron: review-requests triggered");
+  res.json({ ok: true });
+  await sendReviewRequests();
 });
 
 export default router;

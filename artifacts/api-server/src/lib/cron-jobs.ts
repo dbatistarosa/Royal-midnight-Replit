@@ -89,6 +89,52 @@ export async function sendTripReminders(): Promise<void> {
   }
 }
 
+export async function sendReviewRequests(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // ignore anything older than a week
+    const { bookingsTable } = await import("@workspace/db");
+    const { sendReviewRequestEmail } = await import("./mailer.js");
+
+    const candidates = await db
+      .select({ id: bookingsTable.id })
+      .from(bookingsTable)
+      .where(and(
+        eq(bookingsTable.status, "completed"),
+        isNull(bookingsTable.reviewRequestSentAt),
+        gte(bookingsTable.updatedAt, cutoff),
+      ));
+
+    for (const { id } of candidates) {
+      const [claimed] = await db
+        .update(bookingsTable)
+        .set({ reviewRequestSentAt: new Date() })
+        .where(and(eq(bookingsTable.id, id), isNull(bookingsTable.reviewRequestSentAt)))
+        .returning();
+
+      if (!claimed) continue; // already claimed by a concurrent run
+
+      try {
+        await sendReviewRequestEmail({
+          id: claimed.id,
+          passengerName: claimed.passengerName,
+          passengerEmail: claimed.passengerEmail,
+          pickupAddress: claimed.pickupAddress,
+          dropoffAddress: claimed.dropoffAddress,
+          pickupAt: claimed.pickupAt.toISOString(),
+          vehicleClass: claimed.vehicleClass ?? "standard",
+          passengers: claimed.passengers ?? 1,
+          priceQuoted: parseFloat(String(claimed.priceQuoted)),
+        });
+        logger.info({ bookingId: claimed.id }, "Review request sent");
+      } catch (err) {
+        logger.error({ err, bookingId: claimed.id }, "Failed to send review request (non-fatal)");
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "Review request scheduler error (non-fatal)");
+  }
+}
+
 export async function runWeeklyPayoutIfNeeded(): Promise<void> {
   try {
     const now = new Date();

@@ -37,15 +37,20 @@ export default function Signup() {
 
   async function onSubmit(values: SignupFormValues) {
     try {
-      const result = await registerMutation.mutateAsync({
-        data: {
-          name: values.name,
-          email: values.email,
-          phone: values.phone || null,
-          password: values.password,
-          role: "passenger",
-        },
-      });
+      const referralCode =
+        new URLSearchParams(window.location.search).get("ref") ?? localStorage.getItem("rm_referral_code");
+
+      const data = {
+        name: values.name,
+        email: values.email,
+        phone: values.phone || null,
+        password: values.password,
+        role: "passenger" as const,
+      };
+      if (referralCode) (data as Record<string, unknown>).referralCode = referralCode;
+
+      const result = await registerMutation.mutateAsync({ data });
+      localStorage.removeItem("rm_referral_code");
       login(result.user as any, result.token);
       toast({ title: "Account created", description: "Welcome to Royal Midnight." });
       setLocation("/passenger/dashboard");

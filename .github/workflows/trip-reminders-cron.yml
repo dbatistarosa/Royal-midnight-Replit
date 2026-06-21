@@ -1,0 +1,20 @@
+name: Trip Reminders Cron
+
+# Vercel's Hobby plan only allows daily cron schedules, but trip reminders need
+# to fire every ~10 minutes to catch bookings 55-65 minutes before pickup.
+# This workflow is the free workaround: GitHub Actions pings the existing
+# /api/cron/trip-reminders endpoint on a tight schedule instead.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call trip-reminders endpoint
+        run: |
+          curl -sf -X POST "https://royal-midnight.vercel.app/api/cron/trip-reminders" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Length: 0"

@@ -8,6 +8,7 @@ import { requireAdmin } from "../middleware/auth.js";
 import { hashPassword, verifyPassword } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
+import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
 
 const router: IRouter = Router();
 
@@ -36,6 +37,11 @@ router.post("/auth/register", async (req, res): Promise<void> => {
   }
 
   const { name, email, password, phone, role } = parsed.data;
+  // referralCode isn't part of the generated RegisterBody contract — read it loosely so
+  // older/other clients that don't send it keep working unchanged.
+  const referralCodeUsed = typeof (req.body as Record<string, unknown> | undefined)?.["referralCode"] === "string"
+    ? ((req.body as Record<string, string>)["referralCode"]).trim().toUpperCase()
+    : undefined;
 
   const [existingUser] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email));
   if (existingUser) {
@@ -49,6 +55,14 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     return;
   }
 
+  let referredByUserId: number | null = null;
+  if (referralCodeUsed) {
+    const [referrer] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.referralCode, referralCodeUsed));
+    if (referrer) referredByUserId = referrer.id;
+  }
+
+  const newReferralCode = await ensureUniqueReferralCode(name);
+
   const [user] = await db
     .insert(usersTable)
     .values({
@@ -57,11 +71,23 @@ router.post("/auth/register", async (req, res): Promise<void> => {
       phone: phone ?? null,
       role,
       passwordHash: hashPassword(password),
+      referralCode: newReferralCode,
+      referredByUserId,
     })
     .returning();
 
   const token = generateToken(user.id);
   await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+
+  if (referredByUserId) {
+    issueRefereeWelcomePromo(user.name)
+      .then(({ code, amount }) => {
+        import("../lib/mailer.js").then(({ sendReferralWelcomeEmail }) =>
+          sendReferralWelcomeEmail({ name: user.name, email: user.email, promoCode: code, amount }),
+        );
+      })
+      .catch(err => console.error("[auth] referral welcome promo failed (non-fatal):", err));
+  }
 
   res.status(201).json({
     token,
@@ -71,6 +97,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
       email: user.email,
       phone: user.phone,
       role: user.role,
+      referralCode: user.referralCode,
       createdAt: user.createdAt.toISOString(),
     },
   });

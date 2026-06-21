@@ -4,6 +4,11 @@ packages:
   - lib/integrations/*
   - scripts
 
+allowBuilds:
+  bcrypt: true
+  core-js: true
+  esbuild: true
+
 autoInstallPeers: false
 
 catalog:
@@ -40,6 +45,7 @@ minimumReleaseAgeExclude:
 onlyBuiltDependencies:
   - '@swc/core'
   - bcrypt
+  - core-js
   - esbuild
   - msw
   - unrs-resolver
