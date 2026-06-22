@@ -1,20 +1,24 @@
 /**
- * Twilio SMS library — graceful no-op when TWILIO_* env vars are not set.
- * Configure via: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
+ * Sent.dm SMS/WhatsApp library — calls the `send-message-via-sent` Supabase Edge
+ * Function (graceful no-op when Supabase env vars are not set).
+ * Configure via: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+ * (The Edge Function itself needs SENT_DM_API_KEY + SENT_DM_TEXT_TEMPLATE_NAME
+ * set as Supabase Edge Function secrets — see supabase/functions/send-message-via-sent.)
  */
 
-const TWILIO_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_FROM = process.env.TWILIO_FROM_NUMBER;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+type SmsChannel = "auto" | "sms" | "whatsapp";
 
 export function isSmsConfigured(): boolean {
-  return !!(TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM);
+  return !!(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 }
 
 export function getSmsStatus() {
   return {
     configured: isSmsConfigured(),
-    provider: isSmsConfigured() ? "twilio" : "none",
+    provider: isSmsConfigured() ? "sent.dm" : "none",
   };
 }
 
@@ -31,21 +35,34 @@ function normalisePhone(raw: string | null | undefined): string | null {
   return null;
 }
 
-async function sendSms(to: string | null | undefined, body: string): Promise<void> {
+async function sendSms(
+  to: string | null | undefined,
+  body: string,
+  channel: SmsChannel = "auto",
+): Promise<void> {
   const normalised = normalisePhone(to);
   if (!normalised) return; // no phone on file — silent skip
 
   if (!isSmsConfigured()) {
-    console.log(`[sms] Twilio not configured — would send to ${normalised}: ${body.slice(0, 80)}…`);
+    console.log(`[sms] Sent.dm not configured — would send to ${normalised}: ${body.slice(0, 80)}…`);
     return;
   }
 
-  // Dynamic import so the module can be imported even without the package installed
   try {
-    const twilio = (await import("twilio")).default;
-    const client = twilio(TWILIO_SID!, TWILIO_TOKEN!);
-    await client.messages.create({ to: normalised, from: TWILIO_FROM!, body });
-    console.log(`[sms] Sent to ${normalised}`);
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-message-via-sent`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ phone: normalised, message: body, channel }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success) {
+      console.error(`[sms] Failed to send to ${normalised}:`, json?.error ?? res.status);
+      return;
+    }
+    console.log(`[sms] Sent to ${normalised} via ${json.channel_used}`);
   } catch (err: any) {
     console.error(`[sms] Failed to send to ${normalised}:`, err.message);
   }

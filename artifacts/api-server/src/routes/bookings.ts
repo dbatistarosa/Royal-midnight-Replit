@@ -4,6 +4,7 @@ import { eq, desc, and, or, isNull, ne, sql, inArray } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
+import { HOURLY_RATES, DEFAULT_RATE_PER_MILE } from "./quote.js";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -1144,9 +1145,20 @@ router.post("/bookings/:id/trip/start", requireAuth, async (req, res): Promise<v
     return;
   }
 
+  // For hourly charters, freeze the rate/limit defaults onto the booking now so
+  // the check-reservation-status cron has stable values to compute overage from,
+  // even if pricing defaults change later.
+  const hourlySetFields = booking.charterMode === "hourly"
+    ? {
+        hourlyRate: booking.hourlyRate ?? String(HOURLY_RATES[booking.vehicleClass] ?? 95),
+        maxMilesPerHour: booking.maxMilesPerHour ?? 30,
+        extraMileRate: booking.extraMileRate ?? String(DEFAULT_RATE_PER_MILE[booking.vehicleClass] ?? 3.5),
+      }
+    : {};
+
   const [updated] = await db
     .update(bookingsTable)
-    .set({ status: "in_progress", updatedAt: new Date() })
+    .set({ status: "in_progress", tripStartedAt: new Date(), updatedAt: new Date(), ...hourlySetFields })
     .where(and(eq(bookingsTable.id, id), eq(bookingsTable.status, "on_location")))
     .returning();
 
@@ -1173,9 +1185,17 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
     return;
   }
 
+  const extraCharge = parseFloat(String(booking.extraCharge ?? "0")) || 0;
+  const totalPrice = parseFloat(String(booking.priceQuoted)) + extraCharge;
+
   const [updated] = await db
     .update(bookingsTable)
-    .set({ status: "completed", updatedAt: new Date() })
+    .set({
+      status: "completed",
+      tripEndedAt: new Date(),
+      totalPrice: String(totalPrice),
+      updatedAt: new Date(),
+    })
     .where(and(eq(bookingsTable.id, id), eq(bookingsTable.status, "in_progress")))
     .returning();
 
@@ -1207,7 +1227,7 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
         vehicleClass: updated.vehicleClass ?? "standard",
         passengers: updated.passengers ?? 1,
         priceQuoted: parseFloat(String(updated.priceQuoted)),
-      }, updated.tipAmount != null ? parseFloat(String(updated.tipAmount)) : null);
+      }, updated.tipAmount != null ? parseFloat(String(updated.tipAmount)) : null, extraCharge > 0 ? extraCharge : null);
     } catch (err) {
       console.error("[bookings] trip completion email error:", err);
     }

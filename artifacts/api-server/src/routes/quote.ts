@@ -5,12 +5,12 @@ import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
-const DEFAULT_BASE_FARES: Record<string, number> = {
+export const DEFAULT_BASE_FARES: Record<string, number> = {
   business: 55,
   suv: 75,
 };
 
-const DEFAULT_RATE_PER_MILE: Record<string, number> = {
+export const DEFAULT_RATE_PER_MILE: Record<string, number> = {
   business: 3.5,
   suv: 4.0,
 };
@@ -69,54 +69,53 @@ function resolveAddress(raw: string): string {
   return raw.trim();
 }
 
+/** Forward-geocode an address to Mapbox [lng, lat] coordinates. */
+async function geocodeMapbox(address: string, token: string): Promise<[number, number] | null> {
+  const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json`);
+  url.searchParams.set("access_token", token);
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("country", "US");
+  const res = await fetch(url.toString());
+  const data = await res.json() as { features?: Array<{ center: [number, number] }> };
+  return data.features?.[0]?.center ?? null;
+}
+
 async function getDirectionsDistance(
   pickup: string,
   dropoff: string,
   waypoints?: string[],
 ): Promise<{ distance: number; duration: number } | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
+  const token = process.env.MAPBOX_ACCESS_TOKEN;
+  if (!token) return null;
 
   const origin = resolveAddress(pickup);
   const destination = resolveAddress(dropoff);
+  const stops = (waypoints ?? []).map(resolveAddress);
 
   try {
-    // Directions API — returns actual driving route distance & duration
-    const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
-    url.searchParams.set("origin", origin);
-    url.searchParams.set("destination", destination);
-    url.searchParams.set("mode", "driving");
-    url.searchParams.set("units", "imperial");
-    url.searchParams.set("key", apiKey);
+    // Mapbox Directions takes coordinates, not addresses, so geocode every
+    // stop first, then request the whole multi-stop route in one call.
+    const coords = await Promise.all([origin, ...stops, destination].map((addr) => geocodeMapbox(addr, token)));
+    if (coords.some((c) => !c)) return null;
 
-    if (waypoints && waypoints.length > 0) {
-      const resolved = waypoints.map(resolveAddress).join("|");
-      url.searchParams.set("waypoints", resolved);
-    }
+    const coordString = coords.map((c) => `${c![0]},${c![1]}`).join(";");
+    const url = new URL(`https://api.mapbox.com/directions/v5/mapbox/driving/${coordString}`);
+    url.searchParams.set("access_token", token);
+    url.searchParams.set("geometries", "geojson");
+    url.searchParams.set("overview", "false");
 
     const response = await fetch(url.toString());
     const data = await response.json() as {
-      status: string;
-      routes?: Array<{
-        legs: Array<{
-          distance: { value: number; text: string };
-          duration: { value: number; text: string };
-        }>;
-      }>;
+      code: string;
+      routes?: Array<{ distance: number; duration: number }>;
     };
 
-    if (data.status !== "OK" || !data.routes?.length) return null;
+    if (data.code !== "Ok" || !data.routes?.length) return null;
 
-    // Sum all legs (multi-stop routes have multiple legs)
-    const legs = data.routes[0].legs;
-    if (!legs?.length) return null;
-
-    const totalDistanceMeters = legs.reduce((sum, l) => sum + l.distance.value, 0);
-    const totalDurationSeconds = legs.reduce((sum, l) => sum + l.duration.value, 0);
-
+    const route = data.routes[0]!;
     return {
-      distance: Math.round((totalDistanceMeters / 1609.344) * 10) / 10,
-      duration: Math.round(totalDurationSeconds / 60),
+      distance: Math.round((route.distance / 1609.344) * 10) / 10,
+      duration: Math.round(route.duration / 60),
     };
   } catch {
     return null;
@@ -167,19 +166,13 @@ function pointInPolygon(lat: number, lng: number, coords: number[][]): boolean {
   return inside;
 }
 
-/** Geocode an address to lat/lng via Google Geocoding API (best-effort) */
+/** Geocode an address to lat/lng via Mapbox Geocoding API (best-effort) */
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
+  const token = process.env.MAPBOX_ACCESS_TOKEN;
+  if (!token) return null;
   try {
-    const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-    url.searchParams.set("address", address);
-    url.searchParams.set("key", apiKey);
-    const res = await fetch(url.toString());
-    const data = await res.json() as { status: string; results?: Array<{ geometry: { location: { lat: number; lng: number } } }> };
-    if (data.status !== "OK" || !data.results?.length) return null;
-    const loc = data.results[0]!.geometry.location;
-    return { lat: loc.lat, lng: loc.lng };
+    const coord = await geocodeMapbox(address, token);
+    return coord ? { lat: coord[1], lng: coord[0] } : null;
   } catch {
     return null;
   }
@@ -261,7 +254,7 @@ async function getPricingForClass(vc: string): Promise<{ baseFare: number; rateP
 }
 
 // Hourly charter rates per vehicle class ($/hr, before tax)
-const HOURLY_RATES: Record<string, number> = {
+export const HOURLY_RATES: Record<string, number> = {
   business: 95,
   suv: 125,
 };

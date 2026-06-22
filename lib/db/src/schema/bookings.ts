@@ -39,6 +39,16 @@ export const bookingsTable = pgTable("bookings", {
   charterHours: integer("charter_hours"), // only set when charterMode="hourly"
   // Delegate/EA booking (Phase 3 — item 15)
   bookedByUserId: integer("booked_by_user_id"), // EA who booked on behalf of traveler
+  // Hourly-service timer (service_type reuses charterMode; scheduled duration
+  // reuses charterHours * 60; "is_active" reuses status = "in_progress")
+  maxMilesPerHour: integer("max_miles_per_hour"),
+  hourlyRate: numeric("hourly_rate", { precision: 10, scale: 2 }),
+  extraMileRate: numeric("extra_mile_rate", { precision: 10, scale: 2 }),
+  tripStartedAt: timestamp("trip_started_at", { withTimezone: true }),
+  tripEndedAt: timestamp("trip_ended_at", { withTimezone: true }),
+  extraCharge: numeric("extra_charge", { precision: 10, scale: 2 }).notNull().default("0"),
+  totalPrice: numeric("total_price", { precision: 10, scale: 2 }),
+  overageNotifiedAt: timestamp("overage_notified_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

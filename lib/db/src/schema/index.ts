@@ -19,3 +19,5 @@ export * from "./user-favorite-drivers";
 export * from "./geo-zones";
 export * from "./managed-travelers";
 export * from "./compliance-documents";
+export * from "./message-events";
+export * from "./driver-locations";

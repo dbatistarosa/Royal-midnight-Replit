@@ -9,7 +9,8 @@ import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 
 const passengerNavItems = [
@@ -68,17 +69,16 @@ type CancelPreview = {
 // ──────────────────────────────────────────────────────────────────────────────
 // Live Driver Tracking Map
 // ──────────────────────────────────────────────────────────────────────────────
-const MAP_STYLES: google.maps.MapTypeStyle[] = [
-  { elementType: "geometry", stylers: [{ color: "#1a1a2e" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#1a1a2e" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#9ca3af" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#2d2d4e" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#16162a" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0f0f23" }] },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#c9a84c" }] },
-];
+
+function createMarkerElement(iconUrl: string, width: number, height: number): HTMLDivElement {
+  const el = document.createElement("div");
+  el.style.width = `${width}px`;
+  el.style.height = `${height}px`;
+  el.style.backgroundImage = `url(${iconUrl})`;
+  el.style.backgroundSize = "contain";
+  el.style.backgroundRepeat = "no-repeat";
+  return el;
+}
 
 function createCarSvgMarker(color: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
@@ -109,9 +109,8 @@ interface DriverTrackingMapProps {
 
 function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
-  const googleMapRef = useRef<google.maps.Map | null>(null);
-  const driverMarkerRef = useRef<google.maps.Marker | null>(null);
-  const pickupMarkerRef = useRef<google.maps.Marker | null>(null);
+  const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
+  const driverMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const [mapsReady, setMapsReady] = useState(false);
   const [mapsError, setMapsError] = useState<string | null>(null);
   const [location, setLocation] = useState<DriverLocation | null>(null);
@@ -131,27 +130,24 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
     }
   }, [bookingId, token]);
 
-  // Load Google Maps SDK once
+  // Configure Mapbox GL once
   useEffect(() => {
-    const apiKey = import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] as string | undefined;
-    if (!apiKey) { setMapsError("Maps not available."); return; }
-    setOptions({ key: apiKey });
-    importLibrary("maps")
-      .then(() => setMapsReady(true))
-      .catch(() => setMapsError("Failed to load map."));
+    const token = import.meta.env["VITE_MAPBOX_TOKEN"] as string | undefined;
+    if (!token) { setMapsError("Maps not available."); return; }
+    mapboxgl.accessToken = token;
+    setMapsReady(true);
   }, []);
 
-  // Init map once SDK is ready
+  // Init map once Mapbox is ready
   useEffect(() => {
-    if (!mapsReady || !mapRef.current || googleMapRef.current) return;
-    googleMapRef.current = new google.maps.Map(mapRef.current, {
+    if (!mapsReady || !mapRef.current || mapboxMapRef.current) return;
+    mapboxMapRef.current = new mapboxgl.Map({
+      container: mapRef.current,
+      style: "mapbox://styles/mapbox/dark-v11",
+      center: [-80.3, 25.9],
       zoom: 14,
-      center: { lat: 25.9, lng: -80.3 },
-      mapTypeId: "roadmap",
-      disableDefaultUI: true,
-      zoomControl: true,
-      styles: MAP_STYLES,
     });
+    mapboxMapRef.current.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
   }, [mapsReady]);
 
   // Fetch location on mount and every 10 seconds
@@ -163,33 +159,22 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
 
   // Update map markers when location changes
   useEffect(() => {
-    if (!googleMapRef.current || !location?.available || !location.lat || !location.lng) return;
-    const map = googleMapRef.current;
-    const driverPos = { lat: location.lat, lng: location.lng };
+    if (!mapboxMapRef.current || !location?.available || !location.lat || !location.lng) return;
+    const map = mapboxMapRef.current;
+    const driverPos: [number, number] = [location.lng, location.lat];
 
     // Create or move driver marker
     if (!driverMarkerRef.current) {
-      driverMarkerRef.current = new google.maps.Marker({
-        map,
-        position: driverPos,
-        icon: { url: createCarSvgMarker("#3b82f6"), scaledSize: new google.maps.Size(40, 40), anchor: new google.maps.Point(20, 20) },
-        title: location.driverName ?? "Your Driver",
-        zIndex: 10,
-      });
+      const element = createMarkerElement(createCarSvgMarker("#3b82f6"), 40, 40);
+      driverMarkerRef.current = new mapboxgl.Marker({ element })
+        .setLngLat(driverPos)
+        .addTo(map);
     } else {
-      driverMarkerRef.current.setPosition(driverPos);
+      driverMarkerRef.current.setLngLat(driverPos);
     }
 
     // Center map on driver
     map.panTo(driverPos);
-  }, [location]);
-
-  // Add pickup pin once (pickup address label only — no geocoding needed for visual)
-  useEffect(() => {
-    if (!googleMapRef.current || pickupMarkerRef.current) return;
-    // We'll show pickup pin only if we have driver coords to center from
-    if (!location?.available) return;
-    // We can't geocode without extra API call — skip pickup pin for now
   }, [location]);
 
   // Status label

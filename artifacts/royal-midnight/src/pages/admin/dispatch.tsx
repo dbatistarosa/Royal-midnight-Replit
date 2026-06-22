@@ -3,7 +3,8 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, RefreshCw, Wallet } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { API_BASE } from "@/lib/constants";
-import { setOptions, importLibrary } from "@googlemaps/js-api-loader";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 
 const adminNavItems = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
@@ -75,6 +76,17 @@ function createSvgMarker(color: string): string {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
+function createMarkerElement(iconUrl: string, width: number, height: number): HTMLDivElement {
+  const el = document.createElement("div");
+  el.style.width = `${width}px`;
+  el.style.height = `${height}px`;
+  el.style.backgroundImage = `url(${iconUrl})`;
+  el.style.backgroundSize = "contain";
+  el.style.backgroundRepeat = "no-repeat";
+  el.style.cursor = "pointer";
+  return el;
+}
+
 export default function AdminDispatch() {
   const [board, setBoard] = useState<DispatchBoard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,8 +95,8 @@ export default function AdminDispatch() {
   const [mapsError, setMapsError] = useState<string | null>(null);
 
   const mapRef = useRef<HTMLDivElement>(null);
-  const googleMapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<Record<number, { marker: google.maps.Marker; infoWindow: google.maps.InfoWindow }>>({});
+  const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<Record<number, { marker: mapboxgl.Marker; popup: mapboxgl.Popup }>>({});
 
   const token = (() => {
     try {
@@ -113,45 +125,33 @@ export default function AdminDispatch() {
     }
   }, [authHeader]);
 
-  // Load Google Maps
+  // Configure Mapbox GL
   useEffect(() => {
-    const apiKey = import.meta.env["VITE_GOOGLE_MAPS_API_KEY"] as string | undefined;
-    if (!apiKey) {
-      setMapsError("Google Maps API key not configured.");
+    const token = import.meta.env["VITE_MAPBOX_TOKEN"] as string | undefined;
+    if (!token) {
+      setMapsError("Mapbox token not configured.");
       return;
     }
-    setOptions({ key: apiKey });
-    importLibrary("maps")
-      .then(() => setMapsReady(true))
-      .catch(() => setMapsError("Failed to load Google Maps."));
+    mapboxgl.accessToken = token;
+    setMapsReady(true);
   }, []);
 
-  // Init map once Maps API is ready and ref is mounted
+  // Init map once Mapbox is ready and ref is mounted
   useEffect(() => {
-    if (!mapsReady || !mapRef.current || googleMapRef.current) return;
-    googleMapRef.current = new google.maps.Map(mapRef.current, {
-      center: SOUTH_FLORIDA_CENTER,
+    if (!mapsReady || !mapRef.current || mapboxMapRef.current) return;
+    mapboxMapRef.current = new mapboxgl.Map({
+      container: mapRef.current,
+      style: "mapbox://styles/mapbox/dark-v11",
+      center: [SOUTH_FLORIDA_CENTER.lng, SOUTH_FLORIDA_CENTER.lat],
       zoom: 10,
-      mapTypeId: "roadmap",
-      styles: [
-        { elementType: "geometry", stylers: [{ color: "#1a1a2e" }] },
-        { elementType: "labels.text.stroke", stylers: [{ color: "#1a1a2e" }] },
-        { elementType: "labels.text.fill", stylers: [{ color: "#9ca3af" }] },
-        { featureType: "road", elementType: "geometry", stylers: [{ color: "#2d2d4e" }] },
-        { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#16162a" }] },
-        { featureType: "water", elementType: "geometry", stylers: [{ color: "#0f0f23" }] },
-        { featureType: "poi", stylers: [{ visibility: "off" }] },
-        { featureType: "transit", stylers: [{ visibility: "off" }] },
-        { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#c9a84c" }] },
-      ],
     });
   }, [mapsReady]);
 
   // Update markers when board data changes
   useEffect(() => {
-    if (!googleMapRef.current || !board) return;
+    if (!mapboxMapRef.current || !board) return;
 
-    const map = googleMapRef.current;
+    const map = mapboxMapRef.current;
     const currentIds = new Set<number>();
 
     for (const driver of board.availableDrivers) {
@@ -180,24 +180,18 @@ export default function AdminDispatch() {
 
       const existing = markersRef.current[driver.id];
       if (existing) {
-        existing.marker.setPosition({ lat, lng });
-        existing.marker.setIcon({ url: iconUrl, scaledSize: new google.maps.Size(32, 40) });
-        existing.infoWindow.setContent(infoContent);
+        existing.marker.setLngLat([lng, lat]);
+        existing.marker.getElement().style.backgroundImage = `url(${iconUrl})`;
+        existing.popup.setHTML(infoContent);
       } else {
-        const marker = new google.maps.Marker({
-          position: { lat, lng },
-          map,
-          title: driver.name,
-          icon: { url: iconUrl, scaledSize: new google.maps.Size(32, 40) },
-        });
+        const element = createMarkerElement(iconUrl, 32, 40);
+        const popup = new mapboxgl.Popup({ offset: 20, closeButton: false }).setHTML(infoContent);
+        const marker = new mapboxgl.Marker({ element, anchor: "bottom" })
+          .setLngLat([lng, lat])
+          .setPopup(popup)
+          .addTo(map);
 
-        const infoWindow = new google.maps.InfoWindow({ content: infoContent });
-
-        marker.addListener("click", () => {
-          infoWindow.open(map, marker);
-        });
-
-        markersRef.current[driver.id] = { marker, infoWindow };
+        markersRef.current[driver.id] = { marker, popup };
       }
     }
 
@@ -205,7 +199,7 @@ export default function AdminDispatch() {
     for (const idStr of Object.keys(markersRef.current)) {
       const id = Number(idStr);
       if (!currentIds.has(id)) {
-        markersRef.current[id]?.marker.setMap(null);
+        markersRef.current[id]?.marker.remove();
         delete markersRef.current[id];
       }
     }

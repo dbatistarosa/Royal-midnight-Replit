@@ -1,5 +1,5 @@
 /**
- * Google Maps route estimate helper.
+ * Mapbox route estimate helper.
  * Used by the booking system to store estimated drive time so that
  * the driver scheduling conflict detector can prevent impossible back-to-back trips.
  */
@@ -30,50 +30,54 @@ export type RouteEstimate = {
 const MIN_DURATION_MINUTES = 15;  // never assume a trip takes less than this
 const DEFAULT_DURATION_MINUTES = 60; // fallback when API is unavailable
 
+/** Forward-geocode an address to Mapbox [lng, lat] coordinates. */
+async function geocode(address: string, token: string): Promise<[number, number] | null> {
+  const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json`);
+  url.searchParams.set("access_token", token);
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("country", "US");
+  const res = await fetch(url.toString());
+  const data = await res.json() as { features?: Array<{ center: [number, number] }> };
+  return data.features?.[0]?.center ?? null;
+}
+
 /**
- * Call the Google Maps Directions API to get the estimated driving time and
- * distance between two addresses. Returns null if the API key is absent or
- * the request fails — callers should use DEFAULT_DURATION_MINUTES as fallback.
+ * Call the Mapbox Directions API to get the estimated driving time and
+ * distance between two addresses. Returns null if the access token is absent
+ * or the request fails — callers should use DEFAULT_DURATION_MINUTES as fallback.
  */
 export async function getRouteEstimate(
   pickup: string,
   dropoff: string,
 ): Promise<RouteEstimate | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
+  const token = process.env.MAPBOX_ACCESS_TOKEN;
+  if (!token) return null;
 
   const origin = resolveAddress(pickup);
   const destination = resolveAddress(dropoff);
 
   try {
-    const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
-    url.searchParams.set("origin", origin);
-    url.searchParams.set("destination", destination);
-    url.searchParams.set("mode", "driving");
-    url.searchParams.set("units", "imperial");
-    url.searchParams.set("key", apiKey);
+    const [originCoord, destCoord] = await Promise.all([geocode(origin, token), geocode(destination, token)]);
+    if (!originCoord || !destCoord) return null;
+
+    const url = new URL(
+      `https://api.mapbox.com/directions/v5/mapbox/driving/${originCoord[0]},${originCoord[1]};${destCoord[0]},${destCoord[1]}`,
+    );
+    url.searchParams.set("access_token", token);
+    url.searchParams.set("geometries", "geojson");
+    url.searchParams.set("overview", "false");
 
     const response = await fetch(url.toString());
     const data = await response.json() as {
-      status: string;
-      routes?: Array<{
-        legs: Array<{
-          distance: { value: number };
-          duration: { value: number };
-        }>;
-      }>;
+      code: string;
+      routes?: Array<{ distance: number; duration: number }>;
     };
 
-    if (data.status !== "OK" || !data.routes?.length) return null;
+    if (data.code !== "Ok" || !data.routes?.length) return null;
 
-    const leg = data.routes[0]?.legs[0];
-    if (!leg) return null;
-
-    const durationMinutes = Math.max(
-      MIN_DURATION_MINUTES,
-      Math.round(leg.duration.value / 60),
-    );
-    const distanceMiles = Math.round((leg.distance.value / 1609.344) * 100) / 100;
+    const route = data.routes[0]!;
+    const durationMinutes = Math.max(MIN_DURATION_MINUTES, Math.round(route.duration / 60));
+    const distanceMiles = Math.round((route.distance / 1609.344) * 100) / 100;
 
     return { durationMinutes, distanceMiles };
   } catch {

@@ -44,7 +44,6 @@
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/react-query": "catalog:",
-    "@types/google.maps": "^3.58.1",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
@@ -76,11 +75,11 @@
     "zod": "catalog:"
   },
   "dependencies": {
-    "@googlemaps/js-api-loader": "^2.0.2",
     "@stripe/react-stripe-js": "^6.1.0",
     "@stripe/stripe-js": "^9.0.1",
     "@workspace/object-storage-web": "workspace:*",
     "jspdf": "^4.2.1",
+    "mapbox-gl": "^3.9.0",
     "react-helmet-async": "^3.0.0"
   }
 }

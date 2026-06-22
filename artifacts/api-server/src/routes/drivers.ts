@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq, sql, desc } from "drizzle-orm";
-import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable } from "@workspace/db";
+import { eq, sql, desc, and, inArray } from "drizzle-orm";
+import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable, driverLocationsTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
@@ -358,6 +358,12 @@ router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void>
   });
 });
 
+// Statuses where a driver is actively en route to / with a passenger — used to
+// tag live GPS pings with the trip they belong to (distinct from
+// ACTIVE_TRIP_STATUSES in bookings.ts, which is about scheduling-conflict
+// detection, not "what trip is happening right now").
+const LIVE_TRACKING_STATUSES = ["on_way", "on_location", "in_progress"] as const;
+
 // Driver location update — driver sends GPS coords every 30 seconds when sharing is enabled
 router.patch("/drivers/:id/location", requireAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);
@@ -390,6 +396,21 @@ router.patch("/drivers/:id/location", requireAuth, async (req, res): Promise<voi
     .set({ latitude: String(lat), longitude: String(lng), locationUpdatedAt: new Date() })
     .where(eq(driversTable.id, id))
     .returning();
+
+  const [liveBooking] = await db
+    .select({ id: bookingsTable.id })
+    .from(bookingsTable)
+    .where(and(eq(bookingsTable.driverId, id), inArray(bookingsTable.status, LIVE_TRACKING_STATUSES)));
+
+  // History row for the driver_locations table — Realtime (enabled via the
+  // supabase_realtime publication) broadcasts this insert to any subscribed
+  // map client automatically, no extra code needed here.
+  await db.insert(driverLocationsTable).values({
+    driverId: id,
+    bookingId: liveBooking?.id ?? null,
+    latitude: lat,
+    longitude: lng,
+  });
 
   res.json({ id: updated.id, latitude: updated.latitude, longitude: updated.longitude, locationUpdatedAt: updated.locationUpdatedAt });
 });

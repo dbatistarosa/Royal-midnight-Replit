@@ -41,7 +41,7 @@ router.get("/autocomplete", async (req, res): Promise<void> => {
   const mode = (req.query["mode"] as string || "pickup");
   const isDropoff = mode === "dropoff";
   const airportPool = isDropoff ? ALL_FLORIDA_AIRPORTS : SOUTH_FLORIDA_AIRPORTS;
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const token = process.env.MAPBOX_ACCESS_TOKEN;
 
   if (!query) {
     res.json({ airports: airportPool, suggestions: [] });
@@ -56,50 +56,35 @@ router.get("/autocomplete", async (req, res): Promise<void> => {
     upperQuery.includes(a.code)
   );
 
-  if (!apiKey) {
+  if (!token) {
     res.json({ airports: airportMatches, suggestions: [] });
     return;
   }
 
   try {
-    const url = new URL("https://maps.googleapis.com/maps/api/place/autocomplete/json");
-    url.searchParams.set("input", query);
-    url.searchParams.set("key", apiKey);
-    url.searchParams.set("components", "country:us");
+    const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json`);
+    url.searchParams.set("access_token", token);
+    url.searchParams.set("autocomplete", "true");
+    url.searchParams.set("country", "us");
+    url.searchParams.set("limit", "5");
 
-    if (isDropoff) {
-      // Florida-wide bias: center of the state
-      url.searchParams.set("location", "28.0,-82.0");
-      url.searchParams.set("radius", "500000"); // ~310 miles — covers all of FL
-    } else {
-      // South Florida bias (pickup)
-      url.searchParams.set("location", "26.0,-80.1");
-      url.searchParams.set("radius", "160000"); // ~100 miles around South Florida
-    }
-    url.searchParams.set("strictbounds", "false");
+    // Florida-wide bias (dropoff) vs. South Florida bias (pickup)
+    url.searchParams.set("proximity", isDropoff ? "-82.0,28.0" : "-80.1,26.0");
 
     const response = await fetch(url.toString());
     const data = await response.json() as {
-      status: string;
-      predictions?: Array<{
-        place_id: string;
-        description: string;
-        structured_formatting: { main_text: string; secondary_text: string };
-      }>;
+      features?: Array<{ id: string; place_name: string; text: string }>;
     };
 
-    if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
-      req.log.warn({ status: data.status }, "Places Autocomplete returned non-OK status");
-      res.json({ airports: airportMatches, suggestions: [] });
-      return;
-    }
-
-    const suggestions = (data.predictions || []).slice(0, 5).map(p => ({
-      placeId: p.place_id,
-      text: p.description,
-      mainText: p.structured_formatting?.main_text || p.description,
-      secondaryText: p.structured_formatting?.secondary_text || "",
-    }));
+    const suggestions = (data.features || []).slice(0, 5).map(f => {
+      const [mainText, ...rest] = f.place_name.split(", ");
+      return {
+        placeId: f.id,
+        text: f.place_name,
+        mainText: mainText || f.text,
+        secondaryText: rest.join(", "),
+      };
+    });
 
     res.json({ airports: airportMatches, suggestions });
   } catch {

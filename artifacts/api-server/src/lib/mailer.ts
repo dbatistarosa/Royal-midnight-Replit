@@ -391,12 +391,12 @@ export async function sendDriverArrived(b: BookingEmailData) {
   await send(b.passengerEmail, `Your Driver Has Arrived — Royal Midnight ${bookingRef}`, html, "driver_arrived_passenger");
 }
 
-export async function sendTripCompletionEmail(b: BookingEmailData, tipAmount?: number | null) {
+export async function sendTripCompletionEmail(b: BookingEmailData, tipAmount?: number | null, extraCharge?: number | null) {
   const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
   const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
-  const total = tipAmount != null && tipAmount > 0
-    ? b.priceQuoted + tipAmount
-    : b.priceQuoted;
+  const total = b.priceQuoted
+    + (tipAmount != null && tipAmount > 0 ? tipAmount : 0)
+    + (extraCharge != null && extraCharge > 0 ? extraCharge : 0);
   const html = wrap(`
 <h2 style="color:#22c55e;font-size:20px;margin:0 0 8px">Trip Completed</h2>
 <p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, thank you for riding with Royal Midnight. We hope you enjoyed your journey.</p>
@@ -406,6 +406,7 @@ export async function sendTripCompletionEmail(b: BookingEmailData, tipAmount?: n
   ${row("Date", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
   ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : b.vehicleClass === "suv" ? "Premium SUV" : b.vehicleClass)}
   ${row("Base Fare", `$${b.priceQuoted.toFixed(2)}`)}
+  ${extraCharge != null && extraCharge > 0 ? row("Extra Time Charge", `<span style="color:#f59e0b">$${extraCharge.toFixed(2)}</span>`) : ""}
   ${tipAmount != null && tipAmount > 0 ? row("Gratuity", `<span style="color:#22c55e">$${tipAmount.toFixed(2)}</span>`) : ""}
   ${row("Total Charged", `<span style="color:#c9a84c;font-weight:bold">$${total.toFixed(2)}</span>`)}
 </table>
