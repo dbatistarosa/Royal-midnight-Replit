@@ -666,6 +666,26 @@ export async function sendPasswordResetEmail(to: string, passengerName: string, 
   await send(to, "Reset Your Royal Midnight Password", html, "password_reset");
 }
 
+export async function sendDriverAccountSetupEmail(to: string, driverName: string, setupLink: string) {
+  const html = wrap(`
+<h2 style="color:#ffffff;margin:0 0 8px;font-size:22px;font-weight:600">Welcome to Royal Midnight</h2>
+<p style="color:#9ca3af;margin:0 0 20px;font-size:14px">Your Driver Account Is Ready</p>
+<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${driverName},</p>
+<p style="color:#9ca3af;font-size:14px;margin:0 0 24px">
+  An account has been created for you on the Royal Midnight driver portal. Click the button below to set your
+  password. Once you're signed in, you'll be able to upload your driver's license, vehicle registration, and
+  insurance documents. This link expires in <strong style="color:#e5e7eb">7 days</strong>.
+</p>
+<p style="text-align:center;margin:0 0 24px;">
+  <a href="${setupLink}" style="background:#c9a84c;color:#050505;padding:12px 32px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px;display:inline-block">SET UP MY ACCOUNT</a>
+</p>
+<p style="color:#4b5563;font-size:11px;word-break:break-all">
+  If the button above doesn't work, copy and paste this link into your browser:<br>${setupLink}
+</p>`);
+
+  await send(to, "Welcome to Royal Midnight — Set Up Your Driver Account", html, "driver_account_setup");
+}
+
 // ─── Compliance Emails ────────────────────────────────────────────────────────
 
 export async function sendComplianceReminder(params: {

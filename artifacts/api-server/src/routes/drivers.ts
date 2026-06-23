@@ -1,9 +1,12 @@
 import { Router, type IRouter } from "express";
 import { eq, sql, desc, and, inArray } from "drizzle-orm";
-import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable, driverLocationsTable } from "@workspace/db";
+import crypto from "crypto";
+import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable, driverLocationsTable, passwordResetTokensTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
+import { hashPassword } from "../lib/hash.js";
+import { sendDriverAccountSetupEmail } from "../lib/mailer.js";
 import {
   ListDriversQueryParams,
   ListDriversResponse,
@@ -52,15 +55,59 @@ router.post("/drivers", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
 
-  // Admin-created drivers are immediately active — no approval flow required
-  const [driver] = await db
-    .insert(driversTable)
-    .values({
-      ...parsed.data,
-      approvalStatus: "approved",
-      status: "active",
-    })
-    .returning();
+  const email = parsed.data.email;
+  const [existingUser] = await db.select({ id: usersTable.id, role: usersTable.role }).from(usersTable).where(eq(usersTable.email, email));
+  if (existingUser) {
+    const msg = existingUser.role === "driver"
+      ? "A driver account with this email already exists."
+      : "This email is already registered as a passenger or admin account. Each email can only be used for one portal.";
+    res.status(400).json({ error: msg });
+    return;
+  }
+  const [existingDriverRecord] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.email, email));
+  if (existingDriverRecord) {
+    res.status(400).json({ error: "A driver record with this email already exists." });
+    return;
+  }
+
+  // Admin-created drivers are immediately active — no approval flow required.
+  // They still need a login: create a linked user account with an unusable
+  // random password, then email them a set-password link (same mechanism as
+  // forgot-password) so they can sign in and upload their documents.
+  const { driver } = await db.transaction(async (tx) => {
+    const [user] = await tx
+      .insert(usersTable)
+      .values({
+        name: parsed.data.name,
+        email,
+        phone: parsed.data.phone,
+        role: "driver",
+        passwordHash: hashPassword(crypto.randomBytes(32).toString("hex")),
+      })
+      .returning();
+
+    const [driver] = await tx
+      .insert(driversTable)
+      .values({
+        ...parsed.data,
+        userId: user.id,
+        approvalStatus: "approved",
+        status: "active",
+      })
+      .returning();
+
+    return { user, driver };
+  });
+
+  const setupToken = crypto.randomBytes(32).toString("hex");
+  const setupExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  await db.insert(passwordResetTokensTable).values({ userId: driver.userId!, token: setupToken, expiresAt: setupExpiresAt });
+
+  const APP_URL = process.env.APP_URL ?? "https://royalmidnight.com";
+  const setupLink = `${APP_URL}/auth/reset-password?token=${setupToken}`;
+  sendDriverAccountSetupEmail(email, parsed.data.name, setupLink)
+    .catch(err => req.log.error({ err }, "[drivers] account setup email failed"));
+
   res.status(201).json(GetDriverResponse.parse(parseDriver(driver)));
 });
 

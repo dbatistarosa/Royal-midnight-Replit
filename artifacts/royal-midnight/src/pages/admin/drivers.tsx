@@ -263,7 +263,7 @@ export default function AdminDrivers() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
-      toast({ title: "Driver created", description: `${addForm.name} has been added and is immediately active.` });
+      toast({ title: "Driver created", description: `${addForm.name} has been added and emailed a link to set their password and upload documents.` });
       setShowAdd(false);
       setAddForm(EMPTY_DRIVER);
       refetch();
@@ -497,7 +497,7 @@ export default function AdminDrivers() {
               <button onClick={() => { setShowAdd(false); setAddForm(EMPTY_DRIVER); }} className="text-muted-foreground hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-7 space-y-5 max-h-[60vh] overflow-y-auto">
-              <p className="text-xs text-muted-foreground">Admin-created drivers bypass the approval flow and are immediately active.</p>
+              <p className="text-xs text-muted-foreground">Admin-created drivers bypass the approval flow and are immediately active. They'll receive an email with a link to set their password and upload their license, registration, and insurance documents.</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className={LABEL}>Full Name *</label>
