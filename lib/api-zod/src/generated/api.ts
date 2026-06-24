@@ -695,6 +695,12 @@ export const GetUserResponse = zod.object({
   role: zod.enum(["passenger", "driver", "admin", "corporate"]),
   createdAt: zod.coerce.date(),
   vipNotes: zod.string().nullish(),
+  cabinTempF: zod.number().nullish(),
+  musicPreference: zod.string().nullish(),
+  quietRide: zod.boolean().nullish(),
+  preferredBeverage: zod.string().nullish(),
+  opensOwnDoor: zod.boolean().nullish(),
+  addressTitle: zod.string().nullish(),
 });
 
 /**
@@ -717,6 +723,12 @@ export const UpdateUserResponse = zod.object({
   role: zod.enum(["passenger", "driver", "admin", "corporate"]),
   createdAt: zod.coerce.date(),
   vipNotes: zod.string().nullish(),
+  cabinTempF: zod.number().nullish(),
+  musicPreference: zod.string().nullish(),
+  quietRide: zod.boolean().nullish(),
+  preferredBeverage: zod.string().nullish(),
+  opensOwnDoor: zod.boolean().nullish(),
+  addressTitle: zod.string().nullish(),
 });
 
 /**

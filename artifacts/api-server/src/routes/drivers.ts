@@ -26,8 +26,13 @@ import {
 const router: IRouter = Router();
 
 function parseDriver(d: typeof driversTable.$inferSelect) {
+  // payoutSsn/payoutRoutingNumber/payoutAccountNumber are encrypted at rest,
+  // but general-purpose driver responses shouldn't carry the ciphertext at
+  // all — callers who need this data use the dedicated, properly-masked
+  // GET /drivers/:id/payout endpoint instead.
+  const { payoutSsn, payoutRoutingNumber, payoutAccountNumber, ...rest } = d;
   return {
-    ...d,
+    ...rest,
     rating: d.rating != null ? parseFloat(d.rating) : null,
     createdAt: d.createdAt.toISOString(),
   };
