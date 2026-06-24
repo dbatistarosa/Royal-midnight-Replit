@@ -57,7 +57,7 @@ async function sendSms(
       },
       body: JSON.stringify({ phone: normalised, message: body, channel }),
     });
-    const json = await res.json().catch(() => null);
+    const json = await res.json().catch(() => null) as { success?: boolean; error?: string; channel_used?: string } | null;
     if (!res.ok || !json?.success) {
       console.error(`[sms] Failed to send to ${normalised}:`, json?.error ?? res.status);
       return;

@@ -76,7 +76,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: '#/components/schemas/ErrorResponse'
   /storage/objects/{objectPath}:
     get:
       tags: [Storage]
@@ -101,7 +101,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: '#/components/schemas/ErrorResponse'
 
   # ── AUTH ──────────────────────────────────────────────────────────────────
   /auth/register:

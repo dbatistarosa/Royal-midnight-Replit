@@ -56,6 +56,10 @@ export const driversTable = pgTable("drivers", {
 
   // Compliance hold — set to true at Day Zero when a document expires without renewal
   complianceHold: boolean("compliance_hold").notNull().default(false),
+
+  // Driver mobile app push notifications
+  pushToken: text("push_token"),
+  pushPlatform: text("push_platform"),
 });
 
 export const insertDriverSchema = createInsertSchema(driversTable).omit({ id: true, createdAt: true, updatedAt: true });

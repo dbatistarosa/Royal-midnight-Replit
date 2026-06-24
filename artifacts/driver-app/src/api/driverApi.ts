@@ -1,0 +1,214 @@
+import { customFetch, requestUploadUrl as requestUploadUrlGenerated, type LoginBody } from "@workspace/api-client-react";
+import type {
+  AppNotification,
+  Driver,
+  DriverBooking,
+  DriverDocuments,
+  DriverEarnings,
+  DriverPayout,
+  DriverReview,
+  FlightStatus,
+  LoginResponse,
+  SupportTicket,
+  TicketMessage,
+} from "@/api/types";
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+export function login(body: LoginBody): Promise<LoginResponse> {
+  return customFetch<LoginResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// ── Driver profile ───────────────────────────────────────────────────────────
+
+export function getDriverByUserId(userId: number): Promise<Driver> {
+  return customFetch<Driver>(`/drivers/by-user/${userId}`);
+}
+
+export function getDriver(driverId: number): Promise<Driver> {
+  return customFetch<Driver>(`/drivers/${driverId}`);
+}
+
+export function patchDriverContact(
+  driverId: number,
+  body: { phone?: string; profilePicture?: string },
+): Promise<Driver> {
+  return customFetch<Driver>(`/drivers/${driverId}/contact`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchDriverStatus(
+  driverId: number,
+  status: "available" | "on_break" | "unavailable",
+): Promise<Driver> {
+  return customFetch<Driver>(`/drivers/${driverId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function patchDriverLocation(
+  driverId: number,
+  lat: number,
+  lng: number,
+): Promise<{ id: number; latitude: string; longitude: string; locationUpdatedAt: string }> {
+  return customFetch(`/drivers/${driverId}/location`, {
+    method: "PATCH",
+    body: JSON.stringify({ lat, lng }),
+  });
+}
+
+export function patchDriverPushToken(
+  driverId: number,
+  pushToken: string,
+  pushPlatform: "ios" | "android",
+): Promise<{ id: number; pushPlatform: string }> {
+  return customFetch(`/drivers/${driverId}/push-token`, {
+    method: "PATCH",
+    body: JSON.stringify({ pushToken, pushPlatform }),
+  });
+}
+
+// ── Payout ───────────────────────────────────────────────────────────────────
+
+export function getDriverPayout(driverId: number): Promise<DriverPayout> {
+  return customFetch<DriverPayout>(`/drivers/${driverId}/payout`);
+}
+
+export function patchDriverPayout(
+  driverId: number,
+  body: {
+    payoutLegalName?: string;
+    payoutEmail?: string;
+    payoutBankName?: string;
+    payoutRoutingNumber?: string;
+    payoutAccountNumber?: string;
+  },
+): Promise<DriverPayout> {
+  return customFetch<DriverPayout>(`/drivers/${driverId}/payout`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+// ── Compliance documents ─────────────────────────────────────────────────────
+
+export function getDriverDocuments(driverId: number): Promise<DriverDocuments> {
+  return customFetch<DriverDocuments>(`/drivers/${driverId}/documents`);
+}
+
+export function postDriverDocument(
+  driverId: number,
+  body: { docType: string; fileUrl: string; newExpiry?: string },
+): Promise<DriverDocuments["submissions"][number]> {
+  return customFetch(`/drivers/${driverId}/documents`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// ── Earnings ─────────────────────────────────────────────────────────────────
+
+export function getDriverEarnings(
+  driverId: number,
+  range?: { startDate: string; endDate: string },
+): Promise<DriverEarnings> {
+  const qs = range ? `?startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}` : "";
+  return customFetch<DriverEarnings>(`/drivers/${driverId}/earnings${qs}`);
+}
+
+// ── Bookings / trip lifecycle ────────────────────────────────────────────────
+
+export function listBookings(params: { status?: string; driverId?: number }): Promise<DriverBooking[]> {
+  const qs = new URLSearchParams();
+  if (params.status) qs.set("status", params.status);
+  if (params.driverId != null) qs.set("driverId", String(params.driverId));
+  return customFetch<DriverBooking[]>(`/bookings?${qs.toString()}`);
+}
+
+export function getBooking(bookingId: number): Promise<DriverBooking> {
+  return customFetch<DriverBooking>(`/bookings/${bookingId}`);
+}
+
+export function acceptBooking(bookingId: number): Promise<DriverBooking> {
+  return customFetch<DriverBooking>(`/bookings/${bookingId}/accept`, { method: "POST" });
+}
+
+export function postTripChecklist(bookingId: number): Promise<{ ok: true; checklistCompletedAt: string }> {
+  return customFetch(`/bookings/${bookingId}/trip/checklist`, { method: "POST" });
+}
+
+export function postTripOnWay(bookingId: number): Promise<DriverBooking> {
+  return customFetch<DriverBooking>(`/bookings/${bookingId}/trip/on-way`, { method: "POST" });
+}
+
+export function postTripOnLocation(bookingId: number): Promise<DriverBooking> {
+  return customFetch<DriverBooking>(`/bookings/${bookingId}/trip/on-location`, { method: "POST" });
+}
+
+export function postTripStart(bookingId: number): Promise<DriverBooking> {
+  return customFetch<DriverBooking>(`/bookings/${bookingId}/trip/start`, { method: "POST" });
+}
+
+export function postTripComplete(bookingId: number): Promise<DriverBooking> {
+  return customFetch<DriverBooking>(`/bookings/${bookingId}/trip/complete`, { method: "POST" });
+}
+
+export function getFlightStatus(bookingId: number): Promise<FlightStatus> {
+  return customFetch<FlightStatus>(`/bookings/${bookingId}/flight-status`);
+}
+
+// ── Reviews ──────────────────────────────────────────────────────────────────
+
+export function listDriverReviews(driverId: number): Promise<DriverReview[]> {
+  return customFetch<DriverReview[]>(`/reviews?driverId=${driverId}`);
+}
+
+// ── Notifications ────────────────────────────────────────────────────────────
+
+export function listNotifications(userId: number): Promise<AppNotification[]> {
+  return customFetch<AppNotification[]>(`/notifications?userId=${userId}`);
+}
+
+export function markNotificationRead(notificationId: number): Promise<AppNotification> {
+  return customFetch<AppNotification>(`/notifications/${notificationId}/read`, { method: "PATCH" });
+}
+
+// ── Support ──────────────────────────────────────────────────────────────────
+
+export function listSupportTickets(): Promise<SupportTicket[]> {
+  return customFetch<SupportTicket[]>(`/support`);
+}
+
+export function createSupportTicket(body: { subject: string; description: string }): Promise<SupportTicket> {
+  return customFetch<SupportTicket>(`/support`, { method: "POST", body: JSON.stringify(body) });
+}
+
+export function listTicketMessages(ticketId: number): Promise<TicketMessage[]> {
+  return customFetch<TicketMessage[]>(`/support/${ticketId}/messages`);
+}
+
+export function postTicketMessage(ticketId: number, message: string): Promise<TicketMessage> {
+  return customFetch<TicketMessage>(`/support/${ticketId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
+
+// ── Document/photo upload (presigned URL contract) ──────────────────────────
+
+export function requestUploadUrl(name: string, size: number, contentType: string) {
+  return requestUploadUrlGenerated({ name, size, contentType });
+}
+
+export async function uploadFileToPresignedUrl(uploadURL: string, localUri: string, contentType: string): Promise<void> {
+  const file = await fetch(localUri);
+  const blob = await file.blob();
+  const res = await fetch(uploadURL, { method: "PUT", body: blob, headers: { "Content-Type": contentType } });
+  if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
+}

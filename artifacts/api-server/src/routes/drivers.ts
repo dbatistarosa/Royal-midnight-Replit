@@ -462,6 +462,41 @@ router.patch("/drivers/:id/location", requireAuth, async (req, res): Promise<voi
   res.json({ id: updated.id, latitude: updated.latitude, longitude: updated.longitude, locationUpdatedAt: updated.locationUpdatedAt });
 });
 
+// Driver mobile app registers/refreshes its Expo push token here on every login/foreground.
+router.patch("/drivers/:id/push-token", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] || "0", 10);
+  if (!id) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const { pushToken, pushPlatform } = req.body as { pushToken?: string; pushPlatform?: string };
+  if (!pushToken || (pushPlatform !== "ios" && pushPlatform !== "android")) {
+    res.status(400).json({ error: "pushToken and pushPlatform ('ios'|'android') are required" });
+    return;
+  }
+
+  const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
+  if (!driver) {
+    res.status(404).json({ error: "Driver not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.userId !== driver.userId) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(driversTable)
+    .set({ pushToken, pushPlatform })
+    .where(eq(driversTable.id, id))
+    .returning();
+
+  res.json({ id: updated.id, pushPlatform: updated.pushPlatform });
+});
+
 // Driver self-service status update (available / on_break / unavailable)
 router.patch("/drivers/:id/status", requireAuth, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"] || "0", 10);

@@ -21,6 +21,7 @@ import {
   sendTripCompletionEmail,
 } from "../lib/mailer.js";
 import { sendDriverOnWaySms, sendDriverArrivedSms, sendCancellationSms } from "../lib/sms.js";
+import { sendNewRideOfferPush } from "../lib/push.js";
 import { maybeRewardReferrerForCompletedRide } from "../lib/referrals.js";
 import {
   ListBookingsQueryParams,
@@ -530,6 +531,12 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
           .where(eq(driversTable.approvalStatus, "approved"));
         const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
         await sendNewBookingAvailableToDrivers(emailData, driverEmails);
+
+        const pushableDrivers = await db
+          .select({ pushToken: driversTable.pushToken, pushPlatform: driversTable.pushPlatform })
+          .from(driversTable)
+          .where(and(eq(driversTable.status, "available"), eq(driversTable.complianceHold, false)));
+        await sendNewRideOfferPush(pushableDrivers, { id: booking.id, pickupAddress: booking.pickupAddress, driverEarnings });
       } catch (err) {
         console.error("[bookings] corporate post-create email error:", err);
       }
@@ -956,10 +963,15 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
           .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
           .where(eq(driversTable.approvalStatus, "approved"));
         const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
+        const pushableDrivers = await db
+          .select({ pushToken: driversTable.pushToken, pushPlatform: driversTable.pushPlatform })
+          .from(driversTable)
+          .where(and(eq(driversTable.status, "available"), eq(driversTable.complianceHold, false)));
         emailPromises.push(
           sendBookingConfirmationPassenger(bookingEmailData),
           sendNewBookingAdmin(bookingEmailData),
           sendNewBookingAvailableToDrivers(bookingEmailData, driverEmails),
+          sendNewRideOfferPush(pushableDrivers, { id: bookingEmailData.id, pickupAddress: bookingEmailData.pickupAddress, driverEarnings: bookingEmailData.driverEarnings }),
         );
       }
 

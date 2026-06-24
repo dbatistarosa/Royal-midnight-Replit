@@ -80,6 +80,7 @@
     "@workspace/object-storage-web": "workspace:*",
     "jspdf": "^4.2.1",
     "mapbox-gl": "^3.9.0",
+    "qrcode.react": "^4.2.0",
     "react-helmet-async": "^3.0.0"
   }
 }

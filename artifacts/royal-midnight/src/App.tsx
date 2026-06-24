@@ -65,6 +65,7 @@ import AdminPassengers from "@/pages/admin/passengers";
 import AdminDrivers from "@/pages/admin/drivers";
 import AdminFleet from "@/pages/admin/fleet";
 import AdminDispatch from "@/pages/admin/dispatch";
+import AdminDriverApp from "@/pages/admin/driver-app";
 import AdminPricing from "@/pages/admin/pricing";
 import AdminPromos from "@/pages/admin/promos";
 import AdminSupport from "@/pages/admin/support";
@@ -300,6 +301,9 @@ function Router() {
       </Route>
       <Route path="/admin/dispatch">
         <AdminRoute component={AdminDispatch} />
+      </Route>
+      <Route path="/admin/driver-app">
+        <AdminRoute component={AdminDriverApp} />
       </Route>
       <Route path="/admin/pricing">
         <AdminRoute component={AdminPricing} />

@@ -32,7 +32,6 @@ import type {
   DispatchBoard,
   Driver,
   DriverEarnings,
-  ErrorEnvelope,
   ErrorResponse,
   GetRecentBookingsParams,
   HealthStatus,
@@ -178,7 +177,7 @@ export const requestUploadUrl = async (
 };
 
 export const getRequestUploadUrlMutationOptions = <
-  TError = ErrorType<ErrorEnvelope>,
+  TError = ErrorType<ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -219,13 +218,13 @@ export type RequestUploadUrlMutationResult = NonNullable<
   Awaited<ReturnType<typeof requestUploadUrl>>
 >;
 export type RequestUploadUrlMutationBody = BodyType<UploadUrlRequest>;
-export type RequestUploadUrlMutationError = ErrorType<ErrorEnvelope>;
+export type RequestUploadUrlMutationError = ErrorType<ErrorResponse>;
 
 /**
  * @summary Request a presigned URL for file upload
  */
 export const useRequestUploadUrl = <
-  TError = ErrorType<ErrorEnvelope>,
+  TError = ErrorType<ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -267,7 +266,7 @@ export const getGetStorageObjectQueryKey = (objectPath: string) => {
 
 export const getGetStorageObjectQueryOptions = <
   TData = Awaited<ReturnType<typeof getStorageObject>>,
-  TError = ErrorType<ErrorEnvelope>,
+  TError = ErrorType<ErrorResponse>,
 >(
   objectPath: string,
   options?: {
@@ -304,7 +303,7 @@ export const getGetStorageObjectQueryOptions = <
 export type GetStorageObjectQueryResult = NonNullable<
   Awaited<ReturnType<typeof getStorageObject>>
 >;
-export type GetStorageObjectQueryError = ErrorType<ErrorEnvelope>;
+export type GetStorageObjectQueryError = ErrorType<ErrorResponse>;
 
 /**
  * @summary Serve an object entity
@@ -312,7 +311,7 @@ export type GetStorageObjectQueryError = ErrorType<ErrorEnvelope>;
 
 export function useGetStorageObject<
   TData = Awaited<ReturnType<typeof getStorageObject>>,
-  TError = ErrorType<ErrorEnvelope>,
+  TError = ErrorType<ErrorResponse>,
 >(
   objectPath: string,
   options?: {

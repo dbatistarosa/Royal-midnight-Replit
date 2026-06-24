@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import Stripe from "stripe";
 import { db } from "@workspace/db";
 import { bookingsTable as bookings, driversTable, settingsTable, usersTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -11,6 +11,7 @@ import {
   getMailerStatus,
 } from "../lib/mailer.js";
 import { sendBookingConfirmationSms } from "../lib/sms.js";
+import { sendNewRideOfferPush } from "../lib/push.js";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 
 const router: IRouter = Router();
@@ -70,12 +71,20 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
     .where(eq(driversTable.approvalStatus, "approved"));
   const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
 
+  // Narrower than the email fan-out above: only drivers who can actually act
+  // on the offer right now get a push (online, available, not on hold).
+  const pushableDrivers = await db
+    .select({ pushToken: driversTable.pushToken, pushPlatform: driversTable.pushPlatform })
+    .from(driversTable)
+    .where(and(eq(driversTable.status, "available"), eq(driversTable.complianceHold, false)));
+
   const bookingRef = `RM-${String(bookingId).padStart(4, "0")}`;
 
   await Promise.all([
     sendBookingConfirmationPassenger(emailData),
     sendNewBookingAdmin(emailData),
     sendNewBookingAvailableToDrivers(emailData, driverEmails),
+    sendNewRideOfferPush(pushableDrivers, { id: booking.id, pickupAddress: booking.pickupAddress, driverEarnings: emailData.driverEarnings }),
     // SMS confirmation — non-fatal; passenger phone may be absent
     sendBookingConfirmationSms(
       booking.passengerPhone,
