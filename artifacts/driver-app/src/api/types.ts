@@ -162,11 +162,14 @@ export interface AppNotification {
 
 export interface SupportTicket {
   id: number;
-  userId: number;
+  userId: number | null;
+  bookingId: number | null;
+  name: string;
+  email: string;
   subject: string;
-  description: string;
+  message: string;
   status: "open" | "in_progress" | "closed";
-  priority?: string;
+  priority: "low" | "medium" | "high" | "urgent";
   createdAt: string;
   updatedAt: string;
 }

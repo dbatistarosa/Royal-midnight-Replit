@@ -135,28 +135,39 @@ export function getBooking(bookingId: number): Promise<DriverBooking> {
   return customFetch<DriverBooking>(`/bookings/${bookingId}`);
 }
 
-export function acceptBooking(bookingId: number): Promise<DriverBooking> {
-  return customFetch<DriverBooking>(`/bookings/${bookingId}/accept`, { method: "POST" });
+// Note: these trip-lifecycle endpoints return the RAW booking row (with
+// `priceQuoted`, not the driver-view `driverEarnings` substitution that
+// GET /bookings and GET /bookings/:id apply). The app never reads fields off
+// these mutation results directly — every screen re-fetches via useBooking()
+// after invalidation, which DOES get the driver-view shape — so this is only
+// typed as a minimal, accurate shape rather than the full DriverBooking.
+interface BookingActionResult {
+  id: number;
+  status: string;
+}
+
+export function acceptBooking(bookingId: number): Promise<BookingActionResult> {
+  return customFetch(`/bookings/${bookingId}/accept`, { method: "POST" });
 }
 
 export function postTripChecklist(bookingId: number): Promise<{ ok: true; checklistCompletedAt: string }> {
   return customFetch(`/bookings/${bookingId}/trip/checklist`, { method: "POST" });
 }
 
-export function postTripOnWay(bookingId: number): Promise<DriverBooking> {
-  return customFetch<DriverBooking>(`/bookings/${bookingId}/trip/on-way`, { method: "POST" });
+export function postTripOnWay(bookingId: number): Promise<BookingActionResult> {
+  return customFetch(`/bookings/${bookingId}/trip/on-way`, { method: "POST" });
 }
 
-export function postTripOnLocation(bookingId: number): Promise<DriverBooking> {
-  return customFetch<DriverBooking>(`/bookings/${bookingId}/trip/on-location`, { method: "POST" });
+export function postTripOnLocation(bookingId: number): Promise<BookingActionResult> {
+  return customFetch(`/bookings/${bookingId}/trip/on-location`, { method: "POST" });
 }
 
-export function postTripStart(bookingId: number): Promise<DriverBooking> {
-  return customFetch<DriverBooking>(`/bookings/${bookingId}/trip/start`, { method: "POST" });
+export function postTripStart(bookingId: number): Promise<BookingActionResult> {
+  return customFetch(`/bookings/${bookingId}/trip/start`, { method: "POST" });
 }
 
-export function postTripComplete(bookingId: number): Promise<DriverBooking> {
-  return customFetch<DriverBooking>(`/bookings/${bookingId}/trip/complete`, { method: "POST" });
+export function postTripComplete(bookingId: number): Promise<BookingActionResult> {
+  return customFetch(`/bookings/${bookingId}/trip/complete`, { method: "POST" });
 }
 
 export function getFlightStatus(bookingId: number): Promise<FlightStatus> {
@@ -185,8 +196,17 @@ export function listSupportTickets(): Promise<SupportTicket[]> {
   return customFetch<SupportTicket[]>(`/support`);
 }
 
-export function createSupportTicket(body: { subject: string; description: string }): Promise<SupportTicket> {
-  return customFetch<SupportTicket>(`/support`, { method: "POST", body: JSON.stringify(body) });
+export function createSupportTicket(body: {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  priority?: "low" | "medium" | "high" | "urgent";
+}): Promise<SupportTicket> {
+  return customFetch<SupportTicket>(`/support`, {
+    method: "POST",
+    body: JSON.stringify({ priority: "medium", ...body }),
+  });
 }
 
 export function listTicketMessages(ticketId: number): Promise<TicketMessage[]> {
