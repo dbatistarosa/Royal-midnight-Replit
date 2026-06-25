@@ -10,10 +10,16 @@ export interface QuoteResponse {
   vehicleClass: string;
   estimatedPrice: number;
   baseFare: number;
+  includedMiles: number;
+  billableMiles: number;
   distanceCharge: number;
   airportFee: number;
+  surgeAdjustment: number;
+  subtotal: number;
   taxRate: number;
   taxAmount: number;
+  cardProcessingFeeRate: number;
+  cardProcessingFee: number;
   totalWithTax: number;
   estimatedDuration: number;
   estimatedDistance: number;

@@ -12,6 +12,8 @@ export interface UpdatePricingRuleBody {
   /** @nullable */
   ratePerMile?: number | null;
   /** @nullable */
+  includedMiles?: number | null;
+  /** @nullable */
   airportSurcharge?: number | null;
   /** @nullable */
   isActive?: boolean | null;

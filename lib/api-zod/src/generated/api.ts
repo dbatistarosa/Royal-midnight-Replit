@@ -348,10 +348,16 @@ export const GetQuoteResponse = zod.object({
   vehicleClass: zod.string(),
   estimatedPrice: zod.number(),
   baseFare: zod.number(),
+  includedMiles: zod.number(),
+  billableMiles: zod.number(),
   distanceCharge: zod.number(),
   airportFee: zod.number(),
+  surgeAdjustment: zod.number(),
+  subtotal: zod.number(),
   taxRate: zod.number(),
   taxAmount: zod.number(),
+  cardProcessingFeeRate: zod.number(),
+  cardProcessingFee: zod.number(),
   totalWithTax: zod.number(),
   estimatedDuration: zod.number(),
   estimatedDistance: zod.number(),
@@ -1032,6 +1038,7 @@ export const ListPricingRulesResponseItem = zod.object({
   vehicleClass: zod.string().nullish(),
   baseFare: zod.number(),
   ratePerMile: zod.number(),
+  includedMiles: zod.number(),
   airportSurcharge: zod.number(),
   isActive: zod.boolean(),
   createdAt: zod.coerce.date(),
@@ -1046,6 +1053,7 @@ export const CreatePricingRuleBody = zod.object({
   vehicleClass: zod.string().nullish(),
   baseFare: zod.number(),
   ratePerMile: zod.number(),
+  includedMiles: zod.number().nullish(),
   airportSurcharge: zod.number(),
 });
 
@@ -1059,6 +1067,7 @@ export const UpdatePricingRuleParams = zod.object({
 export const UpdatePricingRuleBody = zod.object({
   baseFare: zod.number().nullish(),
   ratePerMile: zod.number().nullish(),
+  includedMiles: zod.number().nullish(),
   airportSurcharge: zod.number().nullish(),
   isActive: zod.boolean().nullish(),
 });
@@ -1069,6 +1078,7 @@ export const UpdatePricingRuleResponse = zod.object({
   vehicleClass: zod.string().nullish(),
   baseFare: zod.number(),
   ratePerMile: zod.number(),
+  includedMiles: zod.number(),
   airportSurcharge: zod.number(),
   isActive: zod.boolean(),
   createdAt: zod.coerce.date(),

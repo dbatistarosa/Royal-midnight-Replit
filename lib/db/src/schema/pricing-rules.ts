@@ -8,6 +8,7 @@ export const pricingRulesTable = pgTable("pricing_rules", {
   vehicleClass: text("vehicle_class"),
   baseFare: numeric("base_fare", { precision: 10, scale: 2 }).notNull(),
   ratePerMile: numeric("rate_per_mile", { precision: 10, scale: 2 }).notNull(),
+  includedMiles: numeric("included_miles", { precision: 10, scale: 1 }).notNull().default("0"),
   airportSurcharge: numeric("airport_surcharge", { precision: 10, scale: 2 }).notNull().default("15"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

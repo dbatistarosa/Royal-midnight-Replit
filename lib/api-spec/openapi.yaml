@@ -1547,13 +1547,25 @@ components:
           type: number
         baseFare:
           type: number
+        includedMiles:
+          type: number
+        billableMiles:
+          type: number
         distanceCharge:
           type: number
         airportFee:
           type: number
+        surgeAdjustment:
+          type: number
+        subtotal:
+          type: number
         taxRate:
           type: number
         taxAmount:
+          type: number
+        cardProcessingFeeRate:
+          type: number
+        cardProcessingFee:
           type: number
         totalWithTax:
           type: number
@@ -1567,7 +1579,7 @@ components:
           type: ["number", "null"]
         finalPrice:
           type: ["number", "null"]
-      required: [vehicleClass, estimatedPrice, baseFare, distanceCharge, airportFee, taxRate, taxAmount, totalWithTax, estimatedDuration, estimatedDistance, currency]
+      required: [vehicleClass, estimatedPrice, baseFare, includedMiles, billableMiles, distanceCharge, airportFee, surgeAdjustment, subtotal, taxRate, taxAmount, cardProcessingFeeRate, cardProcessingFee, totalWithTax, estimatedDuration, estimatedDistance, currency]
 
     # ── ADDRESS SCHEMAS ───────────────────────────────────────────────────────
     SavedAddress:
@@ -1814,6 +1826,8 @@ components:
           type: number
         ratePerMile:
           type: number
+        includedMiles:
+          type: number
         airportSurcharge:
           type: number
         isActive:
@@ -1821,7 +1835,7 @@ components:
         createdAt:
           type: string
           format: date-time
-      required: [id, name, baseFare, ratePerMile, airportSurcharge, isActive, createdAt]
+      required: [id, name, baseFare, ratePerMile, includedMiles, airportSurcharge, isActive, createdAt]
 
     CreatePricingRuleBody:
       type: object
@@ -1834,6 +1848,8 @@ components:
           type: number
         ratePerMile:
           type: number
+        includedMiles:
+          type: number
         airportSurcharge:
           type: number
       required: [name, baseFare, ratePerMile, airportSurcharge]
@@ -1844,6 +1860,8 @@ components:
         baseFare:
           type: ["number", "null"]
         ratePerMile:
+          type: ["number", "null"]
+        includedMiles:
           type: ["number", "null"]
         airportSurcharge:
           type: ["number", "null"]

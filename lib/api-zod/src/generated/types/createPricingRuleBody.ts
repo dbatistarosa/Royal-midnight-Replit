@@ -12,5 +12,7 @@ export interface CreatePricingRuleBody {
   vehicleClass?: string | null;
   baseFare: number;
   ratePerMile: number;
+  /** @nullable */
+  includedMiles?: number | null;
   airportSurcharge: number;
 }

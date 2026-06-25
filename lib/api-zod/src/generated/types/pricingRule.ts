@@ -13,6 +13,7 @@ export interface PricingRule {
   vehicleClass?: string | null;
   baseFare: number;
   ratePerMile: number;
+  includedMiles: number;
   airportSurcharge: number;
   isActive: boolean;
   createdAt: Date;

@@ -410,10 +410,16 @@ export interface QuoteResponse {
   vehicleClass: string;
   estimatedPrice: number;
   baseFare: number;
+  includedMiles: number;
+  billableMiles: number;
   distanceCharge: number;
   airportFee: number;
+  surgeAdjustment: number;
+  subtotal: number;
   taxRate: number;
   taxAmount: number;
+  cardProcessingFeeRate: number;
+  cardProcessingFee: number;
   totalWithTax: number;
   estimatedDuration: number;
   estimatedDistance: number;
@@ -645,6 +651,7 @@ export interface PricingRule {
   vehicleClass?: string | null;
   baseFare: number;
   ratePerMile: number;
+  includedMiles: number;
   airportSurcharge: number;
   isActive: boolean;
   createdAt: string;
@@ -656,6 +663,8 @@ export interface CreatePricingRuleBody {
   vehicleClass?: string | null;
   baseFare: number;
   ratePerMile: number;
+  /** @nullable */
+  includedMiles?: number | null;
   airportSurcharge: number;
 }
 
@@ -664,6 +673,8 @@ export interface UpdatePricingRuleBody {
   baseFare?: number | null;
   /** @nullable */
   ratePerMile?: number | null;
+  /** @nullable */
+  includedMiles?: number | null;
   /** @nullable */
   airportSurcharge?: number | null;
   /** @nullable */

@@ -15,6 +15,11 @@ export const DEFAULT_RATE_PER_MILE: Record<string, number> = {
   suv: 4.0,
 };
 
+export const DEFAULT_INCLUDED_MILES: Record<string, number> = {
+  business: 0,
+  suv: 0,
+};
+
 // Canonical airport addresses for resolving shortcodes passed from the frontend
 const AIRPORT_ADDRESSES: Record<string, string> = {
   FLL: "Fort Lauderdale-Hollywood International Airport, 100 Terminal Dr, Fort Lauderdale, FL 33315",
@@ -228,7 +233,7 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 
 /** Fetch active pricing rule for a given vehicle class from the DB.
  *  Falls back to hardcoded defaults if none found. */
-async function getPricingForClass(vc: string): Promise<{ baseFare: number; ratePerMile: number; airportFee: number }> {
+async function getPricingForClass(vc: string): Promise<{ baseFare: number; ratePerMile: number; includedMiles: number; airportFee: number }> {
   try {
     const [rule] = await db
       .select()
@@ -239,6 +244,7 @@ async function getPricingForClass(vc: string): Promise<{ baseFare: number; rateP
       return {
         baseFare: parseFloat(rule.baseFare ?? "0") || (DEFAULT_BASE_FARES[vc] ?? 35),
         ratePerMile: parseFloat(rule.ratePerMile ?? "0") || (DEFAULT_RATE_PER_MILE[vc] ?? 2.5),
+        includedMiles: parseFloat(rule.includedMiles ?? "0") || 0,
         airportFee: parseFloat(rule.airportSurcharge ?? "0") || 0,
       };
     }
@@ -249,6 +255,7 @@ async function getPricingForClass(vc: string): Promise<{ baseFare: number; rateP
   return {
     baseFare: DEFAULT_BASE_FARES[vc] ?? 35,
     ratePerMile: DEFAULT_RATE_PER_MILE[vc] ?? 2.5,
+    includedMiles: DEFAULT_INCLUDED_MILES[vc] ?? 0,
     airportFee: 0,
   };
 }
@@ -298,27 +305,36 @@ router.post("/quote", async (req, res): Promise<void> => {
   if (taxRate > 1) taxRate = taxRate / 100;
 
   // Get pricing rule from DB for this vehicle class
-  const { baseFare, ratePerMile, airportFee: ruleAirportFee } = await getPricingForClass(vc);
+  const { baseFare, ratePerMile, includedMiles: ruleIncludedMiles, airportFee: ruleAirportFee } = await getPricingForClass(vc);
 
   let distanceCharge: number;
   let estimatedDistance: number;
   let estimatedDuration: number;
+  let includedMiles: number;
+  let billableMiles: number;
 
   if (charterMode === "hourly" && charterHours > 0) {
-    // Hourly charter — price is time-based, not distance-based
+    // Hourly charter — price is time-based, not distance-based, so the
+    // included-miles allowance (which is mileage pricing) doesn't apply.
     const hourlyRate = HOURLY_RATES[vc] ?? baseFare * 1.5;
     distanceCharge = Math.round((hourlyRate * charterHours - baseFare) * 100) / 100;
     if (distanceCharge < 0) distanceCharge = 0;
     // For display purposes, estimate ~25 mph average city speed
     estimatedDistance = charterHours * 25;
     estimatedDuration = charterHours * 60;
+    includedMiles = 0;
+    billableMiles = 0;
   } else {
     // Route-based (single or multi-stop)
     const mapsResult = await getDirectionsDistance(pickupAddress, dropoffAddress, waypoints.length > 0 ? waypoints : undefined);
     const fallback = fallbackDistance(pickupAddress, dropoffAddress);
     estimatedDistance = mapsResult?.distance ?? fallback.distance;
     estimatedDuration = mapsResult?.duration ?? fallback.duration;
-    distanceCharge = Math.round(estimatedDistance * ratePerMile * 100) / 100;
+    includedMiles = ruleIncludedMiles;
+    // Base fare already covers the first `includedMiles` miles — only the
+    // remainder is billed at the per-mile rate.
+    billableMiles = Math.round(Math.max(0, estimatedDistance - includedMiles) * 10) / 10;
+    distanceCharge = Math.round(billableMiles * ratePerMile * 100) / 100;
   }
 
   // Airport fee: apply from pricing rule if either endpoint is an airport
@@ -331,18 +347,35 @@ router.post("/quote", async (req, res): Promise<void> => {
 
   const subtotalBeforeZone = Math.round((baseFare + distanceCharge + airportFee) * 100) / 100;
   const subtotal = Math.round(subtotalBeforeZone * zoneMultiplier * 100) / 100;
+  // Any difference from the zone multiplier, called out as its own line so
+  // nothing is folded silently into the subtotal.
+  const surgeAdjustment = Math.round((subtotal - subtotalBeforeZone) * 100) / 100;
   const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
-  const totalWithTax = Math.round((subtotal + taxAmount) * 100) / 100;
+
+  // Card processing fee, passed through to the customer and shown as its
+  // own line item (admin-configurable via the `cc_fee_pct` setting).
+  const ccFeeRateStr = await getSetting("cc_fee_pct", "0");
+  let cardProcessingFeeRate = parseFloat(ccFeeRateStr);
+  if (cardProcessingFeeRate > 1) cardProcessingFeeRate = cardProcessingFeeRate / 100;
+  const cardProcessingFee = Math.round((subtotal + taxAmount) * cardProcessingFeeRate * 100) / 100;
+
+  const totalWithTax = Math.round((subtotal + taxAmount + cardProcessingFee) * 100) / 100;
 
   res.json(
     GetQuoteResponse.parse({
       vehicleClass: vc,
       estimatedPrice: subtotal,
       baseFare,
+      includedMiles,
+      billableMiles,
       distanceCharge,
       airportFee,
+      surgeAdjustment,
+      subtotal,
       taxRate,
       taxAmount,
+      cardProcessingFeeRate,
+      cardProcessingFee,
       totalWithTax,
       estimatedDuration,
       estimatedDistance,

@@ -29,6 +29,7 @@ type PricingRule = {
   vehicleClass?: string | null;
   baseFare: number;
   ratePerMile: number;
+  includedMiles: number;
   airportSurcharge: number;
   isActive: boolean;
 };
@@ -38,10 +39,11 @@ type FormData = {
   vehicleClass: string;
   baseFare: string;
   ratePerMile: string;
+  includedMiles: string;
   airportSurcharge: string;
 };
 
-const EMPTY: FormData = { name: "", vehicleClass: "", baseFare: "", ratePerMile: "", airportSurcharge: "" };
+const EMPTY: FormData = { name: "", vehicleClass: "", baseFare: "", ratePerMile: "", includedMiles: "0", airportSurcharge: "" };
 const LABEL = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const INPUT = "bg-white/5 border-white/10 text-white rounded-none h-10 text-sm";
 
@@ -94,7 +96,7 @@ export default function AdminPricing() {
   const openCreate = () => { setEditRule(null); setForm(EMPTY); setModalOpen(true); };
   const openEdit = (r: PricingRule) => {
     setEditRule(r);
-    setForm({ name: r.name, vehicleClass: r.vehicleClass ?? "", baseFare: String(r.baseFare), ratePerMile: String(r.ratePerMile), airportSurcharge: String(r.airportSurcharge) });
+    setForm({ name: r.name, vehicleClass: r.vehicleClass ?? "", baseFare: String(r.baseFare), ratePerMile: String(r.ratePerMile), includedMiles: String(r.includedMiles), airportSurcharge: String(r.airportSurcharge) });
     setModalOpen(true);
   };
 
@@ -109,12 +111,13 @@ export default function AdminPricing() {
     }
     setSaving(true);
     try {
-      // PATCH only accepts baseFare, ratePerMile, airportSurcharge, isActive
-      // POST accepts name, vehicleClass, baseFare, ratePerMile, airportSurcharge
+      // PATCH only accepts baseFare, ratePerMile, includedMiles, airportSurcharge, isActive
+      // POST accepts name, vehicleClass, baseFare, ratePerMile, includedMiles, airportSurcharge
       const body = editRule
         ? {
             baseFare: parseFloat(form.baseFare),
             ratePerMile: parseFloat(form.ratePerMile),
+            includedMiles: parseFloat(form.includedMiles || "0"),
             airportSurcharge: parseFloat(form.airportSurcharge),
           }
         : {
@@ -122,6 +125,7 @@ export default function AdminPricing() {
             vehicleClass: form.vehicleClass || null,
             baseFare: parseFloat(form.baseFare),
             ratePerMile: parseFloat(form.ratePerMile),
+            includedMiles: parseFloat(form.includedMiles || "0"),
             airportSurcharge: parseFloat(form.airportSurcharge),
           };
       const res = editRule
@@ -170,6 +174,7 @@ export default function AdminPricing() {
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Class</th>
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Base Fare</th>
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Per Mile</th>
+                <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Included Mi.</th>
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Airport</th>
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Status</th>
                 <th className="px-5 py-4 font-medium text-muted-foreground uppercase tracking-widest text-xs">Actions</th>
@@ -177,17 +182,18 @@ export default function AdminPricing() {
             </thead>
             <tbody className="divide-y divide-border">
               {isLoading ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-muted-foreground">
+                <tr><td colSpan={8} className="px-5 py-10 text-center text-muted-foreground">
                   <Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading...
                 </td></tr>
               ) : !rules.length ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-muted-foreground">No pricing rules found.</td></tr>
+                <tr><td colSpan={8} className="px-5 py-10 text-center text-muted-foreground">No pricing rules found.</td></tr>
               ) : rules.map(r => (
                 <tr key={r.id} className="hover:bg-background/50 transition-colors">
                   <td className="px-5 py-4 font-medium">{r.name}</td>
                   <td className="px-5 py-4 capitalize text-muted-foreground">{r.vehicleClass?.replace("_", " ") || "All"}</td>
                   <td className="px-5 py-4">${r.baseFare.toFixed(2)}</td>
                   <td className="px-5 py-4">${r.ratePerMile.toFixed(2)}</td>
+                  <td className="px-5 py-4">{r.includedMiles.toFixed(1)} mi</td>
                   <td className="px-5 py-4">${r.airportSurcharge.toFixed(2)}</td>
                   <td className="px-5 py-4">
                     <span className={r.isActive ? "text-green-400 text-xs" : "text-muted-foreground text-xs"}>{r.isActive ? "Active" : "Inactive"}</span>
@@ -239,14 +245,19 @@ export default function AdminPricing() {
               Editing fares for: <strong className="text-white">{editRule.name}</strong>
             </div>
           )}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={LABEL}>Base Fare ($) *</label>
               <Input type="number" step="0.01" value={form.baseFare} onChange={e => setField("baseFare", e.target.value)} className={INPUT} placeholder="55.00" />
             </div>
             <div>
+              <label className={LABEL}>Included Miles</label>
+              <Input type="number" step="0.1" value={form.includedMiles} onChange={e => setField("includedMiles", e.target.value)} className={INPUT} placeholder="0" />
+            </div>
+            <div>
               <label className={LABEL}>Per Mile ($) *</label>
               <Input type="number" step="0.01" value={form.ratePerMile} onChange={e => setField("ratePerMile", e.target.value)} className={INPUT} placeholder="3.50" />
+              <p className="text-[11px] text-muted-foreground mt-1">Charged only on miles beyond "Included Miles".</p>
             </div>
             <div>
               <label className={LABEL}>Airport Surcharge ($) *</label>

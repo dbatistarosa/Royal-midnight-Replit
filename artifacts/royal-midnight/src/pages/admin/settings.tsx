@@ -67,7 +67,7 @@ const SETTING_FIELDS: SettingField[] = [
   {
     key: "cc_fee_pct",
     label: "Credit Card Processing Fee",
-    description: "Percentage charged on top of subtotal + taxes to cover Stripe/card processing costs (e.g., 3 means 3%). Used in financial reports.",
+    description: "Percentage charged to the customer on top of subtotal + taxes to cover Stripe/card processing costs (e.g., 3 means 3%). Shown as its own line item in the booking summary before payment, and used in financial reports.",
     suffix: "%",
     min: 0,
     max: 10,

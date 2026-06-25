@@ -18,6 +18,7 @@ function parseRule(r: typeof pricingRulesTable.$inferSelect) {
     ...r,
     baseFare: parseFloat(r.baseFare ?? "0"),
     ratePerMile: parseFloat(r.ratePerMile ?? "0"),
+    includedMiles: parseFloat(r.includedMiles ?? "0"),
     airportSurcharge: parseFloat(r.airportSurcharge ?? "0"),
     createdAt: r.createdAt.toISOString(),
   };
@@ -41,6 +42,7 @@ router.post("/pricing", requireAdmin, async (req, res): Promise<void> => {
       ...parsed.data,
       baseFare: String(parsed.data.baseFare),
       ratePerMile: String(parsed.data.ratePerMile),
+      includedMiles: String(parsed.data.includedMiles ?? 0),
       airportSurcharge: String(parsed.data.airportSurcharge),
     })
     .returning();
@@ -64,6 +66,7 @@ router.patch("/pricing/:id", requireAdmin, async (req, res): Promise<void> => {
   const updateData: Record<string, unknown> = {};
   if (parsed.data.baseFare != null) updateData.baseFare = String(parsed.data.baseFare);
   if (parsed.data.ratePerMile != null) updateData.ratePerMile = String(parsed.data.ratePerMile);
+  if (parsed.data.includedMiles != null) updateData.includedMiles = String(parsed.data.includedMiles);
   if (parsed.data.airportSurcharge != null) updateData.airportSurcharge = String(parsed.data.airportSurcharge);
   if (parsed.data.isActive != null) updateData.isActive = parsed.data.isActive;
 

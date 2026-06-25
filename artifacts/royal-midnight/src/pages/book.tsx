@@ -43,9 +43,16 @@ type BookingFormValues = z.infer<typeof bookingSchema>;
 interface QuoteResult {
   vehicleClass: string;
   baseFare: number;
+  includedMiles: number;
+  billableMiles: number;
   distanceCharge: number;
+  airportFee: number;
+  surgeAdjustment: number;
+  subtotal: number;
   taxRate: number;
   taxAmount: number;
+  cardProcessingFeeRate: number;
+  cardProcessingFee: number;
   totalWithTax: number;
   estimatedDistance: number;
   estimatedDuration: number;
@@ -70,6 +77,50 @@ const VEHICLE_INFO = {
     class: "CLASS 2",
   },
 };
+
+/** Itemized price breakdown — used in both the vehicle-selection cards and
+ *  the final review/payment summary so every fee is visible before paying. */
+function PriceBreakdownLines({ quote, isHourly }: { quote: QuoteResult; isHourly: boolean }) {
+  return (
+    <>
+      <div className="flex justify-between items-center text-gray-500">
+        <span>Base fare{!isHourly && quote.includedMiles > 0 ? ` (includes ${quote.includedMiles.toFixed(1)} mi)` : ""}</span>
+        <span className="text-gray-300">${quote.baseFare.toFixed(2)}</span>
+      </div>
+      <div className="flex justify-between items-center text-gray-500">
+        <span>{isHourly ? "Hourly charge" : `Extra miles (${quote.billableMiles.toFixed(1)} mi)`}</span>
+        <span className="text-gray-300">${quote.distanceCharge.toFixed(2)}</span>
+      </div>
+      {quote.airportFee > 0 && (
+        <div className="flex justify-between items-center text-gray-500">
+          <span>Airport fee</span>
+          <span className="text-gray-300">${quote.airportFee.toFixed(2)}</span>
+        </div>
+      )}
+      {quote.surgeAdjustment !== 0 && (
+        <div className="flex justify-between items-center text-gray-500">
+          <span>Peak/zone adjustment</span>
+          <span className="text-gray-300">${quote.surgeAdjustment.toFixed(2)}</span>
+        </div>
+      )}
+      <div className="h-px bg-white/8 my-1" />
+      <div className="flex justify-between items-center text-gray-500">
+        <span>Subtotal</span>
+        <span className="text-gray-300">${quote.subtotal.toFixed(2)}</span>
+      </div>
+      <div className="flex justify-between items-center text-gray-500">
+        <span>Florida tax ({(quote.taxRate * 100).toFixed(0)}%)</span>
+        <span className="text-gray-300">${quote.taxAmount.toFixed(2)}</span>
+      </div>
+      {quote.cardProcessingFee > 0 && (
+        <div className="flex justify-between items-center text-gray-500">
+          <span>Card processing fee ({(quote.cardProcessingFeeRate * 100).toFixed(1)}%)</span>
+          <span className="text-gray-300">${quote.cardProcessingFee.toFixed(2)}</span>
+        </div>
+      )}
+    </>
+  );
+}
 
 const STEPS = [
   { num: 1, label: "Trip Details" },
@@ -331,9 +382,16 @@ export default function Book() {
         newQuotes.business = {
           vehicleClass: r.vehicleClass,
           baseFare: r.baseFare,
+          includedMiles: (r as any).includedMiles ?? 0,
+          billableMiles: (r as any).billableMiles ?? r.estimatedDistance,
           distanceCharge: r.distanceCharge,
+          airportFee: (r as any).airportFee ?? 0,
+          surgeAdjustment: (r as any).surgeAdjustment ?? 0,
+          subtotal: (r as any).subtotal ?? r.estimatedPrice,
           taxRate: (r as any).taxRate ?? 0.07,
           taxAmount: (r as any).taxAmount ?? 0,
+          cardProcessingFeeRate: (r as any).cardProcessingFeeRate ?? 0,
+          cardProcessingFee: (r as any).cardProcessingFee ?? 0,
           totalWithTax: (r as any).totalWithTax ?? r.estimatedPrice,
           estimatedDistance: r.estimatedDistance,
           estimatedDuration: r.estimatedDuration,
@@ -347,9 +405,16 @@ export default function Book() {
         newQuotes.suv = {
           vehicleClass: r.vehicleClass,
           baseFare: r.baseFare,
+          includedMiles: (r as any).includedMiles ?? 0,
+          billableMiles: (r as any).billableMiles ?? r.estimatedDistance,
           distanceCharge: r.distanceCharge,
+          airportFee: (r as any).airportFee ?? 0,
+          surgeAdjustment: (r as any).surgeAdjustment ?? 0,
+          subtotal: (r as any).subtotal ?? r.estimatedPrice,
           taxRate: (r as any).taxRate ?? 0.07,
           taxAmount: (r as any).taxAmount ?? 0,
+          cardProcessingFeeRate: (r as any).cardProcessingFeeRate ?? 0,
+          cardProcessingFee: (r as any).cardProcessingFee ?? 0,
           totalWithTax: (r as any).totalWithTax ?? r.estimatedPrice,
           estimatedDistance: r.estimatedDistance,
           estimatedDuration: r.estimatedDuration,
@@ -1165,30 +1230,14 @@ export default function Book() {
                         {quote ? (
                           <div className={`border-t md:border-t-0 md:border-l ${isSelected ? "border-primary/20 bg-[#0d0b04]" : "border-white/8 bg-[#060606]"} p-6 sm:p-8 md:p-10 flex flex-col justify-between`}>
                             <div className="space-y-3 text-sm">
-                              <div className="flex justify-between items-center text-gray-500">
-                                <span>Base fare</span>
-                                <span className="text-gray-300">${quote.baseFare.toFixed(2)}</span>
-                              </div>
-                              <div className="flex justify-between items-center text-gray-500">
-                                <span>Distance ({quote.estimatedDistance.toFixed(1)} mi)</span>
-                                <span className="text-gray-300">${quote.distanceCharge.toFixed(2)}</span>
-                              </div>
-                              <div className="h-px bg-white/8 my-1" />
-                              <div className="flex justify-between items-center text-gray-500">
-                                <span>Subtotal</span>
-                                <span className="text-gray-300">${(quote.baseFare + quote.distanceCharge).toFixed(2)}</span>
-                              </div>
-                              <div className="flex justify-between items-center text-gray-500">
-                                <span>Florida tax ({(quote.taxRate * 100).toFixed(0)}%)</span>
-                                <span className="text-gray-300">${quote.taxAmount.toFixed(2)}</span>
-                              </div>
+                              <PriceBreakdownLines quote={quote} isHourly={charterMode === "hourly"} />
                             </div>
                             <div className="mt-5 pt-4 border-t border-white/10">
                               <p className="text-[10px] uppercase tracking-widest text-gray-600 mb-1">Total</p>
                               <p className={`text-3xl sm:text-4xl font-serif transition-colors ${isSelected ? "text-primary" : "text-white"}`}>
                                 ${quote.totalWithTax.toFixed(2)}
                               </p>
-                              <p className="text-xs text-gray-700 mt-1">All inclusive</p>
+                              <p className="text-xs text-gray-700 mt-1">All inclusive — no hidden fees</p>
                             </div>
                           </div>
                         ) : (
@@ -1283,6 +1332,12 @@ export default function Book() {
                         <p className="text-sm text-gray-400 italic">{form.getValues("specialRequests")}</p>
                       </div>
                     )}
+
+                    {/* Price breakdown — every fee disclosed before payment */}
+                    <div className="border-t border-white/8 pt-5 space-y-3 text-sm">
+                      <p className="text-[10px] uppercase tracking-widest text-gray-600">Price Breakdown</p>
+                      <PriceBreakdownLines quote={selectedQuote} isHourly={charterMode === "hourly"} />
+                    </div>
 
                     {/* Total */}
                     <div className="border-t border-white/8 pt-5">
