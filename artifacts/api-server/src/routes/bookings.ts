@@ -421,6 +421,10 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
 
   const caller = req.currentUser;
   const isCorporate = parsed.data.paymentType === "corporate_account";
+  // A promo code can discount a booking down to $0 — there's no card to charge,
+  // so skip the awaiting_payment/Stripe step entirely and drop it straight into
+  // the same "pending" state a successfully-paid booking reaches.
+  const isFreeBooking = !isCorporate && parsed.data.priceQuoted <= 0;
 
   if (isCorporate) {
     if (!caller || (caller.role !== "corporate" && caller.role !== "admin")) {
@@ -441,8 +445,10 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       priceQuoted: String(parsed.data.priceQuoted),
       discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
       paymentType: parsed.data.paymentType ?? "standard",
-      // Corporate bookings are confirmed immediately — all others (including admin-manual) await payment
-      status: isCorporate ? "confirmed" : "awaiting_payment",
+      // Corporate bookings are confirmed immediately; fully-discounted bookings skip
+      // payment and go straight to pending (open driver pool). Everyone else
+      // (including admin-manual) awaits payment.
+      status: isCorporate ? "confirmed" : isFreeBooking ? "pending" : "awaiting_payment",
     })
     .returning();
 
@@ -509,8 +515,8 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       .catch(err => console.error("[bookings] promoCode usedCount increment failed:", err));
   }
 
-  // Corporate bookings: fire emails immediately since no payment step
-  if (isCorporate) {
+  // Corporate and fully-discounted bookings: fire emails immediately since there's no payment step
+  if (isCorporate || isFreeBooking) {
     (async () => {
       try {
         const parsed2 = parseBooking(booking);
@@ -538,7 +544,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
           .where(and(eq(driversTable.status, "available"), eq(driversTable.complianceHold, false)));
         await sendNewRideOfferPush(pushableDrivers, { id: booking.id, pickupAddress: booking.pickupAddress, driverEarnings });
       } catch (err) {
-        console.error("[bookings] corporate post-create email error:", err);
+        console.error("[bookings] post-create email error:", err);
       }
     })();
   }

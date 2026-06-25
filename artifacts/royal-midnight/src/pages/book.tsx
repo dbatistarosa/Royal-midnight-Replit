@@ -534,6 +534,16 @@ export default function Book() {
         sessionStorage.setItem("rm_pending_booking_id", String(bookingId));
       }
 
+      // A 100%-off promo code can bring the total to $0 — there's no card to charge.
+      // The booking was already created server-side as "pending" (no awaiting_payment
+      // step), so skip Stripe entirely and go straight to the confirmation page.
+      if (effectiveTotal <= 0) {
+        sessionStorage.removeItem("rm_pending_booking_id");
+        setLocation(`/booking-confirmation/${bookingId}`);
+        setIsConfirming(false);
+        return;
+      }
+
       // Build the 3DS return URL — confirmation page handles the redirect_status params from Stripe.
       const baseUrl = `${window.location.origin}${(import.meta.env.BASE_URL ?? "/").replace(/\/$/, "")}`;
       const confirmationReturnUrl = `${baseUrl}/booking-confirmation/${bookingId}`;

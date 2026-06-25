@@ -85,12 +85,12 @@ export default function AdminPromos() {
 
   const refetch = useCallback(() => {
     setIsLoading(true);
-    fetch(`${API_BASE}/promos`)
+    fetch(`${API_BASE}/promos`, { headers: { Authorization: authHdr } })
       .then(r => r.ok ? r.json() as Promise<Promo[]> : Promise.resolve([]))
       .then(data => setPromos(Array.isArray(data) ? data : []))
       .catch(() => setPromos([]))
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [authHdr]);
 
   useEffect(() => { refetch(); }, [refetch]);
 
