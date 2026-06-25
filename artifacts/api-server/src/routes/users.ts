@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, or, and, isNull } from "drizzle-orm";
+import { eq, desc, or, and, isNull, isNotNull, inArray } from "drizzle-orm";
 import { db, usersTable, bookingsTable, userFavoriteDriversTable, driversTable, managedTravelersTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { ensureUniqueReferralCode, fetchReferralCreditAmount } from "../lib/referrals.js";
@@ -218,6 +218,79 @@ router.get("/users/:id/referral", requireAuth, async (req, res): Promise<void> =
     creditAmount,
     referredCount: referredUsers.length,
     rewardedCount: referredUsers.filter(r => r.rewardedAt != null).length,
+  });
+});
+
+// GET /admin/affiliates — every referral relationship, for admin oversight of the referral program
+router.get("/admin/affiliates", requireAdmin, async (_req, res): Promise<void> => {
+  const referredRows = await db
+    .select({
+      refereeId: usersTable.id,
+      refereeName: usersTable.name,
+      refereeEmail: usersTable.email,
+      refereeCreatedAt: usersTable.createdAt,
+      referrerId: usersTable.referredByUserId,
+      rewardedAt: usersTable.referralRewardedAt,
+    })
+    .from(usersTable)
+    .where(isNotNull(usersTable.referredByUserId))
+    .orderBy(desc(usersTable.createdAt));
+
+  const referrerIds = [...new Set(referredRows.map(r => r.referrerId).filter((id): id is number => id != null))];
+  const referrers = referrerIds.length
+    ? await db
+        .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, referralCode: usersTable.referralCode })
+        .from(usersTable)
+        .where(inArray(usersTable.id, referrerIds))
+    : [];
+  const referrerById = new Map(referrers.map(r => [r.id, r]));
+
+  const creditAmount = await fetchReferralCreditAmount();
+
+  const referrals = referredRows.map(r => {
+    const referrer = r.referrerId != null ? referrerById.get(r.referrerId) : undefined;
+    return {
+      refereeId: r.refereeId,
+      refereeName: r.refereeName,
+      refereeEmail: r.refereeEmail,
+      refereeCreatedAt: r.refereeCreatedAt.toISOString(),
+      referrerId: r.referrerId,
+      referrerName: referrer?.name ?? "Unknown",
+      referrerEmail: referrer?.email ?? "",
+      referrerCode: referrer?.referralCode ?? null,
+      rewarded: r.rewardedAt != null,
+      rewardedAt: r.rewardedAt ? r.rewardedAt.toISOString() : null,
+    };
+  });
+
+  const byReferrer = new Map<number, { referrerId: number; referrerName: string; referrerEmail: string; referralCode: string | null; referredCount: number; rewardedCount: number }>();
+  for (const r of referrals) {
+    if (r.referrerId == null) continue;
+    const entry = byReferrer.get(r.referrerId) ?? {
+      referrerId: r.referrerId,
+      referrerName: r.referrerName,
+      referrerEmail: r.referrerEmail,
+      referralCode: r.referrerCode,
+      referredCount: 0,
+      rewardedCount: 0,
+    };
+    entry.referredCount += 1;
+    if (r.rewarded) entry.rewardedCount += 1;
+    byReferrer.set(r.referrerId, entry);
+  }
+
+  const rewardedCount = referrals.filter(r => r.rewarded).length;
+
+  res.json({
+    creditAmount,
+    totals: {
+      totalReferrers: byReferrer.size,
+      totalReferred: referrals.length,
+      totalRewarded: rewardedCount,
+      totalRewardedAmount: Math.round(rewardedCount * creditAmount * 100) / 100,
+    },
+    topReferrers: [...byReferrer.values()].sort((a, b) => b.referredCount - a.referredCount),
+    referrals,
   });
 });
 

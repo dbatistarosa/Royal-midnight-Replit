@@ -6,7 +6,7 @@ import { generateReportPdf } from "@/lib/generateReportPdf";
 import {
   LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare,
   BarChart, Settings, TrendingUp, TrendingDown, CheckCircle, Wallet, FileDown,
-  Loader2, CreditCard, Building2, Receipt,
+  Loader2, CreditCard, Building2, Receipt, Gift,
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import {
@@ -23,6 +23,7 @@ const adminNavItems = [
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
   { label: "Promos", href: "/admin/promos", icon: Tag },
+  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
   { label: "Payouts", href: "/admin/payouts", icon: Wallet },

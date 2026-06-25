@@ -3,7 +3,7 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { STATUS_COLORS } from "@/lib/constants";
 import { format } from "date-fns";
-import { Loader2, Users, Car, DollarSign, Calendar, Activity, Map, Tag, MessageSquare, BarChart, LayoutDashboard, Settings, Wallet } from "lucide-react";
+import { Loader2, Users, Car, DollarSign, Calendar, Activity, Map, Tag, MessageSquare, BarChart, LayoutDashboard, Settings, Wallet, Gift } from "lucide-react";
 import { Link } from "wouter";
 
 const adminNavItems = [
@@ -15,6 +15,7 @@ const adminNavItems = [
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
   { label: "Promos", href: "/admin/promos", icon: Tag },
+  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
   { label: "Payouts", href: "/admin/payouts", icon: Wallet },

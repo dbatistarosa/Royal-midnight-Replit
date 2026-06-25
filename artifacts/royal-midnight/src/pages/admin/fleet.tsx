@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag,
   MessageSquare, BarChart, Settings, Loader2, CheckCircle, XCircle,
   Wallet, Plus, Trash2, X, ChevronDown, AlertTriangle, ShieldAlert,
-  Mail, Clock, ExternalLink, Lock, Unlock,
+  Mail, Clock, ExternalLink, Lock, Unlock, Gift,
 } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -21,6 +21,7 @@ const adminNavItems = [
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
   { label: "Promos", href: "/admin/promos", icon: Tag },
+  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
   { label: "Payouts", href: "/admin/payouts", icon: Wallet },

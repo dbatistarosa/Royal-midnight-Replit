@@ -5,7 +5,7 @@ import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
 import { format } from "date-fns";
-import { Loader2, Save, Settings, LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, UserPlus, CheckCircle2, Building2, Webhook, Mail, AlertTriangle, RefreshCw, Copy, ExternalLink, Wallet } from "lucide-react";
+import { Loader2, Save, Settings, LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, UserPlus, CheckCircle2, Building2, Webhook, Mail, AlertTriangle, RefreshCw, Copy, ExternalLink, Wallet, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,7 @@ const adminNavItems = [
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
   { label: "Promos", href: "/admin/promos", icon: Tag },
+  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
   { label: "Payouts", href: "/admin/payouts", icon: Wallet },

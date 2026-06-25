@@ -68,6 +68,7 @@ import AdminDispatch from "@/pages/admin/dispatch";
 import AdminDriverApp from "@/pages/admin/driver-app";
 import AdminPricing from "@/pages/admin/pricing";
 import AdminPromos from "@/pages/admin/promos";
+import AdminAffiliates from "@/pages/admin/affiliates";
 import AdminSupport from "@/pages/admin/support";
 import AdminReports from "@/pages/admin/reports";
 import AdminSettings from "@/pages/admin/settings";
@@ -310,6 +311,9 @@ function Router() {
       </Route>
       <Route path="/admin/promos">
         <AdminRoute component={AdminPromos} />
+      </Route>
+      <Route path="/admin/affiliates">
+        <AdminRoute component={AdminAffiliates} />
       </Route>
       <Route path="/admin/support">
         <AdminRoute component={AdminSupport} />

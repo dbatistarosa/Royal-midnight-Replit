@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Wallet, Smartphone } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Wallet, Smartphone, Gift } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { API_BASE } from "@/lib/constants";
 
@@ -14,6 +14,7 @@ const adminNavItems = [
   { label: "Driver App", href: "/admin/driver-app", icon: Smartphone },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
   { label: "Promos", href: "/admin/promos", icon: Tag },
+  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
   { label: "Payouts", href: "/admin/payouts", icon: Wallet },

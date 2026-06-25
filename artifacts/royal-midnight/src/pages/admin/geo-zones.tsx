@@ -3,7 +3,7 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import {
   LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag,
   MessageSquare, BarChart, Settings, Wallet, MapPin, Plus, Pencil,
-  Trash2, X, ToggleLeft, ToggleRight, Loader2,
+  Trash2, X, ToggleLeft, ToggleRight, Loader2, Gift,
 } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -19,6 +19,7 @@ const adminNavItems = [
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
   { label: "Geo Zones", href: "/admin/geo-zones", icon: MapPin },
   { label: "Promos", href: "/admin/promos", icon: Tag },
+  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
   { label: "Payouts", href: "/admin/payouts", icon: Wallet },

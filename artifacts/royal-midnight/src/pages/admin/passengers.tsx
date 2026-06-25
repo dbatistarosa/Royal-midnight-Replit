@@ -1,6 +1,6 @@
 import { useListUsers } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Wallet, Shield, ChevronDown, ChevronUp, Save, X } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Wallet, Shield, ChevronDown, ChevronUp, Save, X, Gift } from "lucide-react";
 import { format } from "date-fns";
 import { useState } from "react";
 import { useAuth } from "@/contexts/auth";
@@ -16,6 +16,7 @@ const adminNavItems = [
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
   { label: "Promos", href: "/admin/promos", icon: Tag },
+  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
   { label: "Payouts", href: "/admin/payouts", icon: Wallet },
