@@ -42,7 +42,7 @@ export default function Fleet() {
               </div>
 
               <div className="w-full md:w-2/5">
-                <h3 className="text-primary text-sm uppercase tracking-widest mb-4 border-b border-primary/30 pb-2 inline-block">Class {idx + 1}</h3>
+                <h3 className="text-primary text-sm uppercase tracking-widest mb-4 border-b border-primary/30 pb-2 inline-block">{vehicle.category}</h3>
                 <h2 className="text-2xl sm:text-4xl font-serif text-white mb-4 sm:mb-6">{vehicle.name}</h2>
                 <p className="text-gray-400 text-base sm:text-lg mb-6 sm:mb-8 leading-relaxed">
                   {vehicle.description} Perfect for airport transfers, executive road shows, or a discrete night out.

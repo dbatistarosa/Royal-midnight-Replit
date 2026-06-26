@@ -65,7 +65,7 @@ const VEHICLE_INFO = {
     description: "Elevated executive comfort for the discerning professional. Professional chauffeur, premium amenities.",
     maxPassengers: 3,
     maxBags: 3,
-    class: "CLASS 1",
+    class: "SEDAN",
   },
   suv: {
     name: "Premium SUV",
@@ -74,7 +74,7 @@ const VEHICLE_INFO = {
     description: "Commanding presence and expansive cabin for groups and families. Maximum space with no compromise on luxury.",
     maxPassengers: 6,
     maxBags: 6,
-    class: "CLASS 2",
+    class: "SUV",
   },
 };
 

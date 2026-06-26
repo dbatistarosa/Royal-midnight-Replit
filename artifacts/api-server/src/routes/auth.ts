@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import rateLimit from "express-rate-limit";
 import { eq } from "drizzle-orm";
 import { db, usersTable, driversTable, sessionsTable, passwordResetTokensTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
@@ -13,6 +14,25 @@ import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/refer
 const router: IRouter = Router();
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+// Throttle credential-guessing / account-creation abuse. Keyed by IP (express-rate-limit default).
+const credentialLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts. Please try again later." },
+});
+
+// Tighter limit for OTP send/verify — SMS has a real per-message cost and a 6-digit
+// code is brute-forceable within minutes without this.
+const otpLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many OTP requests. Please try again later." },
+});
 
 function generateToken(_userId: number): string {
   return crypto.randomBytes(32).toString("hex");
@@ -29,7 +49,7 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-router.post("/auth/register", async (req, res): Promise<void> => {
+router.post("/auth/register", credentialLimiter, async (req, res): Promise<void> => {
   const parsed = RegisterBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -103,7 +123,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/auth/login", async (req, res): Promise<void> => {
+router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> => {
   const parsed = LoginBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -146,7 +166,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/auth/send-otp", async (req, res): Promise<void> => {
+router.post("/auth/send-otp", otpLimiter, async (req, res): Promise<void> => {
   const parsed = SendOtpBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -162,7 +182,7 @@ router.post("/auth/send-otp", async (req, res): Promise<void> => {
   res.json({ message: "OTP sent successfully" });
 });
 
-router.post("/auth/verify-otp", async (req, res): Promise<void> => {
+router.post("/auth/verify-otp", otpLimiter, async (req, res): Promise<void> => {
   const parsed = VerifyOtpBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -230,7 +250,7 @@ const DriverRegisterBody = z.object({
   profilePicture: z.string().optional(),
 });
 
-router.post("/auth/driver-register", async (req, res): Promise<void> => {
+router.post("/auth/driver-register", credentialLimiter, async (req, res): Promise<void> => {
   const parsed = DriverRegisterBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -396,7 +416,7 @@ router.get("/auth/corporate-accounts", requireAdmin, async (req, res): Promise<v
 });
 
 // POST /auth/forgot-password — generate reset token and return link
-router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+router.post("/auth/forgot-password", credentialLimiter, async (req, res): Promise<void> => {
   const email = (req.body?.email as string | undefined)?.trim().toLowerCase();
   if (!email) {
     res.status(400).json({ error: "email is required" });
@@ -426,7 +446,7 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
 });
 
 // POST /auth/reset-password — validate token and set new password
-router.post("/auth/reset-password", async (req, res): Promise<void> => {
+router.post("/auth/reset-password", credentialLimiter, async (req, res): Promise<void> => {
   const token = (req.body?.token as string | undefined)?.trim();
   const password = (req.body?.password as string | undefined);
 

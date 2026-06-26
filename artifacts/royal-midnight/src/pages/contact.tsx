@@ -90,7 +90,7 @@ export default function Contact() {
                 </div>
                 <div>
                   <h3 className="font-medium mb-1">Phone</h3>
-                  <p className="text-muted-foreground">+1 (800) 555-0199</p>
+                  <p className="text-muted-foreground">+1 (728) 230-4531</p>
                   <p className="text-sm text-muted-foreground mt-1">Available 24/7 for immediate assistance</p>
                 </div>
               </div>

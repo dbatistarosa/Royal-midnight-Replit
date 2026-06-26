@@ -12,30 +12,65 @@ export default function Privacy() {
         <h1 className="font-serif text-4xl md:text-5xl mb-8">Privacy Policy</h1>
         
         <div className="prose prose-invert prose-p:text-muted-foreground max-w-none">
-          <p>Last Updated: October 1, 2023</p>
-          
+          <p>Last Updated: June 25, 2026</p>
+
           <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">1. Information We Collect</h2>
           <p>
-            We collect personal information necessary to provide our luxury transportation services, 
-            including name, contact details, payment information, and pickup/dropoff locations.
+            We collect personal information necessary to provide our luxury transportation services, including
+            name, contact details, pickup/dropoff locations, and account credentials. For drivers, we additionally
+            collect license, vehicle registration, insurance documents, and payout banking details. We do not
+            store full payment card numbers — payment processing is handled by Stripe, our PCI-compliant payment
+            processor.
           </p>
 
-          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">2. How We Use Your Information</h2>
+          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">2. Location Data</h2>
           <p>
-            Your information is used solely for the purpose of executing your reservations, communicating 
-            updates regarding your ride, processing payments, and improving our services.
+            To calculate fares and provide live trip tracking, we collect pickup/dropoff addresses and, during an
+            active trip, your chauffeur's real-time GPS location. This live location is shared with the passenger
+            on that trip (via a tracking link) and with our dispatch team, and is retained as trip history after
+            the ride ends. Address and route data is processed through Mapbox's mapping and geocoding services.
           </p>
 
-          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">3. Data Security</h2>
+          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">3. How We Use Your Information</h2>
           <p>
-            We implement industry-standard security measures to protect your personal and payment data. 
-            We do not sell your personal information to third parties.
+            Your information is used to execute reservations, communicate updates about your ride (including
+            booking confirmations, trip reminders, and chauffeur details via email and SMS), process payments,
+            send post-ride receipts and review requests, administer our referral program, and improve our
+            services. Driver documents are used solely to verify compliance with licensing, insurance, and
+            registration requirements.
           </p>
 
-          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">4. Absolute Discretion</h2>
+          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">4. Service Providers</h2>
           <p>
-            As a premium service, we maintain strict confidentiality regarding our clients' identities, 
+            We share information with trusted third-party providers only as needed to deliver our service:
+            Stripe (payment processing), Twilio (SMS notifications and OTP login), Resend (transactional email),
+            Mapbox (mapping, geocoding, and route pricing), and Supabase (secure data storage and document
+            uploads). We do not sell your personal information to third parties.
+          </p>
+
+          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">5. Data Security</h2>
+          <p>
+            We implement industry-standard security measures to protect your personal and payment data,
+            including encryption of sensitive financial details (such as driver payout account information) at
+            rest and role-based access controls restricting who can view it.
+          </p>
+
+          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">6. Your Choices</h2>
+          <p>
+            You may request access to, correction of, or deletion of your personal information by contacting us
+            at the email below. SMS notifications can be opted out of at any time by following the instructions
+            included in the message.
+          </p>
+
+          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">7. Absolute Discretion</h2>
+          <p>
+            As a premium service, we maintain strict confidentiality regarding our clients' identities,
             destinations, and conversations held within our vehicles.
+          </p>
+
+          <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">8. Contact Us</h2>
+          <p>
+            Questions about this policy can be directed to concierge@royalmidnight.com or +1 (728) 230-4531.
           </p>
         </div>
       </div>
