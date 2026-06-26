@@ -190,6 +190,14 @@ export default function Book() {
     if (ref) localStorage.setItem("rm_referral_code", ref.trim().toUpperCase());
   }, []);
 
+  // Pre-select the vehicle when arriving via a deep link from /fleet or /pricing (?class=business|suv).
+  useEffect(() => {
+    const vehicleClass = searchParams.get("class");
+    if (vehicleClass === "business" || vehicleClass === "suv") {
+      setSelectedVehicle(vehicleClass);
+    }
+  }, []);
+
   // On mount: handle 3DS redirect return (payment_intent + redirect_status in URL)
   useEffect(() => {
     const pi = searchParams.get("payment_intent");

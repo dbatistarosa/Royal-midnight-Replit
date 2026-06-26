@@ -1,43 +1,30 @@
 import { Link } from "wouter";
 import { PageSeo } from "@/components/PageSeo";
 
+// Rates must mirror the live backend defaults in artifacts/api-server/src/routes/quote.ts
+// (DEFAULT_BASE_FARES, DEFAULT_RATE_PER_MILE, HOURLY_RATES) — only "business" and "suv" are
+// real, bookable vehicle classes today. Add a tier here only after the backend has rates for it.
 const pricingTiers = [
   {
+    id: "business",
     name: "Business Sedan",
     description: "Cadillac CT6 or similar",
     capacity: "Up to 3 passengers",
-    baseRate: "$95",
-    hourlyRate: "$85/hr",
+    baseRate: "$55",
+    hourlyRate: "$95/hr",
     perMile: "$3.50",
     features: ["Wi-Fi", "Bottled Water", "Leather Interior"]
   },
   {
-    name: "Luxury SUV",
-    description: "Cadillac Escalade or similar",
+    id: "suv",
+    name: "Premium SUV",
+    description: "2026 Chevrolet Suburban",
     capacity: "Up to 6 passengers",
-    baseRate: "$125",
-    hourlyRate: "$110/hr",
-    perMile: "$4.50",
+    baseRate: "$75",
+    hourlyRate: "$125/hr",
+    perMile: "$4.00",
     features: ["Extra Luggage Space", "Wi-Fi", "Bottled Water", "Leather Interior"]
   },
-  {
-    name: "First Class",
-    description: "Mercedes-Benz S-Class or similar",
-    capacity: "Up to 3 passengers",
-    baseRate: "$150",
-    hourlyRate: "$130/hr",
-    perMile: "$5.50",
-    features: ["Premium Rear Seating", "Wi-Fi", "Bottled Water", "Massage Seats"]
-  },
-  {
-    name: "Executive Van",
-    description: "Mercedes-Benz Sprinter",
-    capacity: "Up to 14 passengers",
-    baseRate: "$200",
-    hourlyRate: "$175/hr",
-    perMile: "$6.50",
-    features: ["Group Travel", "Wi-Fi", "Bottled Water", "Standing Room"]
-  }
 ];
 
 export default function Pricing() {
@@ -82,8 +69,8 @@ export default function Pricing() {
                 </div>
               </div>
               
-              <Link 
-                href={`/book?class=${tier.name.toLowerCase().replace(' ', '_')}`}
+              <Link
+                href={`/book?class=${tier.id}`}
                 className="w-full inline-flex items-center justify-center rounded-md text-sm font-medium border border-primary text-primary hover:bg-primary hover:text-primary-foreground h-10 transition-colors"
               >
                 Book Now
