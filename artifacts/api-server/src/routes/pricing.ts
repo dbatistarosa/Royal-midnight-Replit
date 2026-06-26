@@ -20,6 +20,7 @@ function parseRule(r: typeof pricingRulesTable.$inferSelect) {
     ratePerMile: parseFloat(r.ratePerMile ?? "0"),
     includedMiles: parseFloat(r.includedMiles ?? "0"),
     airportSurcharge: parseFloat(r.airportSurcharge ?? "0"),
+    hourlyRate: r.hourlyRate != null ? parseFloat(r.hourlyRate) : null,
     createdAt: r.createdAt.toISOString(),
   };
 }
@@ -44,6 +45,8 @@ router.post("/pricing", requireAdmin, async (req, res): Promise<void> => {
       ratePerMile: String(parsed.data.ratePerMile),
       includedMiles: String(parsed.data.includedMiles ?? 0),
       airportSurcharge: String(parsed.data.airportSurcharge),
+      hourlyRate: parsed.data.hourlyRate != null ? String(parsed.data.hourlyRate) : null,
+      sortOrder: parsed.data.sortOrder ?? 0,
     })
     .returning();
 
@@ -64,10 +67,18 @@ router.patch("/pricing/:id", requireAdmin, async (req, res): Promise<void> => {
   }
 
   const updateData: Record<string, unknown> = {};
+  if (parsed.data.name != null) updateData.name = parsed.data.name;
   if (parsed.data.baseFare != null) updateData.baseFare = String(parsed.data.baseFare);
   if (parsed.data.ratePerMile != null) updateData.ratePerMile = String(parsed.data.ratePerMile);
   if (parsed.data.includedMiles != null) updateData.includedMiles = String(parsed.data.includedMiles);
   if (parsed.data.airportSurcharge != null) updateData.airportSurcharge = String(parsed.data.airportSurcharge);
+  if (parsed.data.hourlyRate != null) updateData.hourlyRate = String(parsed.data.hourlyRate);
+  if (parsed.data.description != null) updateData.description = parsed.data.description;
+  if (parsed.data.category != null) updateData.category = parsed.data.category;
+  if (parsed.data.passengers != null) updateData.passengers = parsed.data.passengers;
+  if (parsed.data.bags != null) updateData.bags = parsed.data.bags;
+  if (parsed.data.imageUrl != null) updateData.imageUrl = parsed.data.imageUrl;
+  if (parsed.data.sortOrder != null) updateData.sortOrder = parsed.data.sortOrder;
   if (parsed.data.isActive != null) updateData.isActive = parsed.data.isActive;
 
   const [rule] = await db

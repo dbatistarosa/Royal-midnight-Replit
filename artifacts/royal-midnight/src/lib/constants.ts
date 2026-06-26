@@ -6,11 +6,6 @@ export const AIRPORTS = [
   { value: "PBI", label: "Palm Beach International (PBI)" },
 ];
 
-export const VEHICLE_CLASSES = [
-  { id: "business", name: "Business Class Sedan", category: "Sedan", passengers: 3, bags: 3, image: "/business.webp", description: "Elevated amenities for the discerning professional. Immaculate leather interior, climate control, and complimentary water service." },
-  { id: "suv", name: "Premium SUV", category: "SUV", passengers: 6, bags: 6, image: "/suv.webp", description: "The 2026 Chevrolet Suburban — commanding presence, expansive cabin, and superior comfort for groups and families traveling in style." },
-];
-
 export const STATUS_COLORS: Record<string, string> = {
   pending: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
   confirmed: "bg-primary/10 text-primary border-primary/20",

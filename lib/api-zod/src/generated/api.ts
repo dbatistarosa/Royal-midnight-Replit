@@ -1040,6 +1040,13 @@ export const ListPricingRulesResponseItem = zod.object({
   ratePerMile: zod.number(),
   includedMiles: zod.number(),
   airportSurcharge: zod.number(),
+  hourlyRate: zod.number().nullish(),
+  description: zod.string().nullish(),
+  category: zod.string().nullish(),
+  passengers: zod.number().nullish(),
+  bags: zod.number().nullish(),
+  imageUrl: zod.string().nullish(),
+  sortOrder: zod.number(),
   isActive: zod.boolean(),
   createdAt: zod.coerce.date(),
 });
@@ -1055,6 +1062,13 @@ export const CreatePricingRuleBody = zod.object({
   ratePerMile: zod.number(),
   includedMiles: zod.number().nullish(),
   airportSurcharge: zod.number(),
+  hourlyRate: zod.number().nullish(),
+  description: zod.string().nullish(),
+  category: zod.string().nullish(),
+  passengers: zod.number().nullish(),
+  bags: zod.number().nullish(),
+  imageUrl: zod.string().nullish(),
+  sortOrder: zod.number().nullish(),
 });
 
 /**
@@ -1065,10 +1079,18 @@ export const UpdatePricingRuleParams = zod.object({
 });
 
 export const UpdatePricingRuleBody = zod.object({
+  name: zod.string().nullish(),
   baseFare: zod.number().nullish(),
   ratePerMile: zod.number().nullish(),
   includedMiles: zod.number().nullish(),
   airportSurcharge: zod.number().nullish(),
+  hourlyRate: zod.number().nullish(),
+  description: zod.string().nullish(),
+  category: zod.string().nullish(),
+  passengers: zod.number().nullish(),
+  bags: zod.number().nullish(),
+  imageUrl: zod.string().nullish(),
+  sortOrder: zod.number().nullish(),
   isActive: zod.boolean().nullish(),
 });
 
@@ -1080,6 +1102,13 @@ export const UpdatePricingRuleResponse = zod.object({
   ratePerMile: zod.number(),
   includedMiles: zod.number(),
   airportSurcharge: zod.number(),
+  hourlyRate: zod.number().nullish(),
+  description: zod.string().nullish(),
+  category: zod.string().nullish(),
+  passengers: zod.number().nullish(),
+  bags: zod.number().nullish(),
+  imageUrl: zod.string().nullish(),
+  sortOrder: zod.number(),
   isActive: zod.boolean(),
   createdAt: zod.coerce.date(),
 });

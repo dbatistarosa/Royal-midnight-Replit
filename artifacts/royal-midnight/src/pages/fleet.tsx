@@ -1,9 +1,12 @@
-import { VEHICLE_CLASSES } from "@/lib/constants";
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 import { Link } from "wouter";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageSeo } from "@/components/PageSeo";
 
 export default function Fleet() {
+  const { vehicleClasses, isLoading } = useVehicleClasses();
+
   return (
     <div className="min-h-screen bg-black pt-32 pb-24">
       <PageSeo
@@ -15,14 +18,17 @@ export default function Fleet() {
         <div className="text-center mb-20 max-w-3xl mx-auto">
           <h1 className="text-3xl sm:text-5xl font-serif text-white mb-6">The Royal Fleet</h1>
           <p className="text-gray-400 text-lg leading-relaxed">
-            Our vehicles are more than mere transportation; they are sanctuaries of privacy and comfort. 
-            Every vehicle in our fleet is meticulously maintained, featuring deep tinted windows, 
+            Our vehicles are more than mere transportation; they are sanctuaries of privacy and comfort.
+            Every vehicle in our fleet is meticulously maintained, featuring deep tinted windows,
             premium leather interiors, and complimentary amenities.
           </p>
         </div>
 
+        {isLoading ? (
+          <div className="flex justify-center py-24"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+        ) : (
         <div className="space-y-16 sm:space-y-24 md:space-y-32">
-          {VEHICLE_CLASSES.map((vehicle, idx) => (
+          {vehicleClasses.map((vehicle, idx) => (
             <div 
               key={vehicle.id} 
               className={`flex flex-col md:flex-row items-center gap-8 sm:gap-12 lg:gap-24 ${
@@ -68,6 +74,7 @@ export default function Fleet() {
             </div>
           ))}
         </div>
+        )}
       </div>
     </div>
   );

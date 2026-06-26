@@ -1,7 +1,8 @@
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { AIRPORTS, VEHICLE_CLASSES } from "@/lib/constants";
+import { AIRPORTS } from "@/lib/constants";
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
 import { PageSeo } from "@/components/PageSeo";
 
@@ -9,6 +10,7 @@ export default function Home() {
   const [, setLocation] = useLocation();
   const [pickup, setPickup] = useState("");
   const [dropoff, setDropoff] = useState("");
+  const { vehicleClasses } = useVehicleClasses();
 
   const handleBook = (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,7 +124,7 @@ export default function Home() {
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
-            {VEHICLE_CLASSES.slice(0, 3).map((vehicle) => (
+            {vehicleClasses.slice(0, 3).map((vehicle) => (
               <div key={vehicle.id} className="group relative overflow-hidden bg-black border border-white/5 aspect-[4/3]">
                 <img
                   src={vehicle.image}

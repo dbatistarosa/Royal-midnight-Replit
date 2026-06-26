@@ -15,4 +15,18 @@ export interface CreatePricingRuleBody {
   /** @nullable */
   includedMiles?: number | null;
   airportSurcharge: number;
+  /** @nullable */
+  hourlyRate?: number | null;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  passengers?: number | null;
+  /** @nullable */
+  bags?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  /** @nullable */
+  sortOrder?: number | null;
 }

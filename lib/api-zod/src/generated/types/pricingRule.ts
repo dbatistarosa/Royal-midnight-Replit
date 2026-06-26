@@ -15,6 +15,19 @@ export interface PricingRule {
   ratePerMile: number;
   includedMiles: number;
   airportSurcharge: number;
+  /** @nullable */
+  hourlyRate?: number | null;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  passengers?: number | null;
+  /** @nullable */
+  bags?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  sortOrder: number;
   isActive: boolean;
   createdAt: Date;
 }

@@ -232,8 +232,9 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 }
 
 /** Fetch active pricing rule for a given vehicle class from the DB.
- *  Falls back to hardcoded defaults if none found. */
-async function getPricingForClass(vc: string): Promise<{ baseFare: number; ratePerMile: number; includedMiles: number; airportFee: number }> {
+ *  Falls back to hardcoded defaults if none found — the DB row (set via
+ *  /admin/pricing) is always authoritative when it exists. */
+async function getPricingForClass(vc: string): Promise<{ baseFare: number; ratePerMile: number; includedMiles: number; airportFee: number; hourlyRate: number | null }> {
   try {
     const [rule] = await db
       .select()
@@ -246,6 +247,7 @@ async function getPricingForClass(vc: string): Promise<{ baseFare: number; rateP
         ratePerMile: parseFloat(rule.ratePerMile ?? "0") || (DEFAULT_RATE_PER_MILE[vc] ?? 2.5),
         includedMiles: parseFloat(rule.includedMiles ?? "0") || 0,
         airportFee: parseFloat(rule.airportSurcharge ?? "0") || 0,
+        hourlyRate: rule.hourlyRate != null ? parseFloat(rule.hourlyRate) || null : null,
       };
     }
   } catch {
@@ -257,10 +259,12 @@ async function getPricingForClass(vc: string): Promise<{ baseFare: number; rateP
     ratePerMile: DEFAULT_RATE_PER_MILE[vc] ?? 2.5,
     includedMiles: DEFAULT_INCLUDED_MILES[vc] ?? 0,
     airportFee: 0,
+    hourlyRate: null,
   };
 }
 
-// Hourly charter rates per vehicle class ($/hr, before tax)
+// Hourly charter rates per vehicle class ($/hr, before tax) — only used when a
+// vehicle class has no admin-set hourlyRate on its pricing_rules row.
 export const HOURLY_RATES: Record<string, number> = {
   business: 95,
   suv: 125,
@@ -305,7 +309,7 @@ router.post("/quote", async (req, res): Promise<void> => {
   if (taxRate > 1) taxRate = taxRate / 100;
 
   // Get pricing rule from DB for this vehicle class
-  const { baseFare, ratePerMile, includedMiles: ruleIncludedMiles, airportFee: ruleAirportFee } = await getPricingForClass(vc);
+  const { baseFare, ratePerMile, includedMiles: ruleIncludedMiles, airportFee: ruleAirportFee, hourlyRate: ruleHourlyRate } = await getPricingForClass(vc);
 
   let distanceCharge: number;
   let estimatedDistance: number;
@@ -316,7 +320,7 @@ router.post("/quote", async (req, res): Promise<void> => {
   if (charterMode === "hourly" && charterHours > 0) {
     // Hourly charter — price is time-based, not distance-based, so the
     // included-miles allowance (which is mileage pricing) doesn't apply.
-    const hourlyRate = HOURLY_RATES[vc] ?? baseFare * 1.5;
+    const hourlyRate = ruleHourlyRate ?? HOURLY_RATES[vc] ?? baseFare * 1.5;
     distanceCharge = Math.round((hourlyRate * charterHours - baseFare) * 100) / 100;
     if (distanceCharge < 0) distanceCharge = 0;
     // For display purposes, estimate ~25 mph average city speed

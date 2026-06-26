@@ -1,33 +1,15 @@
 import { Link } from "wouter";
+import { Loader2 } from "lucide-react";
+import { useListPricingRules } from "@workspace/api-client-react";
 import { PageSeo } from "@/components/PageSeo";
 
-// Rates must mirror the live backend defaults in artifacts/api-server/src/routes/quote.ts
-// (DEFAULT_BASE_FARES, DEFAULT_RATE_PER_MILE, HOURLY_RATES) — only "business" and "suv" are
-// real, bookable vehicle classes today. Add a tier here only after the backend has rates for it.
-const pricingTiers = [
-  {
-    id: "business",
-    name: "Business Sedan",
-    description: "Cadillac CT6 or similar",
-    capacity: "Up to 3 passengers",
-    baseRate: "$55",
-    hourlyRate: "$95/hr",
-    perMile: "$3.50",
-    features: ["Wi-Fi", "Bottled Water", "Leather Interior"]
-  },
-  {
-    id: "suv",
-    name: "Premium SUV",
-    description: "2026 Chevrolet Suburban",
-    capacity: "Up to 6 passengers",
-    baseRate: "$75",
-    hourlyRate: "$125/hr",
-    perMile: "$4.00",
-    features: ["Extra Luggage Space", "Wi-Fi", "Bottled Water", "Leather Interior"]
-  },
-];
-
 export default function Pricing() {
+  const { data, isLoading } = useListPricingRules();
+
+  const tiers = (data ?? [])
+    .filter(r => r.isActive && r.vehicleClass && r.name && r.passengers != null)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
   return (
     <div className="py-24">
       <PageSeo
@@ -43,34 +25,39 @@ export default function Pricing() {
           </p>
         </div>
 
+        {isLoading ? (
+          <div className="flex justify-center py-24"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+        ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-24">
-          {pricingTiers.map((tier) => (
-            <div key={tier.name} className="bg-card border border-border rounded-lg p-6 flex flex-col">
+          {tiers.map((tier) => (
+            <div key={tier.id} className="bg-card border border-border rounded-lg p-6 flex flex-col">
               <h3 className="font-serif text-2xl mb-2">{tier.name}</h3>
               <p className="text-muted-foreground text-sm mb-4">{tier.description}</p>
-              
+
               <div className="mb-6 pb-6 border-b border-border">
-                <div className="text-3xl font-bold text-primary mb-1">{tier.baseRate}</div>
+                <div className="text-3xl font-bold text-primary mb-1">${tier.baseFare.toFixed(0)}</div>
                 <div className="text-sm text-muted-foreground">Base transfer rate</div>
               </div>
-              
+
               <div className="space-y-3 mb-8 flex-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Hourly:</span>
-                  <span>{tier.hourlyRate}</span>
-                </div>
+                {tier.hourlyRate != null && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Hourly:</span>
+                    <span>${tier.hourlyRate.toFixed(0)}/hr</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Per Mile:</span>
-                  <span>{tier.perMile}</span>
+                  <span>${tier.ratePerMile.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Capacity:</span>
-                  <span>{tier.capacity}</span>
+                  <span>Up to {tier.passengers} passengers</span>
                 </div>
               </div>
-              
+
               <Link
-                href={`/book?class=${tier.id}`}
+                href={`/book?class=${tier.vehicleClass}`}
                 className="w-full inline-flex items-center justify-center rounded-md text-sm font-medium border border-primary text-primary hover:bg-primary hover:text-primary-foreground h-10 transition-colors"
               >
                 Book Now
@@ -78,6 +65,7 @@ export default function Pricing() {
             </div>
           ))}
         </div>
+        )}
       </div>
     </div>
   );

@@ -653,6 +653,19 @@ export interface PricingRule {
   ratePerMile: number;
   includedMiles: number;
   airportSurcharge: number;
+  /** @nullable */
+  hourlyRate?: number | null;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  passengers?: number | null;
+  /** @nullable */
+  bags?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  sortOrder: number;
   isActive: boolean;
   createdAt: string;
 }
@@ -666,9 +679,25 @@ export interface CreatePricingRuleBody {
   /** @nullable */
   includedMiles?: number | null;
   airportSurcharge: number;
+  /** @nullable */
+  hourlyRate?: number | null;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  passengers?: number | null;
+  /** @nullable */
+  bags?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  /** @nullable */
+  sortOrder?: number | null;
 }
 
 export interface UpdatePricingRuleBody {
+  /** @nullable */
+  name?: string | null;
   /** @nullable */
   baseFare?: number | null;
   /** @nullable */
@@ -677,6 +706,20 @@ export interface UpdatePricingRuleBody {
   includedMiles?: number | null;
   /** @nullable */
   airportSurcharge?: number | null;
+  /** @nullable */
+  hourlyRate?: number | null;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  category?: string | null;
+  /** @nullable */
+  passengers?: number | null;
+  /** @nullable */
+  bags?: number | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  /** @nullable */
+  sortOrder?: number | null;
   /** @nullable */
   isActive?: boolean | null;
 }

@@ -8,6 +8,7 @@ import { CalendarIcon, Loader2, CheckCircle2, Lock, ChevronLeft, ArrowRight, Map
 
 import { useGetQuote, QuoteRequestVehicleClass } from "@workspace/api-client-react";
 import { API_BASE } from "@/lib/constants";
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 import { useAuth } from "@/contexts/auth";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
 import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
@@ -58,25 +59,6 @@ interface QuoteResult {
   estimatedDuration: number;
 }
 
-const VEHICLE_INFO = {
-  business: {
-    name: "Business Class Sedan",
-    tagline: "Refined executive travel",
-    description: "Elevated executive comfort for the discerning professional. Professional chauffeur, premium amenities.",
-    maxPassengers: 3,
-    maxBags: 3,
-    class: "SEDAN",
-  },
-  suv: {
-    name: "Premium SUV",
-    subtitle: "2026 Chevrolet Suburban",
-    tagline: "Space, presence & luxury",
-    description: "Commanding presence and expansive cabin for groups and families. Maximum space with no compromise on luxury.",
-    maxPassengers: 6,
-    maxBags: 6,
-    class: "SUV",
-  },
-};
 
 /** Itemized price breakdown — used in both the vehicle-selection cards and
  *  the final review/payment summary so every fee is visible before paying. */
@@ -150,8 +132,9 @@ export default function Book() {
   const { toast } = useToast();
   const { user, login, token } = useAuth();
   const [step, setStep] = useState<StepKey>(1);
-  const [quotes, setQuotes] = useState<{ business: QuoteResult | null; suv: QuoteResult | null }>({ business: null, suv: null });
-  const [selectedVehicle, setSelectedVehicle] = useState<"business" | "suv" | null>(null);
+  const [quotes, setQuotes] = useState<Record<string, QuoteResult | null>>({});
+  const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
+  const { vehicleClasses } = useVehicleClasses();
   const [isGettingQuotes, setIsGettingQuotes] = useState(false);
   const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null);
   const [paymentPublishableKey, setPaymentPublishableKey] = useState<string | null>(null);
@@ -190,12 +173,12 @@ export default function Book() {
     if (ref) localStorage.setItem("rm_referral_code", ref.trim().toUpperCase());
   }, []);
 
-  // Pre-select the vehicle when arriving via a deep link from /fleet or /pricing (?class=business|suv).
+  // Pre-select the vehicle when arriving via a deep link from /fleet or /pricing (?class=...).
+  // Validity is re-checked once quotes come back in handleGetQuotes — an unknown or no-longer-
+  // bookable class here is harmless, it just won't match any quote and falls back to auto-select.
   useEffect(() => {
     const vehicleClass = searchParams.get("class");
-    if (vehicleClass === "business" || vehicleClass === "suv") {
-      setSelectedVehicle(vehicleClass);
-    }
+    if (vehicleClass) setSelectedVehicle(vehicleClass);
   }, []);
 
   // On mount: handle 3DS redirect return (payment_intent + redirect_status in URL)
@@ -349,8 +332,10 @@ export default function Book() {
       });
   }, [step]);
 
-  const showBusiness = Number(passengers) <= 3;
   const selectedQuote = selectedVehicle ? quotes[selectedVehicle] : null;
+  const selectedVehicleName = vehicleClasses.find(v => v.id === selectedVehicle)?.name ?? "";
+  // Classes that fit this many passengers, in admin-configured display order.
+  const eligibleVehicleClasses = vehicleClasses.filter(v => Number(passengers) <= v.passengers);
 
   const formattedDateTime = pickupDate && pickupTime
     ? `${format(pickupDate, "EEEE, MMMM d, yyyy")} at ${pickupTime} EST`
@@ -370,6 +355,12 @@ export default function Book() {
     const isoDate = new Date(`${format(pickupDate, "yyyy-MM-dd")}T${pickupTime}:00`).toISOString();
     const numPax = Number(passengers) || 1;
 
+    const candidateClasses = vehicleClasses.filter(v => numPax <= v.passengers);
+    if (candidateClasses.length === 0) {
+      toast({ title: "No vehicle available", description: "No vehicle in our fleet currently fits this many passengers.", variant: "destructive" });
+      return;
+    }
+
     setIsGettingQuotes(true);
     try {
       const quoteExtras = {
@@ -377,68 +368,54 @@ export default function Book() {
         charterMode,
         charterHours: charterMode === "hourly" ? charterHours : undefined,
       };
-    const [businessRes, suvRes] = await Promise.allSettled([
-        getQuote.mutateAsync({ data: { pickupAddress, dropoffAddress, vehicleClass: "business" as QuoteRequestVehicleClass, passengers: numPax, pickupAt: isoDate, ...quoteExtras } as any }),
-        getQuote.mutateAsync({ data: { pickupAddress, dropoffAddress, vehicleClass: "suv" as QuoteRequestVehicleClass, passengers: numPax, pickupAt: isoDate, ...quoteExtras } as any }),
-      ]);
+      const results = await Promise.allSettled(
+        candidateClasses.map(vc =>
+          getQuote.mutateAsync({ data: { pickupAddress, dropoffAddress, vehicleClass: vc.id as QuoteRequestVehicleClass, passengers: numPax, pickupAt: isoDate, ...quoteExtras } as any })
+        )
+      );
 
-      const newQuotes = { business: null as QuoteResult | null, suv: null as QuoteResult | null };
+      const newQuotes: Record<string, QuoteResult | null> = {};
       let firstError = "";
 
-      if (businessRes.status === "fulfilled") {
-        const r = businessRes.value;
-        newQuotes.business = {
-          vehicleClass: r.vehicleClass,
-          baseFare: r.baseFare,
-          includedMiles: (r as any).includedMiles ?? 0,
-          billableMiles: (r as any).billableMiles ?? r.estimatedDistance,
-          distanceCharge: r.distanceCharge,
-          airportFee: (r as any).airportFee ?? 0,
-          surgeAdjustment: (r as any).surgeAdjustment ?? 0,
-          subtotal: (r as any).subtotal ?? r.estimatedPrice,
-          taxRate: (r as any).taxRate ?? 0.07,
-          taxAmount: (r as any).taxAmount ?? 0,
-          cardProcessingFeeRate: (r as any).cardProcessingFeeRate ?? 0,
-          cardProcessingFee: (r as any).cardProcessingFee ?? 0,
-          totalWithTax: (r as any).totalWithTax ?? r.estimatedPrice,
-          estimatedDistance: r.estimatedDistance,
-          estimatedDuration: r.estimatedDuration,
-        };
-      } else {
-        firstError = (businessRes.reason as any)?.message || "Could not get pricing.";
-      }
+      results.forEach((res, i) => {
+        const vc = candidateClasses[i];
+        if (res.status === "fulfilled") {
+          const r = res.value;
+          newQuotes[vc.id] = {
+            vehicleClass: r.vehicleClass,
+            baseFare: r.baseFare,
+            includedMiles: (r as any).includedMiles ?? 0,
+            billableMiles: (r as any).billableMiles ?? r.estimatedDistance,
+            distanceCharge: r.distanceCharge,
+            airportFee: (r as any).airportFee ?? 0,
+            surgeAdjustment: (r as any).surgeAdjustment ?? 0,
+            subtotal: (r as any).subtotal ?? r.estimatedPrice,
+            taxRate: (r as any).taxRate ?? 0.07,
+            taxAmount: (r as any).taxAmount ?? 0,
+            cardProcessingFeeRate: (r as any).cardProcessingFeeRate ?? 0,
+            cardProcessingFee: (r as any).cardProcessingFee ?? 0,
+            totalWithTax: (r as any).totalWithTax ?? r.estimatedPrice,
+            estimatedDistance: r.estimatedDistance,
+            estimatedDuration: r.estimatedDuration,
+          };
+        } else {
+          newQuotes[vc.id] = null;
+          if (!firstError) firstError = (res.reason as any)?.message || "Could not get pricing.";
+        }
+      });
 
-      if (suvRes.status === "fulfilled") {
-        const r = suvRes.value;
-        newQuotes.suv = {
-          vehicleClass: r.vehicleClass,
-          baseFare: r.baseFare,
-          includedMiles: (r as any).includedMiles ?? 0,
-          billableMiles: (r as any).billableMiles ?? r.estimatedDistance,
-          distanceCharge: r.distanceCharge,
-          airportFee: (r as any).airportFee ?? 0,
-          surgeAdjustment: (r as any).surgeAdjustment ?? 0,
-          subtotal: (r as any).subtotal ?? r.estimatedPrice,
-          taxRate: (r as any).taxRate ?? 0.07,
-          taxAmount: (r as any).taxAmount ?? 0,
-          cardProcessingFeeRate: (r as any).cardProcessingFeeRate ?? 0,
-          cardProcessingFee: (r as any).cardProcessingFee ?? 0,
-          totalWithTax: (r as any).totalWithTax ?? r.estimatedPrice,
-          estimatedDistance: r.estimatedDistance,
-          estimatedDuration: r.estimatedDuration,
-        };
-      } else {
-        if (!firstError) firstError = (suvRes.reason as any)?.message || "Could not get pricing.";
-      }
-
-      if (!newQuotes.business && !newQuotes.suv) {
+      if (Object.values(newQuotes).every(q => !q)) {
         toast({ title: "Pricing unavailable", description: firstError, variant: "destructive" });
         setIsGettingQuotes(false);
         return;
       }
 
       setQuotes(newQuotes);
-      setSelectedVehicle(showBusiness && newQuotes.business ? "business" : "suv");
+      // Keep a deep-linked selection if it's still a valid, successfully-quoted option;
+      // otherwise fall back to the first available class in admin-configured display order.
+      setSelectedVehicle(prev =>
+        prev && newQuotes[prev] ? prev : (candidateClasses.find(vc => newQuotes[vc.id])?.id ?? null)
+      );
       setStep(2);
     } catch (err: any) {
       toast({ title: "Error", description: err?.message || "Could not retrieve pricing.", variant: "destructive" });
@@ -1172,13 +1149,13 @@ export default function Book() {
 
                 <p className="text-center text-xs uppercase tracking-[0.3em] text-gray-600 py-1">Select your vehicle</p>
 
-                {(["business", "suv"] as const).map((vc) => {
-                  const info = VEHICLE_INFO[vc];
+                {vehicleClasses.map((info) => {
+                  const vc = info.id;
                   const quote = quotes[vc];
-                  const isDisabled = vc === "business" && Number(passengers) > 3;
+                  const isDisabled = Number(passengers) > info.passengers;
                   const isSelected = selectedVehicle === vc;
 
-                  if (isDisabled) return null;
+                  if (isDisabled || !(vc in quotes)) return null;
 
                   return (
                     <div
@@ -1198,10 +1175,8 @@ export default function Book() {
                         <div className={`p-6 sm:p-8 md:p-10 relative ${isSelected ? "bg-gradient-to-br from-[#0d0b06] to-[#080808]" : "bg-[#080808]"}`}>
                           <div className="flex items-start justify-between mb-5">
                             <div>
-                              <p className="text-[10px] uppercase tracking-[0.35em] text-primary mb-2">{info.class}</p>
+                              {info.category && <p className="text-[10px] uppercase tracking-[0.35em] text-primary mb-2">{info.category}</p>}
                               <h3 className="text-xl sm:text-2xl md:text-3xl font-serif text-white leading-tight">{info.name}</h3>
-                              {"subtitle" in info && <p className="text-xs text-gray-600 mt-1">{info.subtitle}</p>}
-                              <p className="text-xs text-gray-500 mt-1 italic">{info.tagline}</p>
                             </div>
                             <div className={`w-8 h-8 rounded-full border flex items-center justify-center flex-shrink-0 transition-all ${isSelected ? "border-primary bg-primary/10" : "border-white/15"}`}>
                               {isSelected && <CheckCircle2 className="w-5 h-5 text-primary" />}
@@ -1214,13 +1189,13 @@ export default function Book() {
                             <div>
                               <p className="text-[10px] uppercase tracking-widest text-gray-700 mb-1">Passengers</p>
                               <p className="text-sm text-white flex items-center gap-1.5">
-                                <Users className="w-3.5 h-3.5 text-gray-500" /> Up to {info.maxPassengers}
+                                <Users className="w-3.5 h-3.5 text-gray-500" /> Up to {info.passengers}
                               </p>
                             </div>
                             <div>
                               <p className="text-[10px] uppercase tracking-widest text-gray-700 mb-1">Luggage</p>
                               <p className="text-sm text-white flex items-center gap-1.5">
-                                <Briefcase className="w-3.5 h-3.5 text-gray-500" /> Up to {info.maxBags} bags
+                                <Briefcase className="w-3.5 h-3.5 text-gray-500" /> Up to {info.bags} bags
                               </p>
                             </div>
                             {quote && (
@@ -1258,10 +1233,6 @@ export default function Book() {
                   );
                 })}
 
-                {Number(passengers) > 3 && (
-                  <p className="text-xs text-gray-600 text-center py-2">For groups of 4 or more, the Premium SUV is required.</p>
-                )}
-
                 <div className="flex justify-between pt-3">
                   <Button type="button" variant="outline" onClick={() => { sessionStorage.removeItem("rm_pending_booking_id"); setPendingBookingId(null); pendingBookingIdRef.current = null; setStep(1); }} className="border-white/15 text-white/60 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs px-6 h-11">
                     <ChevronLeft className="w-4 h-4 mr-1" /> Back
@@ -1287,7 +1258,7 @@ export default function Book() {
                   <div className="p-8 space-y-7">
                     <div>
                       <p className="text-[10px] uppercase tracking-[0.3em] text-primary mb-1">Booking Summary</p>
-                      <h2 className="text-xl font-serif text-white">{VEHICLE_INFO[selectedVehicle].name}</h2>
+                      <h2 className="text-xl font-serif text-white">{selectedVehicleName}</h2>
                     </div>
 
                     {/* Route */}
@@ -1315,7 +1286,7 @@ export default function Book() {
                     <div className="grid grid-cols-2 gap-4 border-t border-white/8 pt-5">
                       {[
                         { label: "Date & Time", value: formattedDateTime || "—" },
-                        { label: "Vehicle", value: VEHICLE_INFO[selectedVehicle].name },
+                        { label: "Vehicle", value: selectedVehicleName },
                         { label: "Passengers", value: String(form.getValues("passengers")) },
                         { label: "Luggage", value: `${form.getValues("luggage")} ${Number(form.getValues("luggage")) === 1 ? "bag" : "bags"}` },
                         { label: "Name", value: form.getValues("passengerName") },
