@@ -1446,6 +1446,8 @@ components:
           enum: [awaiting_payment, authorized, pending, confirmed, on_way, on_location, in_progress, completed, cancelled]
         priceQuoted:
           type: number
+        fareSubtotal:
+          type: ["number", "null"]
         promoCode:
           type: ["string", "null"]
         discountAmount:
@@ -1492,6 +1494,8 @@ components:
           type: ["string", "null"]
         priceQuoted:
           type: number
+        fareSubtotal:
+          type: ["number", "null"]
         promoCode:
           type: ["string", "null"]
         discountAmount:

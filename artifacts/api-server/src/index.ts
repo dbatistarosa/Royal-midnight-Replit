@@ -401,8 +401,13 @@ async function ensureStripeWebhook(): Promise<void> {
     return;
   }
 
-  // Default to production URL when APP_URL is not explicitly set
-  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  // Preview deployments get their own auto-generated URL via Vercel's
+  // VERCEL_URL system env var — prefer it there so every preview boot
+  // doesn't register/pollute the production webhook list. Falls back to
+  // APP_URL, then the production default.
+  const appUrl = process.env.VERCEL_ENV === "preview" && process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : process.env.APP_URL ?? "https://royalmidnight.com";
   const expectedUrl = `${appUrl}/api/webhook/stripe`;
 
   try {
@@ -514,7 +519,7 @@ async function sendTripReminders(): Promise<void> {
         await client.query("BEGIN");
         const { rows } = await client.query(
           `SELECT id, passenger_name, passenger_email, passenger_phone, pickup_address, dropoff_address,
-                  pickup_at, vehicle_class, passengers, price_quoted, driver_id
+                  pickup_at, vehicle_class, passengers, price_quoted, fare_subtotal, driver_id
            FROM bookings
            WHERE id = $1
              AND status = 'confirmed'
@@ -541,7 +546,8 @@ async function sendTripReminders(): Promise<void> {
         }
 
         const priceQuoted = parseFloat(row.price_quoted ?? "0");
-        const driverEarnings = Math.round(priceQuoted * commissionPct * 100) / 100;
+        const fareSubtotal = row.fare_subtotal != null ? parseFloat(row.fare_subtotal) : priceQuoted;
+        const driverEarnings = Math.round(fareSubtotal * commissionPct * 100) / 100;
 
         const reminderData = {
           id: row.id,
@@ -627,7 +633,7 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
     const weekLabel = weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " – " + new Date(weekEnd.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
     const drivers = await db.select().from(driversTable).where(sqlFn`approval_status = 'approved'`).orderBy(driversTable.name);
-    const bookings = await db.select({ driverId: bookTbl.driverId, priceQuoted: bookTbl.priceQuoted })
+    const bookings = await db.select({ driverId: bookTbl.driverId, priceQuoted: bookTbl.priceQuoted, fareSubtotal: bookTbl.fareSubtotal })
       .from(bookTbl)
       .where(sqlFn`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
 
@@ -635,7 +641,8 @@ async function runWeeklyPayoutIfNeeded(): Promise<void> {
     for (const b of bookings) {
       if (!b.driverId) continue;
       const e = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0 };
-      earningsByDriver.set(b.driverId, { rides: e.rides + 1, gross: e.gross + parseFloat(b.priceQuoted ?? "0") });
+      const fareBase = b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : parseFloat(b.priceQuoted ?? "0");
+      earningsByDriver.set(b.driverId, { rides: e.rides + 1, gross: e.gross + fareBase });
     }
 
     const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("./lib/mailer.js");

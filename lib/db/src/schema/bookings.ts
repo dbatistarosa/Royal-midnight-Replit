@@ -20,6 +20,11 @@ export const bookingsTable = pgTable("bookings", {
   priceQuoted: numeric("price_quoted", { precision: 10, scale: 2 }).notNull(),
   promoCode: text("promo_code"),
   discountAmount: numeric("discount_amount", { precision: 10, scale: 2 }),
+  // Pre-tax, pre-card-fee, pre-discount fare base used to compute driver commission —
+  // taxes, the card processing fee, and promo discounts are absorbed by the company only
+  // and must never shrink what the driver earns. Falls back to priceQuoted when absent
+  // (legacy rows, or booking paths that don't go through the quote flow).
+  fareSubtotal: numeric("fare_subtotal", { precision: 10, scale: 2 }),
   driverId: integer("driver_id"),
   vehicleId: integer("vehicle_id"),
   paymentType: text("payment_type").default("standard"),

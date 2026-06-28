@@ -2,6 +2,15 @@ import { Router, type IRouter } from "express";
 import { db, settingsTable, pricingRulesTable, geoZonesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
+import {
+  isAirportTrip,
+  resolveAddress,
+  fallbackDistance,
+  haversineKm,
+  pointInPolygon,
+  normalizePercentRate,
+  computeFareBreakdown,
+} from "../lib/pricing";
 
 const router: IRouter = Router();
 
@@ -19,60 +28,6 @@ export const DEFAULT_INCLUDED_MILES: Record<string, number> = {
   business: 0,
   suv: 0,
 };
-
-// Canonical airport addresses for resolving shortcodes passed from the frontend
-const AIRPORT_ADDRESSES: Record<string, string> = {
-  FLL: "Fort Lauderdale-Hollywood International Airport, 100 Terminal Dr, Fort Lauderdale, FL 33315",
-  MIA: "Miami International Airport, 2100 NW 42nd Ave, Miami, FL 33142",
-  PBI: "Palm Beach International Airport, 1000 James L Turnage Blvd, West Palm Beach, FL 33406",
-  MCO: "Orlando International Airport, One Jeff Fuqua Blvd, Orlando, FL 32827",
-  TPA: "Tampa International Airport, 4100 George J Bean Pkwy, Tampa, FL 33607",
-  JAX: "Jacksonville International Airport, 2400 Yankee Clipper Dr, Jacksonville, FL 32218",
-  RSW: "Southwest Florida International Airport, 11000 Terminal Access Rd, Fort Myers, FL 33913",
-  SRQ: "Sarasota Bradenton International Airport, 6000 Airport Cir, Sarasota, FL 34243",
-  PIE: "St. Pete-Clearwater International Airport, 14700 Terminal Blvd, Clearwater, FL 33762",
-  GNV: "Gainesville Regional Airport, 3880 NE 39th Ave, Gainesville, FL 32609",
-  TLH: "Tallahassee International Airport, 3300 Capital Circle SW, Tallahassee, FL 32310",
-  EYW: "Key West International Airport, 3491 S Roosevelt Blvd, Key West, FL 33040",
-  DAB: "Daytona Beach International Airport, 700 Catalina Dr, Daytona Beach, FL 32114",
-  MLB: "Melbourne Orlando International Airport, 1 Air Terminal Pkwy, Melbourne, FL 32901",
-  VPS: "Destin–Fort Walton Beach Airport, 1 Putt-Putt Place, Eglin AFB, FL 32542",
-  ECP: "Northwest Florida Beaches International Airport, 6300 West Bay Pkwy, Panama City Beach, FL 32409",
-  PNS: "Pensacola International Airport, 2430 Airport Blvd, Pensacola, FL 32504",
-  OCF: "Ocala International Airport, 1770 SW 60th Ave, Ocala, FL 34474",
-  SFB: "Orlando Sanford International Airport, 1200 Red Cleveland Blvd, Sanford, FL 32773",
-};
-
-// AIRPORT_KEYWORDS is used only to decide whether to add the airport surcharge
-const AIRPORT_KEYWORDS = [
-  "FLL", "MIA", "PBI", "MCO", "TPA", "JAX", "RSW", "SRQ", "PIE",
-  "GNV", "TLH", "EYW", "DAB", "MLB", "VPS", "ECP", "PNS", "OCF", "SFB",
-  "Fort Lauderdale-Hollywood", "Miami International", "Palm Beach International",
-  "Orlando International", "Tampa International", "Jacksonville International",
-  "Southwest Florida International", "Sarasota Bradenton", "St. Pete-Clearwater",
-  "Key West International", "Daytona Beach International", "Melbourne Orlando",
-  "Tallahassee International", "Gainesville Regional", "Pensacola International",
-];
-
-function isAirportTrip(address: string): boolean {
-  return AIRPORT_KEYWORDS.some((k) => address.toLowerCase().includes(k.toLowerCase()));
-}
-
-/** Resolve an address entered by the user to a canonical geocodable string.
- *  Airport shortcuts selected from the dropdown look like "FLL - Fort Lauderdale-Hollywood International Airport"
- *  or the full Place description. We normalise both. */
-function resolveAddress(raw: string): string {
-  const upper = raw.trim().toUpperCase();
-  // Direct code match (e.g. "FLL", "MIA", "PBI")
-  if (AIRPORT_ADDRESSES[upper]) return AIRPORT_ADDRESSES[upper];
-  // Shortcut format "FLL - Fort Lauderdale-Hollywood International Airport"
-  for (const code of Object.keys(AIRPORT_ADDRESSES)) {
-    if (upper.startsWith(code + " -") || upper.startsWith(code + "-")) {
-      return AIRPORT_ADDRESSES[code];
-    }
-  }
-  return raw.trim();
-}
 
 /** Forward-geocode an address to Mapbox [lng, lat] coordinates. */
 async function geocodeMapbox(address: string, token: string): Promise<[number, number] | null> {
@@ -127,49 +82,7 @@ async function getDirectionsDistance(
   }
 }
 
-// Fallback distances (road miles) — only used if Google API is unavailable
-function fallbackDistance(pickup: string, dropoff: string): { distance: number; duration: number } {
-  const pu = pickup.toUpperCase();
-  const do_ = dropoff.toUpperCase();
-  const hasFLL = (s: string) => s.includes("FLL") || s.includes("FORT LAUDERDALE");
-  const hasMIA = (s: string) => s.includes("MIA") || s.includes("MIAMI");
-  const hasPBI = (s: string) => s.includes("PBI") || s.includes("PALM BEACH");
-
-  if (hasFLL(pu) && hasMIA(do_)) return { distance: 35, duration: 45 };
-  if (hasMIA(pu) && hasFLL(do_)) return { distance: 35, duration: 45 };
-  if (hasPBI(pu) && hasFLL(do_)) return { distance: 56, duration: 65 };
-  if (hasFLL(pu) && hasPBI(do_)) return { distance: 56, duration: 65 };
-  if (hasPBI(pu) && hasMIA(do_)) return { distance: 80, duration: 90 };
-  if (hasMIA(pu) && hasPBI(do_)) return { distance: 80, duration: 90 };
-
-  // Generic South Florida point-to-point — rough estimate
-  return { distance: 25, duration: 40 };
-}
-
 // ── Geo Zone helpers ──────────────────────────────────────────────────────────
-
-/** Haversine distance in km between two lat/lng points */
-function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-/** Ray-casting point-in-polygon. coords: [[lng,lat],...] (GeoJSON order) */
-function pointInPolygon(lat: number, lng: number, coords: number[][]): boolean {
-  let inside = false;
-  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
-    const xi = coords[i]![0]!, yi = coords[i]![1]!;
-    const xj = coords[j]![0]!, yj = coords[j]![1]!;
-    const intersect = (yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
 
 /** Geocode an address to lat/lng via Mapbox Geocoding API (best-effort) */
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
@@ -302,11 +215,10 @@ router.post("/quote", async (req, res): Promise<void> => {
     return;
   }
 
-  // Get Florida tax rate from settings (stored as decimal: 0.07 = 7%)
+  // Get Florida tax rate from settings (stored as decimal: 0.07 = 7%, or as a
+  // whole percent like 7 — normalizePercentRate() handles both forms)
   const taxRateStr = await getSetting("florida_tax_rate", "0.07");
-  let taxRate = parseFloat(taxRateStr);
-  // Normalise: if stored as whole percent (e.g. 7 instead of 0.07), convert
-  if (taxRate > 1) taxRate = taxRate / 100;
+  const taxRate = normalizePercentRate(parseFloat(taxRateStr));
 
   // Get pricing rule from DB for this vehicle class
   const { baseFare, ratePerMile, includedMiles: ruleIncludedMiles, airportFee: ruleAirportFee, hourlyRate: ruleHourlyRate } = await getPricingForClass(vc);
@@ -349,21 +261,19 @@ router.post("/quote", async (req, res): Promise<void> => {
   // Geo zone pricing modifier (checked against all route addresses)
   const zoneMultiplier = await getZoneMultiplier(allAddresses.map(resolveAddress));
 
-  const subtotalBeforeZone = Math.round((baseFare + distanceCharge + airportFee) * 100) / 100;
-  const subtotal = Math.round(subtotalBeforeZone * zoneMultiplier * 100) / 100;
-  // Any difference from the zone multiplier, called out as its own line so
-  // nothing is folded silently into the subtotal.
-  const surgeAdjustment = Math.round((subtotal - subtotalBeforeZone) * 100) / 100;
-  const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
-
   // Card processing fee, passed through to the customer and shown as its
   // own line item (admin-configurable via the `cc_fee_pct` setting).
   const ccFeeRateStr = await getSetting("cc_fee_pct", "0");
-  let cardProcessingFeeRate = parseFloat(ccFeeRateStr);
-  if (cardProcessingFeeRate > 1) cardProcessingFeeRate = cardProcessingFeeRate / 100;
-  const cardProcessingFee = Math.round((subtotal + taxAmount) * cardProcessingFeeRate * 100) / 100;
+  const cardProcessingFeeRate = normalizePercentRate(parseFloat(ccFeeRateStr));
 
-  const totalWithTax = Math.round((subtotal + taxAmount + cardProcessingFee) * 100) / 100;
+  const { subtotal, surgeAdjustment, taxAmount, cardProcessingFee, totalWithTax } = computeFareBreakdown({
+    baseFare,
+    distanceCharge,
+    airportFee,
+    zoneMultiplier,
+    taxRate,
+    cardProcessingFeeRate,
+  });
 
   res.json(
     GetQuoteResponse.parse({

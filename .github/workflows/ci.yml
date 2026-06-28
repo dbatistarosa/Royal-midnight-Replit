@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+jobs:
+  typecheck-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Matches vercel.json's installCommand — this lockfile has a known
+      # config mismatch between package.json `overrides` and
+      # pnpm-workspace.yaml that --frozen-lockfile rejects.
+      - run: pnpm install --no-frozen-lockfile
+
+      # Informational only, not gating: the repo has ~80 pre-existing type
+      # errors (mostly Express's req.params typed as string | string[]) that
+      # predate this workflow and aren't part of this change. Surfacing the
+      # trend here without blocking merges until that backlog is triaged.
+      - run: pnpm run typecheck
+        continue-on-error: true
+
+      - run: pnpm run test

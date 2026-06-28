@@ -49,6 +49,9 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
 
   const commissionPct = await getCommissionPct();
   const priceQuoted = parseFloat(String(booking.priceQuoted));
+  // Commission base: pre-tax/pre-fee/pre-discount subtotal, falls back to priceQuoted
+  // for legacy rows — see fareSubtotal column comment in lib/db/src/schema/bookings.ts.
+  const fareSubtotal = booking.fareSubtotal != null ? parseFloat(String(booking.fareSubtotal)) : priceQuoted;
   const emailData = {
     id: booking.id,
     passengerName: booking.passengerName,
@@ -59,7 +62,7 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
     vehicleClass: booking.vehicleClass ?? "business",
     passengers: booking.passengers ?? 1,
     priceQuoted,
-    driverEarnings: Math.round(priceQuoted * commissionPct * 100) / 100,
+    driverEarnings: Math.round(fareSubtotal * commissionPct * 100) / 100,
     flightNumber: booking.flightNumber ?? null,
     specialRequests: booking.specialRequests ?? null,
   };

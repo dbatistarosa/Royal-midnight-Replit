@@ -6,6 +6,11 @@ import path from "path";
 import { existsSync } from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { initSentry, Sentry } from "./lib/sentry";
+
+// Must run before the app/middleware are built so Sentry's auto-instrumentation
+// can wrap them.
+initSentry();
 
 const app: Express = express();
 
@@ -53,11 +58,21 @@ const ALLOWED_ORIGINS = new Set(
     .filter(Boolean),
 );
 
+// Vercel Preview Deployments get a dynamic, per-deploy URL
+// (royal-midnight-git-<branch>-<team>.vercel.app) that can't be listed in
+// ALLOWED_ORIGINS ahead of time — scoped narrowly to this project's own
+// preview URL pattern, not all of *.vercel.app, so other Vercel projects
+// aren't accidentally allowed.
+const PREVIEW_ORIGIN_PATTERN = /^https:\/\/royal-midnight-[a-z0-9-]+\.vercel\.app$/;
+
 app.use(
   cors({
     origin(requestOrigin, callback) {
       // Allow server-to-server calls (no Origin header) and whitelisted origins only
-      if (!requestOrigin || ALLOWED_ORIGINS.has(requestOrigin)) {
+      const isAllowedPreview = process.env.VERCEL_ENV === "preview"
+        && !!requestOrigin
+        && PREVIEW_ORIGIN_PATTERN.test(requestOrigin);
+      if (!requestOrigin || ALLOWED_ORIGINS.has(requestOrigin) || isAllowedPreview) {
         callback(null, true);
       } else {
         callback(new Error(`Origin "${requestOrigin}" not allowed`));
@@ -89,6 +104,10 @@ if (process.env.NODE_ENV === "production") {
     logger.warn({ frontendDist }, "Frontend dist not found — static serving skipped");
   }
 }
+
+// Reports unhandled route errors to Sentry (no-ops if SENTRY_DSN is unset) —
+// must come before the generic error handler below so it sees the error first.
+Sentry.setupExpressErrorHandler(app);
 
 // Global error handler — logs unhandled route errors via pino, returns generic JSON
 app.use((err: unknown, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {

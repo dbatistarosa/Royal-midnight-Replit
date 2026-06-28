@@ -23,6 +23,8 @@ export interface CreateBookingBody {
   specialRequests?: string | null;
   priceQuoted: number;
   /** @nullable */
+  fareSubtotal?: number | null;
+  /** @nullable */
   promoCode?: string | null;
   /** @nullable */
   discountAmount?: number | null;

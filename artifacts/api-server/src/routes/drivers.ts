@@ -625,20 +625,22 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
   const filterStart = filterStartRaw;
   const filterEnd = filterEndRaw;
 
-  // Track fare and tips separately — commission applies only to fares, tips pass through 100%
+  // Track fare and tips separately — commission applies only to fares, tips pass through 100%.
+  // coalesce(fare_subtotal, price_quoted) = pre-tax/pre-fee/pre-discount commission base,
+  // falling back to price_quoted only for legacy rows that predate the fare_subtotal column.
   const [stats] = await db
     .select({
-      fareTotal: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
-      fareThisMonth: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
-      fareThisWeek: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
-      fareToday: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
+      fareTotal: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed'), 0)::float`,
+      fareThisMonth: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
+      fareThisWeek: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
+      fareToday: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
       totalRides: sql<number>`count(*) filter (where status = 'completed')::int`,
       tipsTotal: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null), 0)::float`,
       tipsThisMonth: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
       tipsThisWeek: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and created_at >= date_trunc('week', now())), 0)::float`,
       tipsToday: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and created_at::date = current_date), 0)::float`,
       // Period-scoped aggregates (only populated when date range is provided)
-      farePeriod: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`})), 0)::float`,
+      farePeriod: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed' and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`})), 0)::float`,
       tipsPeriod: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`})), 0)::float`,
       ridesPeriod: sql<number>`count(*) filter (where status = 'completed' and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`}))::int`,
     })
@@ -657,7 +659,7 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
   const dailyRaw = await db
     .select({
       date: sql<string>`date(created_at)::text`,
-      fare: sql<number>`coalesce(sum(price_quoted::numeric), 0)::float`,
+      fare: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric), 0)::float`,
       tip: sql<number>`coalesce(sum(coalesce(tip_amount, 0)::numeric), 0)::float`,
       rides: sql<number>`count(*)::int`,
     })

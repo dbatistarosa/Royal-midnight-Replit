@@ -48,3 +48,9 @@ Thumbs.db
 .cache/
 .local/
 .vercel
+.qa-tokens.sh
+
+# Environment variables (never commit real secrets — .env.example files are the templates)
+.env
+.env.local
+.env.*.local

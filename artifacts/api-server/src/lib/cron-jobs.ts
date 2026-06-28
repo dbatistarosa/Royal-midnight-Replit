@@ -27,7 +27,7 @@ export async function sendTripReminders(): Promise<void> {
         await client.query("BEGIN");
         const { rows } = await client.query(
           `SELECT id, passenger_name, passenger_email, passenger_phone, pickup_address, dropoff_address,
-                  pickup_at, vehicle_class, passengers, price_quoted, driver_id
+                  pickup_at, vehicle_class, passengers, price_quoted, fare_subtotal, driver_id
            FROM bookings
            WHERE id = $1
              AND status = 'confirmed'
@@ -46,7 +46,8 @@ export async function sendTripReminders(): Promise<void> {
         if (!driver) { await client.query("ROLLBACK"); continue; }
 
         const priceQuoted = parseFloat(String(row.price_quoted ?? "0"));
-        const driverEarnings = Math.round(priceQuoted * commissionPct * 100) / 100;
+        const fareSubtotal = row.fare_subtotal != null ? parseFloat(String(row.fare_subtotal)) : priceQuoted;
+        const driverEarnings = Math.round(fareSubtotal * commissionPct * 100) / 100;
 
         const reminderData = {
           id: row.id as number,
@@ -163,7 +164,7 @@ export async function runWeeklyPayoutIfNeeded(): Promise<void> {
       new Date(weekEnd.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
     const drivers = await db.select().from(driversTable).where(sql`approval_status = 'approved'`).orderBy(driversTable.name);
-    const bookings = await db.select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted })
+    const bookings = await db.select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted, fareSubtotal: bookingsTable.fareSubtotal })
       .from(bookingsTable)
       .where(sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
 
@@ -171,7 +172,8 @@ export async function runWeeklyPayoutIfNeeded(): Promise<void> {
     for (const b of bookings) {
       if (!b.driverId) continue;
       const e = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0 };
-      earningsByDriver.set(b.driverId, { rides: e.rides + 1, gross: e.gross + parseFloat(String(b.priceQuoted ?? "0")) });
+      const fareBase = b.fareSubtotal != null ? parseFloat(String(b.fareSubtotal)) : parseFloat(String(b.priceQuoted ?? "0"));
+      earningsByDriver.set(b.driverId, { rides: e.rides + 1, gross: e.gross + fareBase });
     }
 
     const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("./mailer.js");

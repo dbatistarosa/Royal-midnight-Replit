@@ -49,3 +49,19 @@ export async function sendNewRideOfferPush(
     }));
   await sendExpoPush(messages);
 }
+
+// Sent when an admin directly assigns a driver to a booking (not the open-pool
+// self-accept flow) — without this, a directly-assigned driver has no signal
+// that a trip exists until they happen to open the app.
+export async function sendDriverAssignedPush(
+  driver: PushableDriver,
+  booking: { id: number; pickupAddress: string; driverEarnings: number },
+): Promise<void> {
+  if (!driver.pushToken) return;
+  await sendExpoPush([{
+    to: driver.pushToken,
+    title: "New Trip Assigned",
+    body: `${booking.pickupAddress.split(",")[0]} — $${booking.driverEarnings.toFixed(2)} earnings`,
+    data: { type: "trip_assigned", bookingId: booking.id },
+  }]);
+}

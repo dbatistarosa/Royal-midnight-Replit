@@ -561,6 +561,9 @@ export default function Book() {
             flightNumber: values.flightNumber || null,
             specialRequests: values.specialRequests || null,
             priceQuoted: effectiveTotal,
+            // Driver commission is based on the pre-tax/pre-fee/pre-discount subtotal —
+            // taxes, the card fee, and any promo discount are absorbed by the company only.
+            fareSubtotal: selectedQuote.subtotal,
             promoCode: promoResult?.valid && promoCode ? promoCode.toUpperCase() : null,
             discountAmount: promoResult?.valid && promoResult.discountAmount != null ? promoResult.discountAmount : null,
             userId: bookingForTravelerId ?? userId,

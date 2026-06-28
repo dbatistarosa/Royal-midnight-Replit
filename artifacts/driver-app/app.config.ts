@@ -64,7 +64,7 @@ const config: ExpoConfig = {
   extra: {
     apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://royalmidnight.com/api",
     eas: {
-      projectId: process.env.EAS_PROJECT_ID ?? "",
+      projectId: process.env.EAS_PROJECT_ID ?? "caed6e0b-2b17-47d6-aaeb-1675e9cda7d4",
     },
   },
 };

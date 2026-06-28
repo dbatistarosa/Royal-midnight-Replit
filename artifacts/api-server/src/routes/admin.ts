@@ -159,16 +159,18 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
   const [totals] = await db
     .select({
       totalRevenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where ${dateFilter}), 0)::float`,
+      totalFareSubtotal: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where ${dateFilter}), 0)::float`,
       completedCount: sql<number>`count(*) filter (where ${dateFilter})::int`,
     })
     .from(bookingsTable);
 
   // ── Financial breakdown ───────────────────────────────────────────────────────
-  // price_quoted = subtotal + taxes (gross charged to passenger, pre–CC fee).
-  // Reverse-calculate components using the current rates for reporting purposes.
+  // price_quoted = what the passenger actually paid (subtotal + tax + card fee − any
+  // discount). totalSubtotal is the real, stored pre-tax/pre-fee/pre-discount fare base
+  // (fare_subtotal), not a reverse-engineered estimate — this is also the driver
+  // commission base, so it must never be reduced by tax/fee/discount.
   const totalGrossIncome = totals?.totalRevenue ?? 0;
-  // subtotal = grossIncome / (1 + taxRate)  →  taxes = grossIncome - subtotal
-  const totalSubtotal = Math.round((totalGrossIncome / (1 + taxRatePct)) * 100) / 100;
+  const totalSubtotal = totals?.totalFareSubtotal ?? 0;
   const totalTaxesCollected = Math.round((totalGrossIncome - totalSubtotal) * 100) / 100;
   const totalFeesCollected = Math.round(totalGrossIncome * ccFeePct * 100) / 100;
   const totalDriverCommissions = Math.round(totalSubtotal * commissionPct * 100) / 100;
@@ -313,6 +315,7 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
     .select({
       driverId: bookingsTable.driverId,
       priceQuoted: bookingsTable.priceQuoted,
+      fareSubtotal: bookingsTable.fareSubtotal,
       tipAmount: bookingsTable.tipAmount,
     })
     .from(bookingsTable)
@@ -320,14 +323,17 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
       sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`
     );
 
-  // Aggregate per driver (gross fare + tips tracked separately)
+  // Aggregate per driver (gross fare + tips tracked separately). Commission base is
+  // fare_subtotal (pre-tax/pre-fee/pre-discount), falling back to price_quoted for
+  // legacy rows.
   const earningsByDriver = new Map<number, { rides: number; gross: number; tips: number }>();
   for (const b of bookings) {
     if (!b.driverId) continue;
     const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0, tips: 0 };
+    const fareBase = b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : parseFloat(b.priceQuoted ?? "0");
     earningsByDriver.set(b.driverId, {
       rides: existing.rides + 1,
-      gross: existing.gross + parseFloat(b.priceQuoted ?? "0"),
+      gross: existing.gross + fareBase,
       tips: existing.tips + parseFloat(b.tipAmount ?? "0"),
     });
   }
@@ -398,7 +404,7 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
     .orderBy(driversTable.name);
 
   const bookings = await db
-    .select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted, tipAmount: bookingsTable.tipAmount })
+    .select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted, fareSubtotal: bookingsTable.fareSubtotal, tipAmount: bookingsTable.tipAmount })
     .from(bookingsTable)
     .where(sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
 
@@ -406,9 +412,10 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
   for (const b of bookings) {
     if (!b.driverId) continue;
     const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0, tips: 0 };
+    const fareBase = b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : parseFloat(b.priceQuoted ?? "0");
     earningsByDriver.set(b.driverId, {
       rides: existing.rides + 1,
-      gross: existing.gross + parseFloat(b.priceQuoted ?? "0"),
+      gross: existing.gross + fareBase,
       tips: existing.tips + parseFloat(b.tipAmount ?? "0"),
     });
   }

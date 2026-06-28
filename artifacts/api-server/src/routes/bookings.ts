@@ -19,9 +19,10 @@ import {
   sendDriverArrived,
   sendAccountInvitation,
   sendTripCompletionEmail,
+  sendBookingAssignedDriver,
 } from "../lib/mailer.js";
 import { sendDriverOnWaySms, sendDriverArrivedSms, sendCancellationSms } from "../lib/sms.js";
-import { sendNewRideOfferPush } from "../lib/push.js";
+import { sendNewRideOfferPush, sendDriverAssignedPush } from "../lib/push.js";
 import { maybeRewardReferrerForCompletedRide } from "../lib/referrals.js";
 import {
   ListBookingsQueryParams,
@@ -94,6 +95,9 @@ function parseBooking(b: typeof bookingsTable.$inferSelect) {
   return {
     ...b,
     priceQuoted: parseFloat(b.priceQuoted ?? "0"),
+    // Commission base: falls back to priceQuoted for legacy rows / booking paths
+    // that don't supply it (e.g. admin manual bookings).
+    fareSubtotal: b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : parseFloat(b.priceQuoted ?? "0"),
     discountAmount: b.discountAmount != null ? parseFloat(b.discountAmount) : null,
     tipAmount: b.tipAmount != null ? parseFloat(b.tipAmount) : null,
     pickupAt: b.pickupAt.toISOString(),
@@ -187,14 +191,16 @@ function getStripe(): Stripe {
   return new Stripe(key, { apiVersion: "2024-06-20" as const });
 }
 
-function toDriverView<T extends { priceQuoted: number }>(
+function toDriverView<T extends { priceQuoted: number; fareSubtotal: number }>(
   booking: T,
   commissionPct: number
-): Omit<T, "priceQuoted"> & { driverEarnings: number } {
-  const { priceQuoted, ...rest } = booking;
+): Omit<T, "priceQuoted" | "fareSubtotal"> & { driverEarnings: number } {
+  const { priceQuoted, fareSubtotal, ...rest } = booking;
   return {
     ...rest,
-    driverEarnings: Math.round(priceQuoted * commissionPct * 100) / 100,
+    // Commission is on the undiscounted, pre-tax/pre-fee subtotal — drivers are
+    // unaffected by company promos/coupons and never see priceQuoted/fareSubtotal directly.
+    driverEarnings: Math.round(fareSubtotal * commissionPct * 100) / 100,
   };
 }
 
@@ -443,6 +449,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       ...parsed.data,
       pickupAt: new Date(parsed.data.pickupAt),
       priceQuoted: String(parsed.data.priceQuoted),
+      fareSubtotal: String(parsed.data.fareSubtotal ?? parsed.data.priceQuoted),
       discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
       paymentType: parsed.data.paymentType ?? "standard",
       // Corporate bookings are confirmed immediately; fully-discounted bookings skip
@@ -521,28 +528,37 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       try {
         const parsed2 = parseBooking(booking);
         const commissionPct = await getCommissionPct();
-        const driverEarnings = Math.round(parsed2.priceQuoted * commissionPct * 100) / 100;
+        const driverEarnings = Math.round(parsed2.fareSubtotal * commissionPct * 100) / 100;
         const emailData = {
           ...parsed2,
           vehicleClass: parsed2.vehicleClass ?? "business",
           passengers: parsed2.passengers ?? 1,
           driverEarnings,
         };
-        await sendBookingConfirmationPassenger(emailData);
-        await sendNewBookingAdmin(emailData);
         const approvedDrivers = await db
           .select({ email: usersTable.email })
           .from(driversTable)
           .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
           .where(eq(driversTable.approvalStatus, "approved"));
         const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
-        await sendNewBookingAvailableToDrivers(emailData, driverEmails);
 
         const pushableDrivers = await db
           .select({ pushToken: driversTable.pushToken, pushPlatform: driversTable.pushPlatform })
           .from(driversTable)
           .where(and(eq(driversTable.status, "available"), eq(driversTable.complianceHold, false)));
-        await sendNewRideOfferPush(pushableDrivers, { id: booking.id, pickupAddress: booking.pickupAddress, driverEarnings });
+
+        // Each notification is independent — one failing (e.g. a bad template field)
+        // must never silently prevent the others from firing, especially the driver
+        // fan-out, which is how drivers learn a ride is available to claim.
+        const results = await Promise.allSettled([
+          sendBookingConfirmationPassenger(emailData),
+          sendNewBookingAdmin(emailData),
+          sendNewBookingAvailableToDrivers(emailData, driverEmails),
+          sendNewRideOfferPush(pushableDrivers, { id: booking.id, pickupAddress: booking.pickupAddress, driverEarnings }),
+        ]);
+        for (const r of results) {
+          if (r.status === "rejected") console.error("[bookings] post-create notification failed:", r.reason);
+        }
       } catch (err) {
         console.error("[bookings] post-create email error:", err);
       }
@@ -839,6 +855,38 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
       }
     }
   }
+
+  // Fire-and-forget: notify the driver when an admin directly assigns/reassigns them —
+  // unlike the open-pool self-accept flow, a direct assignment has no other signal
+  // that tells the driver a trip now exists for them.
+  if (booking.driverId != null && before?.driverId !== booking.driverId) {
+    const assignedDriverId = booking.driverId;
+    (async () => {
+      try {
+        const [driverUser] = await db
+          .select({ email: usersTable.email, pushToken: driversTable.pushToken, pushPlatform: driversTable.pushPlatform })
+          .from(driversTable)
+          .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
+          .where(eq(driversTable.id, assignedDriverId));
+        if (!driverUser) return;
+
+        const commissionPct = await getCommissionPct();
+        const parsedBooking = parseBooking(booking);
+        const driverEarnings = Math.round(parsedBooking.fareSubtotal * commissionPct * 100) / 100;
+        const emailData = { ...parsedBooking, vehicleClass: parsedBooking.vehicleClass ?? "business", passengers: parsedBooking.passengers ?? 1, driverEarnings };
+
+        const results = await Promise.allSettled([
+          sendBookingAssignedDriver(emailData, driverUser.email),
+          sendDriverAssignedPush({ pushToken: driverUser.pushToken, pushPlatform: driverUser.pushPlatform }, { id: booking.id, pickupAddress: booking.pickupAddress, driverEarnings }),
+        ]);
+        for (const r of results) {
+          if (r.status === "rejected") console.error("[bookings] driver-assigned notification failed:", r.reason);
+        }
+      } catch (err) {
+        console.error("[bookings] driver-assigned notification error:", err);
+      }
+    })();
+  }
 });
 
 // Driver self-assigns a pending booking
@@ -952,7 +1000,7 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
         .from(usersTable)
         .innerJoin(driversTable, eq(driversTable.userId, usersTable.id))
         .where(eq(usersTable.id, caller.userId));
-      const bookingEmailData = { ...parsedUpdated, vehicleClass: parsedUpdated.vehicleClass ?? "business", passengers: parsedUpdated.passengers ?? 1, driverEarnings: Math.round(parsedUpdated.priceQuoted * commissionPct2 * 100) / 100 };
+      const bookingEmailData = { ...parsedUpdated, vehicleClass: parsedUpdated.vehicleClass ?? "business", passengers: parsedUpdated.passengers ?? 1, driverEarnings: Math.round(parsedUpdated.fareSubtotal * commissionPct2 * 100) / 100 };
       const vehicleDescription = [driverUser?.vehicleColor, driverUser?.vehicleYear, driverUser?.vehicleMake, driverUser?.vehicleModel].filter(Boolean).join(" ") || "Luxury Vehicle";
 
       const emailPromises: Promise<void>[] = [
@@ -981,7 +1029,10 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
         );
       }
 
-      await Promise.all(emailPromises);
+      const results = await Promise.allSettled(emailPromises);
+      for (const r of results) {
+        if (r.status === "rejected") console.error("[bookings] accept notification failed:", r.reason);
+      }
     } catch (err) {
       console.error("[bookings] accept email error:", err);
     }

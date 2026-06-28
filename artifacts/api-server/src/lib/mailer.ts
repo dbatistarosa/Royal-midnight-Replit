@@ -79,6 +79,18 @@ async function send(to: string | string[], subject: string, html: string, type =
   await logEmail(to, subject, type, "skipped", "No email provider configured (set RESEND_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS)");
 }
 
+// Royal Midnight email templates interpolate user-supplied strings (names, addresses,
+// special requests, etc.) directly into raw HTML — escapeHtml() prevents stored XSS
+// from rendering as live markup in a recipient's email client.
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function wrap(body: string) {
   return `<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#e8e0d0;margin:0;padding:0">
 <div style="max-width:600px;margin:0 auto;padding:32px 24px">
@@ -126,7 +138,7 @@ export async function sendBookingConfirmationPassenger(b: BookingEmailData) {
   </div>
 </div>
 
-<p style="color:#e8e0d0;font-size:14px;margin:0 0 4px">Dear ${b.passengerName.split(" ")[0]},</p>
+<p style="color:#e8e0d0;font-size:14px;margin:0 0 4px">Dear ${escapeHtml(b.passengerName.split(" ")[0])},</p>
 <p style="color:#888;font-size:13px;margin:0 0 24px;line-height:1.6">
   Your payment has been received and your reservation is confirmed. Below is your booking receipt — please keep it for your records.
 </p>
@@ -135,9 +147,9 @@ export async function sendBookingConfirmationPassenger(b: BookingEmailData) {
   <p style="color:#c9a84c;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin:0 0 14px">Itinerary</p>
   <table style="width:100%;border-collapse:collapse">
     ${row("Date &amp; Time", dateStr)}
-    ${row("Pick-up", b.pickupAddress)}
-    ${row("Drop-off", b.dropoffAddress)}
-    ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
+    ${row("Pick-up", escapeHtml(b.pickupAddress))}
+    ${row("Drop-off", escapeHtml(b.dropoffAddress))}
+    ${b.flightNumber ? row("Flight", escapeHtml(b.flightNumber)) : ""}
   </table>
 </div>
 
@@ -146,7 +158,7 @@ export async function sendBookingConfirmationPassenger(b: BookingEmailData) {
   <table style="width:100%;border-collapse:collapse">
     ${row("Vehicle", vehicleLabel)}
     ${row("Passengers", String(b.passengers))}
-    ${b.specialRequests ? row("Special Requests", b.specialRequests) : ""}
+    ${b.specialRequests ? row("Special Requests", escapeHtml(b.specialRequests)) : ""}
   </table>
 </div>
 
@@ -185,16 +197,16 @@ export async function sendNewBookingAdmin(b: BookingEmailData) {
 <p style="color:#888;font-size:13px;margin:0 0 20px">A new reservation has been paid and is awaiting driver assignment.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", refNum)}
-  ${row("Passenger", b.passengerName)}
-  ${row("Email", b.passengerEmail)}
-  ${row("Pickup", b.pickupAddress)}
-  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Passenger", escapeHtml(b.passengerName))}
+  ${row("Email", escapeHtml(b.passengerEmail))}
+  ${row("Pickup", escapeHtml(b.pickupAddress))}
+  ${row("Dropoff", escapeHtml(b.dropoffAddress))}
   ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
   ${row("Vehicle", vehicleLabel)}
   ${row("Passengers", String(b.passengers))}
   ${row("Total Fare", `<strong style="color:#c9a84c">$${b.priceQuoted.toFixed(2)}</strong>`)}
-  ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
-  ${b.specialRequests ? row("Special Requests", b.specialRequests) : ""}
+  ${b.flightNumber ? row("Flight", escapeHtml(b.flightNumber)) : ""}
+  ${b.specialRequests ? row("Special Requests", escapeHtml(b.specialRequests)) : ""}
 </table>
 <p style="margin-top:24px"><a href="${appUrl}/admin/bookings" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">MANAGE IN ADMIN</a></p>`);
   await send(ADMIN_EMAIL, `New Booking ${refNum} — ${b.passengerName}`, html, "new_booking_admin");
@@ -218,26 +230,56 @@ export async function sendNewBookingAvailableToDrivers(b: BookingEmailData, driv
 
 <table style="width:100%;border-collapse:collapse">
   ${row("Date &amp; Time", dateStr)}
-  ${row("Pick-up", b.pickupAddress)}
-  ${row("Drop-off", b.dropoffAddress)}
+  ${row("Pick-up", escapeHtml(b.pickupAddress))}
+  ${row("Drop-off", escapeHtml(b.dropoffAddress))}
   ${row("Vehicle", vehicleLabel)}
   ${row("Passengers", String(b.passengers))}
-  ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
-  ${b.specialRequests ? row("Special Requests", b.specialRequests) : ""}
+  ${b.flightNumber ? row("Flight", escapeHtml(b.flightNumber)) : ""}
+  ${b.specialRequests ? row("Special Requests", escapeHtml(b.specialRequests)) : ""}
 </table>
 <p style="margin-top:24px"><a href="${appUrl}/driver/dashboard" style="background:#c9a84c;color:#050505;padding:12px 28px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">ACCEPT THIS RIDE</a></p>
 <p style="margin-top:16px;color:#666;font-size:11px">Log in to the driver portal to view full details and accept the ride.</p>`);
   await send(driverEmails, `New Ride ${refNum} — ${earnings} earnings`, html, "new_booking_drivers");
 }
 
+// Sent when an admin directly assigns a driver to a booking (not the open-pool
+// self-accept flow) — the driver otherwise has no signal a trip exists for them.
+export async function sendBookingAssignedDriver(b: BookingEmailData, driverEmail: string) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const refNum = `RM-${String(b.id).padStart(4, "0")}`;
+  const earnings = b.driverEarnings != null ? `$${b.driverEarnings.toFixed(2)}` : "—";
+  const vehicleLabel = b.vehicleClass === "business" ? "Business Class Sedan" : b.vehicleClass === "suv" ? "Premium SUV" : b.vehicleClass;
+  const dateStr = new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" });
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 4px">New Trip Assigned — ${refNum}</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">An admin has assigned this trip directly to you.</p>
+
+<div style="background:#0d0d0d;border:1px solid #c9a84c40;padding:20px;margin-bottom:20px">
+  <p style="color:#c9a84c;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin:0 0 14px">Your Earnings</p>
+  <p style="color:#c9a84c;font-size:32px;font-weight:bold;margin:0;font-family:monospace">${earnings}</p>
+</div>
+
+<table style="width:100%;border-collapse:collapse">
+  ${row("Date &amp; Time", dateStr)}
+  ${row("Pick-up", escapeHtml(b.pickupAddress))}
+  ${row("Drop-off", escapeHtml(b.dropoffAddress))}
+  ${row("Vehicle", vehicleLabel)}
+  ${row("Passengers", String(b.passengers))}
+  ${b.flightNumber ? row("Flight", escapeHtml(b.flightNumber)) : ""}
+  ${b.specialRequests ? row("Special Requests", escapeHtml(b.specialRequests)) : ""}
+</table>
+<p style="margin-top:24px"><a href="${appUrl}/driver/dashboard" style="background:#c9a84c;color:#050505;padding:12px 28px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">VIEW TRIP DETAILS</a></p>`);
+  await send(driverEmail, `New Trip Assigned ${refNum} — ${earnings} earnings`, html, "booking_assigned_driver");
+}
+
 export async function sendBookingCancelledAdmin(b: BookingEmailData) {
   const html = wrap(`
 <h2 style="color:#ef4444;font-size:20px;margin:0 0 20px">Booking #${b.id} Cancelled</h2>
 <table style="width:100%;border-collapse:collapse">
-  ${row("Passenger", b.passengerName)}
-  ${row("Email", b.passengerEmail)}
-  ${row("Pickup", b.pickupAddress)}
-  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Passenger", escapeHtml(b.passengerName))}
+  ${row("Email", escapeHtml(b.passengerEmail))}
+  ${row("Pickup", escapeHtml(b.pickupAddress))}
+  ${row("Dropoff", escapeHtml(b.dropoffAddress))}
   ${row("Was Scheduled", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York" }))}
   ${row("Total Fare", `$${b.priceQuoted.toFixed(2)}`)}
 </table>`);
@@ -253,16 +295,16 @@ export async function sendDriverAcceptedPassenger(
   const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
   const html = wrap(`
 <h2 style="color:#22c55e;font-size:20px;margin:0 0 8px">Your Driver is Confirmed</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Great news, ${b.passengerName.split(" ")[0]}. A driver has been assigned to your reservation. Details are below.</p>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Great news, ${escapeHtml(b.passengerName.split(" ")[0])}. A driver has been assigned to your reservation. Details are below.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", `RM-${String(b.id).padStart(4, "0")}`)}
-  ${row("Driver", driverName)}
-  ${row("Phone", driverPhone)}
-  ${row("Vehicle", vehicleDescription)}
-  ${row("Pickup", b.pickupAddress)}
-  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Driver", escapeHtml(driverName))}
+  ${row("Phone", escapeHtml(driverPhone))}
+  ${row("Vehicle", escapeHtml(vehicleDescription))}
+  ${row("Pickup", escapeHtml(b.pickupAddress))}
+  ${row("Dropoff", escapeHtml(b.dropoffAddress))}
   ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
-  ${b.flightNumber ? row("Flight", b.flightNumber) : ""}
+  ${b.flightNumber ? row("Flight", escapeHtml(b.flightNumber)) : ""}
 </table>
 <p style="margin-top:24px"><a href="${appUrl}/passenger/rides" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">VIEW MY RIDES</a></p>
 <p style="margin-top:20px;color:#888;font-size:12px">
@@ -276,11 +318,11 @@ export async function sendDriverAcceptedAdmin(b: BookingEmailData, driverName: s
   const html = wrap(`
 <h2 style="color:#22c55e;font-size:20px;margin:0 0 20px">Driver Accepted Booking #${b.id}</h2>
 <table style="width:100%;border-collapse:collapse">
-  ${row("Driver", driverName)}
-  ${row("Driver Email", driverEmail)}
-  ${row("Passenger", b.passengerName)}
-  ${row("Pickup", b.pickupAddress)}
-  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Driver", escapeHtml(driverName))}
+  ${row("Driver Email", escapeHtml(driverEmail))}
+  ${row("Passenger", escapeHtml(b.passengerName))}
+  ${row("Pickup", escapeHtml(b.pickupAddress))}
+  ${row("Dropoff", escapeHtml(b.dropoffAddress))}
   ${row("Scheduled", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York" }))}
   ${row("Driver Earnings", b.driverEarnings != null ? `$${b.driverEarnings.toFixed(2)}` : "—")}
 </table>`);
@@ -292,8 +334,8 @@ export async function sendDriverUnassignedAdmin(bookingId: number, driverName: s
 <h2 style="color:#f59e0b;font-size:20px;margin:0 0 20px">Driver Unassigned from Booking #${bookingId}</h2>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", String(bookingId))}
-  ${row("Passenger", passengerName)}
-  ${row("Unassigned Driver", driverName)}
+  ${row("Passenger", escapeHtml(passengerName))}
+  ${row("Unassigned Driver", escapeHtml(driverName))}
 </table>
 <p style="margin-top:16px;color:#888;font-size:13px">The booking is now back in the available pool for drivers to accept.</p>`);
   await send(ADMIN_EMAIL, `Driver Unassigned — Booking #${bookingId}`, html, "driver_unassigned_admin");
@@ -307,9 +349,9 @@ export async function sendInvoiceToPassenger(b: BookingEmailData, invoiceUrl: st
 <p style="color:#888;font-size:13px;margin:0 0 20px">Please find your invoice for booking ${bookingRef} below. Payment is due within 7 days.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", bookingRef)}
-  ${row("Passenger", b.passengerName)}
-  ${row("Pickup", b.pickupAddress)}
-  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Passenger", escapeHtml(b.passengerName))}
+  ${row("Pickup", escapeHtml(b.pickupAddress))}
+  ${row("Dropoff", escapeHtml(b.dropoffAddress))}
   ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
   ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
   ${row("Total Due", `<span style="color:#c9a84c;font-weight:bold">$${b.priceQuoted.toFixed(2)}</span>`)}
@@ -331,10 +373,10 @@ export async function sendBookingCancelledPassenger(b: BookingEmailData, cancell
   const refundAmount = Math.max(0, b.priceQuoted - cancellationFee);
   const html = wrap(`
 <h2 style="color:#ef4444;font-size:20px;margin:0 0 8px">Booking Cancelled</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, your reservation has been cancelled. Here is a summary.</p>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(b.passengerName.split(" ")[0])}, your reservation has been cancelled. Here is a summary.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking", bookingRef)}
-  ${row("Route", `${b.pickupAddress} → ${b.dropoffAddress}`)}
+  ${row("Route", `${escapeHtml(b.pickupAddress)} → ${escapeHtml(b.dropoffAddress)}`)}
   ${row("Was Scheduled", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
   ${row("Booking Total", `$${b.priceQuoted.toFixed(2)}`)}
   ${cancellationFee > 0 ? row("Cancellation Fee", `<span style="color:#ef4444">$${cancellationFee.toFixed(2)}</span>`) : row("Cancellation Fee", '<span style="color:#22c55e">None</span>')}
@@ -354,10 +396,10 @@ export async function sendDriverOnWay(b: BookingEmailData) {
   const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Your Driver Is On the Way</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, your Royal Midnight driver is heading to your pickup location now.</p>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(b.passengerName.split(" ")[0])}, your Royal Midnight driver is heading to your pickup location now.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking", bookingRef)}
-  ${row("Pickup", b.pickupAddress)}
+  ${row("Pickup", escapeHtml(b.pickupAddress))}
   ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
 </table>
 <p style="margin-top:20px;color:#888;font-size:12px">
@@ -375,10 +417,10 @@ export async function sendDriverArrived(b: BookingEmailData) {
   const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
   const html = wrap(`
 <h2 style="color:#22c55e;font-size:20px;margin:0 0 8px">Your Driver Has Arrived</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, your Royal Midnight driver is at your pickup location.</p>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(b.passengerName.split(" ")[0])}, your Royal Midnight driver is at your pickup location.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking", bookingRef)}
-  ${row("Pickup", b.pickupAddress)}
+  ${row("Pickup", escapeHtml(b.pickupAddress))}
   ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
 </table>
 <p style="margin-top:20px;color:#888;font-size:12px">
@@ -399,10 +441,10 @@ export async function sendTripCompletionEmail(b: BookingEmailData, tipAmount?: n
     + (extraCharge != null && extraCharge > 0 ? extraCharge : 0);
   const html = wrap(`
 <h2 style="color:#22c55e;font-size:20px;margin:0 0 8px">Trip Completed</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, thank you for riding with Royal Midnight. We hope you enjoyed your journey.</p>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(b.passengerName.split(" ")[0])}, thank you for riding with Royal Midnight. We hope you enjoyed your journey.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking", bookingRef)}
-  ${row("Route", `${b.pickupAddress} → ${b.dropoffAddress}`)}
+  ${row("Route", `${escapeHtml(b.pickupAddress)} → ${escapeHtml(b.dropoffAddress)}`)}
   ${row("Date", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
   ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : b.vehicleClass === "suv" ? "Premium SUV" : b.vehicleClass)}
   ${row("Base Fare", `$${b.priceQuoted.toFixed(2)}`)}
@@ -435,14 +477,14 @@ export async function sendAccountInvitation({
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Your Booking Is Ready</h2>
 <p style="color:#888;font-size:13px;margin:0 0 20px">
-  Hi ${passengerName.split(" ")[0]}, a Royal Midnight reservation (${bookingRef}) has been created for you.
+  Hi ${escapeHtml(passengerName.split(" ")[0])}, a Royal Midnight reservation (${bookingRef}) has been created for you.
   Create your account to view your bookings, track your driver, and manage future reservations.
 </p>
 <p style="margin-top:24px">
   <a href="${signupUrl}" style="background:#c9a84c;color:#050505;padding:12px 28px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">CREATE MY ACCOUNT</a>
 </p>
 <p style="margin-top:20px;color:#888;font-size:12px">
-  Your email address (${passengerEmail}) is already linked to your booking — just create a password to get started.<br>
+  Your email address (${escapeHtml(passengerEmail)}) is already linked to your booking — just create a password to get started.<br>
   <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
 </p>`);
   await send(passengerEmail, `Your Royal Midnight Reservation is Ready — Create Your Account`, html, "account_invitation");
@@ -453,7 +495,7 @@ export async function sendStatusChangedAdmin(bookingId: number, oldStatus: strin
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 20px">Booking #${bookingId} Status Changed</h2>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", String(bookingId))}
-  ${row("Passenger", passengerName)}
+  ${row("Passenger", escapeHtml(passengerName))}
   ${row("Previous Status", oldStatus.replace(/_/g, " "))}
   ${row("New Status", newStatus.replace(/_/g, " "))}
 </table>`);
@@ -479,16 +521,16 @@ export async function sendTripReminderPassenger(b: ReminderEmailData) {
   const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Reminder: Your Ride is in 1 Hour</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, this is a reminder that your Royal Midnight ride is scheduled in approximately one hour. Please be ready at your pickup location.</p>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(b.passengerName.split(" ")[0])}, this is a reminder that your Royal Midnight ride is scheduled in approximately one hour. Please be ready at your pickup location.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", bookingRef)}
-  ${row("Pickup", b.pickupAddress)}
-  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Pickup", escapeHtml(b.pickupAddress))}
+  ${row("Dropoff", escapeHtml(b.dropoffAddress))}
   ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
   ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
   ${row("Passengers", String(b.passengers))}
-  ${b.driverName ? row("Driver", b.driverName) : ""}
-  ${b.driverPhone ? row("Driver Phone", b.driverPhone) : ""}
+  ${b.driverName ? row("Driver", escapeHtml(b.driverName)) : ""}
+  ${b.driverPhone ? row("Driver Phone", escapeHtml(b.driverPhone)) : ""}
   ${row("Total Fare", `<span style="color:#c9a84c;font-weight:bold">$${b.priceQuoted.toFixed(2)}</span>`)}
 </table>
 <p style="margin-top:20px;color:#888;font-size:12px">
@@ -506,9 +548,9 @@ export async function sendTripReminderDriver(b: ReminderEmailData, driverEmail: 
 <p style="color:#888;font-size:13px;margin:0 0 20px">This is a reminder that you have a scheduled pickup in approximately one hour. Please review the trip details and be on time.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", bookingRef)}
-  ${row("Passenger", b.passengerName)}
-  ${row("Pickup", b.pickupAddress)}
-  ${row("Dropoff", b.dropoffAddress)}
+  ${row("Passenger", escapeHtml(b.passengerName))}
+  ${row("Pickup", escapeHtml(b.pickupAddress))}
+  ${row("Dropoff", escapeHtml(b.dropoffAddress))}
   ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
   ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
   ${row("Passengers", String(b.passengers))}
@@ -545,10 +587,10 @@ export async function sendWeeklyDriverPayout(params: {
   const maskAccount = accountNumber ? `****${accountNumber.slice(-4)}` : "Not on file";
   const commission = Math.round((grossEarnings * commissionPct) * 100) / 100;
 
-  const html = baseHtml(`
+  const html = wrap(`
 <h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Weekly Earnings Statement</h2>
 <p style="color:#9ca3af;margin:0 0 24px;font-size:14px">${weekLabel}</p>
-<p style="color:#e8e0d0;">Dear ${driverName},</p>
+<p style="color:#e8e0d0;">Dear ${escapeHtml(driverName)},</p>
 <p style="color:#9ca3af;line-height:1.6;">Here is your earnings summary for the week of <strong style="color:#e8e0d0">${weekLabel}</strong>.</p>
 <table style="width:100%;border-collapse:collapse;margin:20px 0;">
   ${row("Total Rides", String(rides))}
@@ -561,7 +603,7 @@ export async function sendWeeklyDriverPayout(params: {
 ${bankName ? `
 <p style="color:#9ca3af;font-size:13px;margin:20px 0 8px;">Payout will be sent to:</p>
 <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
-  ${row("Bank", bankName)}
+  ${row("Bank", escapeHtml(bankName))}
   ${row("Account", maskAccount)}
 </table>
 ` : `
@@ -599,18 +641,18 @@ export async function sendWeeklyPayoutAdminReport(params: {
 
   const driverRows = payouts.map(p => `
 <tr style="border-bottom:1px solid #27272a;">
-  <td style="padding:10px 8px;color:#e8e0d0;">${p.driverName}</td>
-  <td style="padding:10px 8px;color:#9ca3af;font-size:13px;">${p.driverEmail}</td>
+  <td style="padding:10px 8px;color:#e8e0d0;">${escapeHtml(p.driverName)}</td>
+  <td style="padding:10px 8px;color:#9ca3af;font-size:13px;">${escapeHtml(p.driverEmail)}</td>
   <td style="padding:10px 8px;text-align:center;color:#e8e0d0;">${p.rides}</td>
   <td style="padding:10px 8px;text-align:right;color:#e8e0d0;">$${p.grossEarnings.toFixed(2)}</td>
   <td style="padding:10px 8px;text-align:right;color:#9ca3af;">${p.tipsTotal > 0 ? `<span style="color:#c9a84c">+$${p.tipsTotal.toFixed(2)}</span>` : "—"}</td>
   <td style="padding:10px 8px;text-align:right;color:#c9a84c;font-weight:600;">$${p.driverNet.toFixed(2)}</td>
-  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;">${p.bankName ?? '<span style="color:#ef4444">Missing</span>'}</td>
-  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.routingNumber ?? '—'}</td>
-  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.accountNumber ? `****${p.accountNumber.slice(-4)}` : '—'}</td>
+  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;">${p.bankName ? escapeHtml(p.bankName) : '<span style="color:#ef4444">Missing</span>'}</td>
+  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.routingNumber ? escapeHtml(p.routingNumber) : '—'}</td>
+  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.accountNumber ? `****${escapeHtml(p.accountNumber.slice(-4))}` : '—'}</td>
 </tr>`).join("");
 
-  const html = baseHtml(`
+  const html = wrap(`
 <h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Weekly Payout Report</h2>
 <p style="color:#9ca3af;margin:0 0 24px;font-size:14px">${weekLabel} — For Admin Review</p>
 <table style="width:100%;border-collapse:collapse;margin:0 0 24px;">
@@ -648,7 +690,7 @@ export async function sendPasswordResetEmail(to: string, passengerName: string, 
   const html = wrap(`
 <h2 style="color:#ffffff;margin:0 0 8px;font-size:22px;font-weight:600">Reset Your Password</h2>
 <p style="color:#9ca3af;margin:0 0 20px;font-size:14px">Royal Midnight — Secure Account Recovery</p>
-<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${passengerName},</p>
+<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${escapeHtml(passengerName)},</p>
 <p style="color:#9ca3af;font-size:14px;margin:0 0 24px">
   We received a request to reset your Royal Midnight password. Click the button below to choose a new password.
   This link expires in <strong style="color:#e5e7eb">30 minutes</strong>.
@@ -670,7 +712,7 @@ export async function sendDriverAccountSetupEmail(to: string, driverName: string
   const html = wrap(`
 <h2 style="color:#ffffff;margin:0 0 8px;font-size:22px;font-weight:600">Welcome to Royal Midnight</h2>
 <p style="color:#9ca3af;margin:0 0 20px;font-size:14px">Your Driver Account Is Ready</p>
-<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${driverName},</p>
+<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${escapeHtml(driverName)},</p>
 <p style="color:#9ca3af;font-size:14px;margin:0 0 24px">
   An account has been created for you on the Royal Midnight driver portal. Click the button below to set your
   password. Once you're signed in, you'll be able to upload your driver's license, vehicle registration, and
@@ -697,21 +739,22 @@ export async function sendComplianceReminder(params: {
   dashboardUrl?: string;
 }) {
   const { to, driverName, docType, expiryDate, daysRemaining, dashboardUrl = "https://royalmidnight.com/driver/documents" } = params;
+  const safeDocType = escapeHtml(docType);
   const urgency = daysRemaining <= 0 ? "EXPIRED" : daysRemaining <= 7 ? "CRITICAL" : "REMINDER";
   const color = daysRemaining <= 0 ? "#ef4444" : daysRemaining <= 7 ? "#f97316" : "#c9a84c";
   const statusText = daysRemaining <= 0
-    ? `Your ${docType} has <strong style="color:#ef4444">EXPIRED</strong>.`
+    ? `Your ${safeDocType} has <strong style="color:#ef4444">EXPIRED</strong>.`
     : daysRemaining === 0
-    ? `Your ${docType} expires <strong style="color:#f97316">TODAY</strong>.`
-    : `Your ${docType} expires in <strong style="color:${color}">${daysRemaining} day${daysRemaining !== 1 ? "s" : ""}</strong> (${expiryDate}).`;
+    ? `Your ${safeDocType} expires <strong style="color:#f97316">TODAY</strong>.`
+    : `Your ${safeDocType} expires in <strong style="color:${color}">${daysRemaining} day${daysRemaining !== 1 ? "s" : ""}</strong> (${expiryDate}).`;
 
   const html = wrap(`
-<h2 style="color:#ffffff;margin:0 0 8px;font-size:22px;font-weight:600">Document ${urgency}: ${docType}</h2>
+<h2 style="color:#ffffff;margin:0 0 8px;font-size:22px;font-weight:600">Document ${urgency}: ${safeDocType}</h2>
 <p style="color:#9ca3af;margin:0 0 20px;font-size:14px">Royal Midnight — Compliance Notice</p>
-<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${driverName},</p>
+<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${escapeHtml(driverName)},</p>
 <p style="color:#9ca3af;font-size:14px;margin:0 0 24px">${statusText}</p>
 <p style="color:#9ca3af;font-size:14px;margin:0 0 24px">
-  To continue accepting rides, please upload a renewed copy of your ${docType} through your driver dashboard immediately.
+  To continue accepting rides, please upload a renewed copy of your ${safeDocType} through your driver dashboard immediately.
   ${daysRemaining <= 0 ? "<strong style=\"color:#ef4444\">Your account has been placed on hold until a valid document is approved.</strong>" : ""}
 </p>
 <p style="text-align:center;margin:0 0 24px;">
@@ -738,8 +781,8 @@ export async function sendComplianceLockoutAdmin(params: {
 <div style="background:#1c0a0a;border:1px solid #ef4444;padding:16px;margin-bottom:24px">
   <p style="color:#ef4444;font-weight:bold;margin:0 0 8px;font-size:15px">Automatic Compliance Hold Applied</p>
   <table style="width:100%;font-size:14px;border-collapse:collapse">
-    <tr><td style="color:#9ca3af;padding:4px 0;width:140px">Driver</td><td style="color:#e5e7eb">${driverName} &lt;${driverEmail}&gt;</td></tr>
-    <tr><td style="color:#9ca3af;padding:4px 0">Expired Document</td><td style="color:#ef4444;font-weight:bold">${docType}</td></tr>
+    <tr><td style="color:#9ca3af;padding:4px 0;width:140px">Driver</td><td style="color:#e5e7eb">${escapeHtml(driverName)} &lt;${escapeHtml(driverEmail)}&gt;</td></tr>
+    <tr><td style="color:#9ca3af;padding:4px 0">Expired Document</td><td style="color:#ef4444;font-weight:bold">${escapeHtml(docType)}</td></tr>
     <tr><td style="color:#9ca3af;padding:4px 0">Expiry Date</td><td style="color:#e5e7eb">${expiryDate}</td></tr>
     <tr><td style="color:#9ca3af;padding:4px 0">Rides Unassigned</td><td style="color:#f97316;font-weight:bold">${ridesUnassigned} ride${ridesUnassigned !== 1 ? "s" : ""} returned to Dispatch pool</td></tr>
   </table>
@@ -750,7 +793,7 @@ export async function sendComplianceLockoutAdmin(params: {
     : "No upcoming rides were affected."}
 </p>
 <p style="color:#9ca3af;font-size:14px;margin:0 0 24px">
-  The driver's account will automatically unlock once you approve their renewed ${docType} in the Fleet → Compliance tab.
+  The driver's account will automatically unlock once you approve their renewed ${escapeHtml(docType)} in the Fleet → Compliance tab.
 </p>
 <p style="text-align:center;margin:0 0 24px;">
   <a href="https://royalmidnight.com/admin/fleet" style="background:#ef4444;color:#ffffff;padding:12px 32px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px;display:inline-block">REVIEW COMPLIANCE</a>
@@ -764,11 +807,12 @@ export async function sendComplianceLockoutAdmin(params: {
 export async function sendReferralWelcomeEmail(params: { name: string; email: string; promoCode: string; amount: number }) {
   const { name, email, promoCode, amount } = params;
   const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const safePromoCode = escapeHtml(promoCode);
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Welcome to Royal Midnight — Here's $${amount.toFixed(0)} On Us</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${name.split(" ")[0]}, you joined through a friend's referral — thank you. Use the code below on your first booking to save $${amount.toFixed(0)}.</p>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(name.split(" ")[0])}, you joined through a friend's referral — thank you. Use the code below on your first booking to save $${amount.toFixed(0)}.</p>
 <div style="text-align:center;margin:20px 0">
-  <span style="display:inline-block;background:#111;border:1px dashed #c9a84c;color:#c9a84c;font-size:20px;font-weight:bold;letter-spacing:2px;padding:14px 28px">${promoCode}</span>
+  <span style="display:inline-block;background:#111;border:1px dashed #c9a84c;color:#c9a84c;font-size:20px;font-weight:bold;letter-spacing:2px;padding:14px 28px">${safePromoCode}</span>
 </div>
 <p style="margin-top:20px">
   <a href="${appUrl}/book" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">BOOK YOUR FIRST RIDE</a>
@@ -783,11 +827,12 @@ export async function sendReferralWelcomeEmail(params: { name: string; email: st
 export async function sendReferralRewardEmail(params: { referrerName: string; referrerEmail: string; refereeName: string; promoCode: string; amount: number }) {
   const { referrerName, referrerEmail, refereeName, promoCode, amount } = params;
   const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const safePromoCode = escapeHtml(promoCode);
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">You Just Earned $${amount.toFixed(0)}</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${referrerName.split(" ")[0]}, ${refereeName.split(" ")[0]} just completed their first ride with Royal Midnight — thanks for the referral! Here is your reward code.</p>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(referrerName.split(" ")[0])}, ${escapeHtml(refereeName.split(" ")[0])} just completed their first ride with Royal Midnight — thanks for the referral! Here is your reward code.</p>
 <div style="text-align:center;margin:20px 0">
-  <span style="display:inline-block;background:#111;border:1px dashed #c9a84c;color:#c9a84c;font-size:20px;font-weight:bold;letter-spacing:2px;padding:14px 28px">${promoCode}</span>
+  <span style="display:inline-block;background:#111;border:1px dashed #c9a84c;color:#c9a84c;font-size:20px;font-weight:bold;letter-spacing:2px;padding:14px 28px">${safePromoCode}</span>
 </div>
 <p style="margin-top:20px">
   <a href="${appUrl}/book" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">BOOK YOUR NEXT RIDE</a>
@@ -806,10 +851,10 @@ export async function sendReviewRequestEmail(b: BookingEmailData) {
   const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">How Was Your Ride?</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${b.passengerName.split(" ")[0]}, thank you again for riding with Royal Midnight. Your feedback helps us keep every chauffeur and vehicle at the standard you expect — it only takes a minute.</p>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(b.passengerName.split(" ")[0])}, thank you again for riding with Royal Midnight. Your feedback helps us keep every chauffeur and vehicle at the standard you expect — it only takes a minute.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking", bookingRef)}
-  ${row("Route", `${b.pickupAddress} → ${b.dropoffAddress}`)}
+  ${row("Route", `${escapeHtml(b.pickupAddress)} → ${escapeHtml(b.dropoffAddress)}`)}
   ${row("Date", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
 </table>
 <p style="margin-top:28px">
@@ -820,4 +865,3 @@ export async function sendReviewRequestEmail(b: BookingEmailData) {
 </p>`);
   await send(b.passengerEmail, `How was your ride? — Royal Midnight ${bookingRef}`, html, "review_request");
 }
-
