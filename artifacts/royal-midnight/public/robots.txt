@@ -12,4 +12,22 @@ Disallow: /auth/
 Disallow: /auth
 Disallow: /booking-confirmation/
 
-Sitemap: https://royalmidnight.com/sitemap.xml
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://www.royalmidnight.com/sitemap.xml

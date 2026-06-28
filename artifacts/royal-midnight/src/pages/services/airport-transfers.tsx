@@ -1,6 +1,7 @@
 import { Plane, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
 import { PageSeo } from "@/components/PageSeo";
+import { SCHEMA } from "@/config/schema";
 
 export default function AirportTransfers() {
   return (
@@ -9,6 +10,7 @@ export default function AirportTransfers() {
         title="Airport Transfers FLL, MIA & PBI | Luxury Black Car South Florida"
         description="Luxury airport transfers serving Fort Lauderdale (FLL), Miami (MIA), and Palm Beach (PBI). Flat-rate pricing, real-time flight tracking, professional meet & greet. Book your South Florida airport transfer."
         path="/services/airport-transfers"
+        schema={SCHEMA.airportTransfers}
       />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="max-w-3xl mb-16">

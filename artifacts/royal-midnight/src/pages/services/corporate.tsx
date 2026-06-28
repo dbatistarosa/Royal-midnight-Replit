@@ -1,6 +1,7 @@
 import { Briefcase, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
 import { PageSeo } from "@/components/PageSeo";
+import { SCHEMA } from "@/config/schema";
 
 export default function Corporate() {
   return (
@@ -9,6 +10,7 @@ export default function Corporate() {
         title="Corporate Car Service South Florida | Executive Black Car Accounts"
         description="Corporate transportation accounts for South Florida businesses. Centralized billing, executive sedans and SUVs, dedicated concierge, and reliable service for your entire team. Set up a corporate account today."
         path="/services/corporate"
+        schema={SCHEMA.corporate}
       />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="max-w-3xl mb-16">

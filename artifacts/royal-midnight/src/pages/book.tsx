@@ -164,7 +164,7 @@ export default function Book() {
 
   const getQuote = useGetQuote();
 
-  const searchParams = new URLSearchParams(window.location.search);
+  const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
 
   // Persist a referral code from a shared link (?ref=CODE) so it's still available
   // if the visitor browses around before eventually creating an account.

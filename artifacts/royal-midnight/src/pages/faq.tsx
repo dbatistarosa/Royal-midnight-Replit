@@ -6,29 +6,7 @@ import {
 } from "@/components/ui/accordion";
 import { Link } from "wouter";
 import { PageSeo } from "@/components/PageSeo";
-
-const faqs = [
-  {
-    question: "What is your cancellation policy?",
-    answer: "Cancellations made 24 hours prior to the scheduled pickup time are fully refundable. Cancellations within 24 hours may be subject to a fee. No-shows are charged the full fare."
-  },
-  {
-    question: "How do I find my chauffeur at the airport?",
-    answer: "Your chauffeur will meet you in the arrivals hall holding a customized digital name sign. For expedited service, curbside pickup is also available upon request."
-  },
-  {
-    question: "What if my flight is delayed?",
-    answer: "We track all incoming flights in real-time. If your flight is delayed, your chauffeur's arrival time will be adjusted automatically at no additional charge."
-  },
-  {
-    question: "Do you provide child seats?",
-    answer: "Yes, premium child safety seats can be provided upon request at the time of booking. Please specify the age and weight of the child."
-  },
-  {
-    question: "Can I make multiple stops?",
-    answer: "Yes, multiple stops can be arranged. For maximum flexibility with numerous stops, we recommend booking our Hourly Chauffeur service."
-  }
-];
+import { FAQ_ITEMS, SCHEMA } from "@/config/schema";
 
 export default function FAQ() {
   return (
@@ -37,6 +15,7 @@ export default function FAQ() {
         title="FAQ | Royal Midnight Luxury Black Car Service South Florida"
         description="Answers to common questions about Royal Midnight's luxury black car service in South Florida. Learn about flat-rate pricing, vehicle classes, booking, cancellation policy, and airport pickups."
         path="/faq"
+        schema={SCHEMA.faq}
       />
       <div className="container mx-auto max-w-3xl px-4">
         <div className="text-center mb-16">
@@ -48,7 +27,7 @@ export default function FAQ() {
 
         <div className="bg-card border border-border p-8 rounded-lg">
           <Accordion type="single" collapsible className="w-full">
-            {faqs.map((faq, index) => (
+            {FAQ_ITEMS.map((faq, index) => (
               <AccordionItem key={index} value={`item-${index}`}>
                 <AccordionTrigger className="text-left font-serif text-lg">
                   {faq.question}

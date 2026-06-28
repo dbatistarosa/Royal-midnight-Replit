@@ -1,7 +1,7 @@
 import { Helmet } from "react-helmet-async";
 
 const SITE_NAME = "Royal Midnight";
-const BASE_URL = "https://royalmidnight.com";
+const BASE_URL = "https://www.royalmidnight.com";
 const DEFAULT_IMAGE = `${BASE_URL}/opengraph.jpg`;
 
 interface PageSeoProps {
@@ -10,11 +10,13 @@ interface PageSeoProps {
   path?: string;
   image?: string;
   noIndex?: boolean;
+  schema?: object | object[];
 }
 
-export function PageSeo({ title, description, path = "", image = DEFAULT_IMAGE, noIndex = false }: PageSeoProps) {
+export function PageSeo({ title, description, path = "", image = DEFAULT_IMAGE, noIndex = false, schema }: PageSeoProps) {
   const fullTitle = title === SITE_NAME ? title : `${title} | ${SITE_NAME}`;
   const canonicalUrl = `${BASE_URL}${path}`;
+  const schemaList = schema ? (Array.isArray(schema) ? schema : [schema]) : [];
 
   return (
     <Helmet>
@@ -36,6 +38,10 @@ export function PageSeo({ title, description, path = "", image = DEFAULT_IMAGE, 
       <meta name="twitter:title" content={fullTitle} />
       <meta name="twitter:description" content={description} />
       <meta name="twitter:image" content={image} />
+
+      {schemaList.map((s, i) => (
+        <script key={i} type="application/ld+json">{JSON.stringify(s)}</script>
+      ))}
     </Helmet>
   );
 }

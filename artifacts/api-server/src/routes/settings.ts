@@ -11,7 +11,7 @@ router.get("/settings/public", async (_req, res): Promise<void> => {
   const map: Record<string, string> = {};
   for (const row of rows) {
     // Only expose non-sensitive keys
-    if (["min_booking_hours", "florida_tax_rate", "cc_fee_pct"].includes(row.key)) {
+    if (["min_booking_hours", "florida_tax_rate", "cc_fee_pct", "social_instagram_url", "social_facebook_url", "social_google_profile_url"].includes(row.key)) {
       map[row.key] = row.value;
     }
   }

@@ -1,6 +1,7 @@
 import { GlassWater, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
 import { PageSeo } from "@/components/PageSeo";
+import { SCHEMA } from "@/config/schema";
 
 export default function Events() {
   return (
@@ -9,6 +10,7 @@ export default function Events() {
         title="Luxury Event Transportation South Florida | Weddings, Galas & More"
         description="Arrive in style with Royal Midnight's luxury event transportation. Premium black cars for weddings, galas, concerts, and special occasions across Miami, Fort Lauderdale, and Palm Beach."
         path="/services/events"
+        schema={SCHEMA.events}
       />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="max-w-3xl mb-16">

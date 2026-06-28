@@ -75,6 +75,30 @@ const SETTING_FIELDS: SettingField[] = [
   },
 ];
 
+interface SocialField {
+  key: string;
+  label: string;
+  placeholder: string;
+}
+
+const SOCIAL_FIELDS: SocialField[] = [
+  {
+    key: "social_instagram_url",
+    label: "Instagram URL",
+    placeholder: "https://www.instagram.com/royalmidnight",
+  },
+  {
+    key: "social_facebook_url",
+    label: "Facebook URL",
+    placeholder: "https://www.facebook.com/royalmidnight",
+  },
+  {
+    key: "social_google_profile_url",
+    label: "Google Business Profile URL",
+    placeholder: "https://g.page/royalmidnight",
+  },
+];
+
 type AdminForm = { name: string; email: string; password: string; confirmPassword: string; phone: string };
 const EMPTY_ADMIN: AdminForm = { name: "", email: "", password: "", confirmPassword: "", phone: "" };
 
@@ -220,6 +244,25 @@ function AdminSettingsInner() {
     setSaving(null);
   };
 
+  const handleSaveText = async (field: SocialField) => {
+    const value = (editValues[field.key] ?? "").trim();
+
+    setSaving(field.key);
+    try {
+      const res = await fetch(`${API_BASE}/admin/settings/${field.key}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ value }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setSettings(prev => ({ ...prev, [field.key]: value }));
+      toast({ title: "Saved", description: `${field.label} updated successfully.` });
+    } catch {
+      toast({ title: "Error", description: "Could not save setting.", variant: "destructive" });
+    }
+    setSaving(null);
+  };
+
   const handleCreateAdmin = async () => {
     if (!adminForm.name || !adminForm.email || !adminForm.password) {
       toast({ title: "Missing fields", description: "Name, email, and password are required.", variant: "destructive" });
@@ -350,6 +393,50 @@ function AdminSettingsInner() {
           </div>
         </div>
       )}
+
+      {/* Business Profile & Social Links */}
+      <div className="mt-12">
+        <div className="flex items-center gap-3 mb-6">
+          <Building2 className="w-5 h-5 text-primary" />
+          <h2 className="font-serif text-2xl">Business Profile &amp; Social Links</h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-6 max-w-2xl">
+          These links are shown publicly on royalmidnight.com (structured data used by Google and AI search). Leave blank to omit.
+        </p>
+        <div className="space-y-6 max-w-2xl">
+          {SOCIAL_FIELDS.map(field => {
+            const currentDisplay = editValues[field.key] ?? "";
+            const storedVal = settings[field.key];
+
+            return (
+              <div key={field.key} className="bg-card border border-border rounded-lg p-6">
+                <div className="mb-4">
+                  <h3 className="font-medium text-foreground mb-1">{field.label}</h3>
+                  {storedVal && <p className="text-xs text-primary mt-1">Current: <strong>{storedVal}</strong></p>}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="url"
+                    placeholder={field.placeholder}
+                    value={currentDisplay}
+                    onChange={e => setEditValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={() => handleSaveText(field)}
+                    disabled={saving === field.key}
+                    size="sm"
+                    className="bg-primary text-black hover:bg-primary/90"
+                  >
+                    {saving === field.key ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Save className="w-4 h-4 mr-1" /> Save</>}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Create Admin Account Section */}
       <div className="mt-12">

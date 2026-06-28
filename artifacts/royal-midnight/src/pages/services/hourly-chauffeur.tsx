@@ -1,6 +1,7 @@
 import { Clock, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
 import { PageSeo } from "@/components/PageSeo";
+import { SCHEMA } from "@/config/schema";
 
 export default function HourlyChauffeur() {
   return (
@@ -9,6 +10,7 @@ export default function HourlyChauffeur() {
         title="Hourly Chauffeur Service South Florida | By-the-Hour Luxury Car"
         description="Hire a professional chauffeur by the hour in South Florida. Flexible luxury transportation for business meetings, shopping, events, and multi-stop trips. Executive sedans and premium SUVs."
         path="/services/hourly-chauffeur"
+        schema={SCHEMA.hourlyChauffeur}
       />
       <div className="container mx-auto max-w-6xl px-4">
         <div className="max-w-3xl mb-16">

@@ -5,6 +5,7 @@ import { AIRPORTS } from "@/lib/constants";
 import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
 import { PageSeo } from "@/components/PageSeo";
+import { BusinessSameAs } from "@/components/BusinessSameAs";
 
 export default function Home() {
   const [, setLocation] = useLocation();
@@ -27,6 +28,7 @@ export default function Home() {
         description="South Florida's premier luxury black car service. Flat-rate airport transfers at FLL, MIA &amp; PBI, hourly chauffeur, and executive transportation. No surge pricing. Book online 24/7."
         path="/"
       />
+      <BusinessSameAs />
       {/* Hero Section */}
       <section className="relative h-screen min-h-[700px] flex items-center pt-20">
         <div className="absolute inset-0 z-0">

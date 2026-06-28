@@ -10,6 +10,7 @@ import { AuthGuard } from "@/components/layout/AuthGuard";
 import NotFound from "@/pages/not-found";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Pages
 import Home from "@/pages/home";
@@ -391,16 +392,22 @@ function Router() {
   );
 }
 
-function App() {
+interface AppProps {
+  ssrPath?: string;
+}
+
+function App({ ssrPath }: AppProps = {}) {
   return (
     <HelmetProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <DriverStatusProvider>
             <TooltipProvider>
-              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-                <Router />
-              </WouterRouter>
+              <ErrorBoundary>
+                <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")} ssrPath={ssrPath}>
+                  <Router />
+                </WouterRouter>
+              </ErrorBoundary>
               <Toaster />
             </TooltipProvider>
           </DriverStatusProvider>
