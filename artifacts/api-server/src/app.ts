@@ -6,13 +6,12 @@ import path from "path";
 import { existsSync } from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { initSentry, Sentry } from "./lib/sentry";
-
-// Must run before the app/middleware are built so Sentry's auto-instrumentation
-// can wrap them.
-initSentry();
 
 const app: Express = express();
+
+// Vercel (and any reverse proxy) sets X-Forwarded-For — trust one hop so
+// express-rate-limit can identify callers correctly.
+app.set("trust proxy", 1);
 
 // Security headers — must be first so every response gets them
 app.use(
@@ -104,10 +103,6 @@ if (process.env.NODE_ENV === "production") {
     logger.warn({ frontendDist }, "Frontend dist not found — static serving skipped");
   }
 }
-
-// Reports unhandled route errors to Sentry (no-ops if SENTRY_DSN is unset) —
-// must come before the generic error handler below so it sees the error first.
-Sentry.setupExpressErrorHandler(app);
 
 // Global error handler — logs unhandled route errors via pino, returns generic JSON
 app.use((err: unknown, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
