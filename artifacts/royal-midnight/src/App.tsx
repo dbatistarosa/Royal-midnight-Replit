@@ -11,6 +11,7 @@ import NotFound from "@/pages/not-found";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Analytics } from "@vercel/analytics/react";
 
 // Pages
 import Home from "@/pages/home";
@@ -413,6 +414,7 @@ function App({ ssrPath }: AppProps = {}) {
                 </WouterRouter>
               </ErrorBoundary>
               <Toaster />
+              <Analytics />
             </TooltipProvider>
           </DriverStatusProvider>
         </AuthProvider>
