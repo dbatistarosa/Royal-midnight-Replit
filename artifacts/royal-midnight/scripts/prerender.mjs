@@ -37,6 +37,12 @@ function extractHeadTags(html) {
   return { headTags, body };
 }
 
+// The static template's own <title> and <meta name="description"> (set for the
+// homepage, before the <!-- Open Graph --> marker) must be stripped too, or the
+// per-page ones extracted below end up duplicating rather than replacing them.
+const STATIC_TITLE_PATTERN = /<title>[\s\S]*?<\/title>/;
+const STATIC_DESCRIPTION_PATTERN = /<meta\s+name="description"[^>]*>/;
+
 function splice(template, path, html) {
   const ogMarker = "<!-- Open Graph -->";
   const tailMarker = "<!-- Favicon -->";
@@ -51,7 +57,10 @@ function splice(template, path, html) {
     throw new Error(`prerender: no <title> found in rendered output for ${path} — PageSeo likely missing`);
   }
 
-  const prefix = template.slice(0, ogIdx);
+  const prefix = template
+    .slice(0, ogIdx)
+    .replace(STATIC_TITLE_PATTERN, "")
+    .replace(STATIC_DESCRIPTION_PATTERN, "");
   const tail = template.slice(tailIdx);
   const withHead = prefix + headTags.join("") + "\n    " + tail;
   return withHead.replace('<div id="root"></div>', `<div id="root">${body}</div>`);
