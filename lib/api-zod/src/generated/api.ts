@@ -174,6 +174,7 @@ export const CreateBookingBody = zod.object({
   discountAmount: zod.number().nullish(),
   luggageCount: zod.number().default(createBookingBodyLuggageCountDefault),
   userId: zod.number().nullish(),
+  extras: zod.array(zod.object({ id: zod.number(), quantity: zod.number().optional() })).nullish(),
   paymentType: zod
     .union([
       zod.literal("standard"),

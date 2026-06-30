@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql, inArray } from "drizzle-orm";
-import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable, extraServicesTable, bookingExtrasTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import { HOURLY_RATES, DEFAULT_RATE_PER_MILE } from "./quote.js";
@@ -511,6 +511,28 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       } catch (err) {
         console.error("[bookings] account-linking error:", err);
       }
+    })();
+  }
+
+  // Persist selected extras (non-blocking — validates each id exists and is active)
+  if (parsed.data.extras?.length) {
+    (async () => {
+      try {
+        const ids = parsed.data.extras!.map(e => e.id);
+        const services = await db.select({ id: extraServicesTable.id, price: extraServicesTable.price })
+          .from(extraServicesTable)
+          .where(and(inArray(extraServicesTable.id, ids), eq(extraServicesTable.isActive, true)));
+        if (services.length) {
+          await db.insert(bookingExtrasTable).values(
+            services.map(s => ({
+              bookingId: booking.id,
+              extraServiceId: s.id,
+              quantity: parsed.data.extras!.find(e => e.id === s.id)?.quantity ?? 1,
+              priceAtBooking: String(s.price),
+            }))
+          ).onConflictDoNothing();
+        }
+      } catch (err) { console.error("[bookings] extras insert failed:", err); }
     })();
   }
 

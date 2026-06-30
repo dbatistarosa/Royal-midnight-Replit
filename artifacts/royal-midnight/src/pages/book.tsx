@@ -576,7 +576,10 @@ export default function Book() {
             priceQuoted: effectiveTotal,
             // Driver commission is based on the pre-tax/pre-fee/pre-discount subtotal —
             // taxes, the card fee, and any promo discount are absorbed by the company only.
-            fareSubtotal: selectedQuote.subtotal,
+            fareSubtotal: selectedQuote.fixedRoutePrice ?? selectedQuote.subtotal,
+            extras: selectedExtras.size > 0
+              ? [...selectedExtras].map(id => ({ id }))
+              : null,
             promoCode: promoResult?.valid && promoCode ? promoCode.toUpperCase() : null,
             discountAmount: promoResult?.valid && promoResult.discountAmount != null ? promoResult.discountAmount : null,
             userId: bookingForTravelerId ?? userId,
@@ -643,9 +646,15 @@ export default function Book() {
     .filter(e => selectedExtras.has(e.id))
     .reduce((sum, e) => sum + e.price, 0);
 
+  // Fixed hotel-airport price overrides the computed rate when the quote detects a match.
+  // Promos and extras still apply on top of the fixed base.
+  const baseTotal = selectedQuote?.fixedRoutePrice != null
+    ? selectedQuote.fixedRoutePrice
+    : selectedQuote?.totalWithTax ?? 0;
+
   const effectiveTotal = Math.round(((promoResult?.valid && promoResult.finalAmount != null
     ? promoResult.finalAmount
-    : selectedQuote?.totalWithTax ?? 0) + extrasTotal) * 100) / 100;
+    : baseTotal) + extrasTotal) * 100) / 100;
 
   const handlePromoValidate = async () => {
     if (!promoCode.trim() || !selectedQuote) return;
@@ -654,7 +663,7 @@ export default function Book() {
       const res = await fetch(`${API_BASE}/promos/validate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: promoCode.trim(), bookingAmount: selectedQuote.totalWithTax }),
+        body: JSON.stringify({ code: promoCode.trim(), bookingAmount: baseTotal }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { error?: string };
@@ -1332,11 +1341,21 @@ export default function Book() {
                       </div>
                     )}
 
+                    {/* Fixed route badge — shown when the route has a pre-negotiated flat rate */}
+                    {selectedQuote.fixedRoutePrice != null && (
+                      <div className="border border-primary/30 bg-primary/5 px-4 py-3 flex items-center justify-between text-sm">
+                        <span className="text-primary text-xs uppercase tracking-widest">Fixed Route Rate</span>
+                        <span className="text-primary font-medium">${selectedQuote.fixedRoutePrice.toFixed(2)}</span>
+                      </div>
+                    )}
+
                     {/* Price breakdown — every fee disclosed before payment */}
-                    <div className="border-t border-white/8 pt-5 space-y-3 text-sm">
-                      <p className="text-[10px] uppercase tracking-widest text-gray-600">Price Breakdown</p>
-                      <PriceBreakdownLines quote={selectedQuote} isHourly={charterMode === "hourly"} />
-                    </div>
+                    {selectedQuote.fixedRoutePrice == null && (
+                      <div className="border-t border-white/8 pt-5 space-y-3 text-sm">
+                        <p className="text-[10px] uppercase tracking-widest text-gray-600">Price Breakdown</p>
+                        <PriceBreakdownLines quote={selectedQuote} isHourly={charterMode === "hourly"} />
+                      </div>
+                    )}
 
                     {/* Total */}
                     <div className="border-t border-white/8 pt-5">
