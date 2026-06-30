@@ -112,6 +112,8 @@ const STEPS = [
   { num: 3, label: "Review & Pay" },
 ];
 
+const DRAFT_KEY = "rm_booking_draft";
+
 type StepKey = 1 | 2 | 3;
 
 type AirportCode = FloridaAirportCode;
@@ -245,6 +247,7 @@ export default function Book() {
       } catch {
         console.warn("[book] 3DS confirm network error — webhook will finalise booking");
       }
+      sessionStorage.removeItem(DRAFT_KEY);
       setLocation(`/booking-confirmation/${bookingId}`);
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -267,6 +270,101 @@ export default function Book() {
     },
   });
 
+  // ── Draft persistence (sessionStorage) ──────────────────────────────────────
+  // Saves booking progress automatically so a refresh or back-button doesn't
+  // wipe the form. Cleared on successful payment.
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const saveDraft = useCallback(() => {
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      const v = form.getValues();
+      try {
+        sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+          ver: 1,
+          step: Math.min(step, 2),
+          form: {
+            pickupAddress: v.pickupAddress,
+            dropoffAddress: v.dropoffAddress,
+            pickupDate: v.pickupDate instanceof Date ? v.pickupDate.toISOString() : null,
+            pickupTime: v.pickupTime,
+            passengers: v.passengers,
+            luggage: v.luggage,
+            passengerName: v.passengerName,
+            passengerEmail: v.passengerEmail,
+            passengerPhone: v.passengerPhone,
+            flightNumber: v.flightNumber,
+            specialRequests: v.specialRequests,
+            // password: never persisted
+          },
+          selectedVehicle,
+          waypoints,
+          charterMode,
+          charterHours,
+          promoCode,
+          promoResult,
+          selectedExtras: [...selectedExtras],
+          pickupAirline,
+          dropoffAirline,
+          quotes,
+        }));
+      } catch { /* storage full or unavailable — ignore */ }
+    }, 400);
+  }, [step, selectedVehicle, waypoints, charterMode, charterHours, promoCode, promoResult, selectedExtras, pickupAirline, dropoffAirline, quotes, form]);
+
+  // Save whenever state vars or any form field changes
+  useEffect(() => {
+    const { unsubscribe } = form.watch(() => saveDraft());
+    return unsubscribe;
+  }, [form, saveDraft]);
+
+  useEffect(() => { saveDraft(); }, [saveDraft]);
+
+  // Restore draft on mount (once). URL params take priority (intentional deep-links).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("pickup") || params.get("dropoff")) return; // deep-link overrides
+
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return;
+    try {
+      const d = JSON.parse(raw) as Record<string, unknown>;
+      if (d.ver !== 1) { sessionStorage.removeItem(DRAFT_KEY); return; }
+
+      const f = (d.form as Record<string, unknown>) ?? {};
+      form.reset({
+        pickupAddress:    String(f.pickupAddress ?? ""),
+        dropoffAddress:   String(f.dropoffAddress ?? ""),
+        pickupDate:       f.pickupDate ? new Date(f.pickupDate as string) : undefined,
+        pickupTime:       String(f.pickupTime ?? "12:00"),
+        passengers:       Number(f.passengers ?? 1),
+        luggage:          Number(f.luggage ?? 0),
+        passengerName:    String(f.passengerName ?? ""),
+        passengerEmail:   String(f.passengerEmail ?? ""),
+        passengerPhone:   String(f.passengerPhone ?? ""),
+        flightNumber:     String(f.flightNumber ?? ""),
+        specialRequests:  String(f.specialRequests ?? ""),
+        password:         "", // never restored
+      });
+
+      if (d.selectedVehicle) setSelectedVehicle(d.selectedVehicle as string);
+      if (Array.isArray(d.waypoints)) setWaypoints(d.waypoints as string[]);
+      if (d.charterMode === "hourly" || d.charterMode === "route") setCharterMode(d.charterMode);
+      if (typeof d.charterHours === "number") setCharterHours(d.charterHours);
+      if (typeof d.promoCode === "string" && d.promoCode) setPromoCode(d.promoCode);
+      if (d.promoResult) setPromoResult(d.promoResult as typeof promoResult);
+      if (Array.isArray(d.selectedExtras)) setSelectedExtras(new Set(d.selectedExtras as number[]));
+      if (typeof d.pickupAirline === "string") setPickupAirline(d.pickupAirline);
+      if (typeof d.dropoffAirline === "string") setDropoffAirline(d.dropoffAirline);
+      if (d.quotes && typeof d.quotes === "object") setQuotes(d.quotes as typeof quotes);
+      if (typeof d.step === "number" && d.step > 1) setStep(d.step as StepKey);
+    } catch {
+      sessionStorage.removeItem(DRAFT_KEY);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-fill personal info for logged-in users (wins over draft for PII fields)
   useEffect(() => {
     if (user) {
       form.setValue("passengerName", user.name || "");
@@ -608,6 +706,7 @@ export default function Book() {
       // step), so skip Stripe entirely and go straight to the confirmation page.
       if (effectiveTotal <= 0) {
         sessionStorage.removeItem("rm_pending_booking_id");
+        sessionStorage.removeItem(DRAFT_KEY);
         setLocation(`/booking-confirmation/${bookingId}`);
         setIsConfirming(false);
         return;
@@ -718,6 +817,7 @@ export default function Book() {
       }).catch(() => {});
     }
 
+    sessionStorage.removeItem(DRAFT_KEY);
     setLocation(`/booking-confirmation/${bookingId}`);
   };
 
