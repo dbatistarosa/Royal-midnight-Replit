@@ -28,6 +28,9 @@ export const usersTable = pgTable("users", {
   referralCode: text("referral_code").unique(),         // this user's own shareable code
   referredByUserId: integer("referred_by_user_id"),      // set at signup if they used someone else's code
   referralRewardedAt: timestamp("referral_rewarded_at", { withTimezone: true }), // when the referrer was paid out for this user
+  // Links a role="corporate" user to their company's billing account (Net-30 terms,
+  // volume discount). Multiple users can share one corporate account.
+  corporateAccountId: integer("corporate_account_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

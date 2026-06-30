@@ -70,6 +70,7 @@ import AdminDriverApp from "@/pages/admin/driver-app";
 import AdminPricing from "@/pages/admin/pricing";
 import AdminPromos from "@/pages/admin/promos";
 import AdminAffiliates from "@/pages/admin/affiliates";
+import AdminCorporateAccounts from "@/pages/admin/corporate-accounts";
 import AdminSupport from "@/pages/admin/support";
 import AdminReports from "@/pages/admin/reports";
 import AdminSettings from "@/pages/admin/settings";
@@ -315,6 +316,9 @@ function Router() {
       </Route>
       <Route path="/admin/affiliates">
         <AdminRoute component={AdminAffiliates} />
+      </Route>
+      <Route path="/admin/corporate-accounts">
+        <AdminRoute component={AdminCorporateAccounts} />
       </Route>
       <Route path="/admin/support">
         <AdminRoute component={AdminSupport} />

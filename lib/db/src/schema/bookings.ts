@@ -54,6 +54,9 @@ export const bookingsTable = pgTable("bookings", {
   extraCharge: numeric("extra_charge", { precision: 10, scale: 2 }).notNull().default("0"),
   totalPrice: numeric("total_price", { precision: 10, scale: 2 }),
   overageNotifiedAt: timestamp("overage_notified_at", { withTimezone: true }),
+  // Set when this booking's amount has been included in a Net-30 invoice sent to a
+  // corporate account — prevents double-billing the same ride across invoice runs.
+  invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

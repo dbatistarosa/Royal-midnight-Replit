@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import rateLimit from "express-rate-limit";
 import { eq } from "drizzle-orm";
-import { db, usersTable, driversTable, sessionsTable, passwordResetTokensTable } from "@workspace/db";
+import { db, usersTable, driversTable, sessionsTable, passwordResetTokensTable, corporateAccountsTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
@@ -365,6 +365,10 @@ const CreateCorporateBody = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   phone: z.string().nullish(),
+  // Billing terms for the new company account — all optional, sensible defaults.
+  billingEmail: z.string().email().nullish(),
+  netTermsDays: z.number().int().positive().nullish(),
+  volumeDiscountPct: z.number().min(0).max(100).nullish(),
 });
 
 router.post("/auth/corporate-register", requireAdmin, async (req, res): Promise<void> => {
@@ -374,13 +378,23 @@ router.post("/auth/corporate-register", requireAdmin, async (req, res): Promise<
     return;
   }
 
-  const { companyName, contactName, email, password, phone } = parsed.data;
+  const { companyName, contactName, email, password, phone, billingEmail, netTermsDays, volumeDiscountPct } = parsed.data;
 
   const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
   if (existing) {
     res.status(400).json({ error: "Email already registered" });
     return;
   }
+
+  const [account] = await db
+    .insert(corporateAccountsTable)
+    .values({
+      companyName,
+      billingEmail: billingEmail ?? email,
+      netTermsDays: netTermsDays ?? 30,
+      volumeDiscountPct: String(volumeDiscountPct ?? 0),
+    })
+    .returning();
 
   const [user] = await db
     .insert(usersTable)
@@ -390,6 +404,7 @@ router.post("/auth/corporate-register", requireAdmin, async (req, res): Promise<
       phone: phone ?? null,
       role: "corporate",
       passwordHash: hashPassword(password),
+      corporateAccountId: account.id,
     })
     .returning();
 
@@ -400,15 +415,18 @@ router.post("/auth/corporate-register", requireAdmin, async (req, res): Promise<
       email: user.email,
       phone: user.phone,
       role: user.role,
+      corporateAccountId: user.corporateAccountId,
       createdAt: user.createdAt.toISOString(),
     },
   });
 });
 
-// Admin-only: list all corporate accounts
+// Admin-only: list all corporate accounts (one row per user; multiple users can
+// share a corporateAccountId — see GET /admin/corporate-accounts for the
+// company-level billing view with unbilled totals).
 router.get("/auth/corporate-accounts", requireAdmin, async (req, res): Promise<void> => {
   const accounts = await db
-    .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone, createdAt: usersTable.createdAt })
+    .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone, corporateAccountId: usersTable.corporateAccountId, createdAt: usersTable.createdAt })
     .from(usersTable)
     .where(eq(usersTable.role, "corporate"));
 

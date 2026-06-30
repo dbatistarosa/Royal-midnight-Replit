@@ -3,7 +3,7 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import {
   LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag,
   MessageSquare, BarChart, Settings, Wallet, Loader2, Send,
-  CheckCircle, AlertTriangle, Pencil, X, ChevronLeft, ChevronRight, RefreshCw, Gift,
+  CheckCircle, AlertTriangle, Pencil, X, ChevronLeft, ChevronRight, RefreshCw, Gift, Building2,
 } from "lucide-react";
 import { format, startOfWeek, addWeeks, subWeeks } from "date-fns";
 import { API_BASE } from "@/lib/constants";
@@ -22,6 +22,7 @@ const adminNavItems = [
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
+  { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },
   { label: "Support", href: "/admin/support", icon: MessageSquare },
   { label: "Reports", href: "/admin/reports", icon: BarChart },
   { label: "Payouts", href: "/admin/payouts", icon: Wallet },

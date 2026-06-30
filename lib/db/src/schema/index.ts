@@ -21,3 +21,4 @@ export * from "./managed-travelers";
 export * from "./compliance-documents";
 export * from "./message-events";
 export * from "./driver-locations";
+export * from "./corporate-accounts";

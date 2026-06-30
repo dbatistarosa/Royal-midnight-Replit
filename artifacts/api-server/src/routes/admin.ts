@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { sql, desc, eq, and, isNull, or, gt } from "drizzle-orm";
-import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable, complianceDocumentsTable } from "@workspace/db";
+import { sql, desc, eq, and, isNull, or, gt, inArray } from "drizzle-orm";
+import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable, complianceDocumentsTable, corporateAccountsTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
@@ -744,6 +744,117 @@ router.post("/admin/compliance/documents/:id/approve", requireAdmin, async (req,
   }
 
   res.json({ success: true, docId, driverId: doc.driverId, newExpiry });
+});
+
+// ─── Corporate Accounts (Net-30 billing) ────────────────────────────────────
+
+// GET /admin/corporate-accounts — company-level billing view with unbilled totals
+router.get("/admin/corporate-accounts", requireAdmin, async (_req, res): Promise<void> => {
+  const accounts = await db.select().from(corporateAccountsTable).orderBy(corporateAccountsTable.companyName);
+
+  const result = await Promise.all(accounts.map(async (account) => {
+    const userRows = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.corporateAccountId, account.id));
+    const userIds = userRows.map(u => u.id);
+
+    let unbilledTotal = 0;
+    let unbilledRides = 0;
+    if (userIds.length > 0) {
+      const unbilled = await db
+        .select({ amount: sql<string>`coalesce(${bookingsTable.fareSubtotal}, ${bookingsTable.priceQuoted})` })
+        .from(bookingsTable)
+        .where(and(
+          inArray(bookingsTable.userId, userIds),
+          inArray(bookingsTable.status, ["confirmed", "completed"]),
+          isNull(bookingsTable.invoicedAt),
+        ));
+      unbilledRides = unbilled.length;
+      unbilledTotal = Math.round(unbilled.reduce((sum, b) => sum + parseFloat(b.amount || "0"), 0) * 100) / 100;
+    }
+
+    return {
+      id: account.id,
+      companyName: account.companyName,
+      billingEmail: account.billingEmail,
+      billingAddress: account.billingAddress,
+      netTermsDays: account.netTermsDays,
+      volumeDiscountPct: parseFloat(account.volumeDiscountPct),
+      creditLimit: account.creditLimit != null ? parseFloat(account.creditLimit) : null,
+      status: account.status,
+      userCount: userIds.length,
+      unbilledRides,
+      unbilledTotal,
+      createdAt: account.createdAt.toISOString(),
+    };
+  }));
+
+  res.json(result);
+});
+
+// PATCH /admin/corporate-accounts/:id — update billing terms
+router.patch("/admin/corporate-accounts/:id", requireAdmin, async (req, res): Promise<void> => {
+  const idParam = req.params["id"];
+  const id = parseInt(Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid corporate account ID" }); return; }
+
+  const { companyName, billingEmail, billingAddress, netTermsDays, volumeDiscountPct, creditLimit, status } = req.body as {
+    companyName?: string; billingEmail?: string; billingAddress?: string | null;
+    netTermsDays?: number; volumeDiscountPct?: number; creditLimit?: number | null; status?: string;
+  };
+
+  const updates: Record<string, unknown> = {};
+  if (companyName !== undefined) updates["companyName"] = companyName;
+  if (billingEmail !== undefined) updates["billingEmail"] = billingEmail;
+  if (billingAddress !== undefined) updates["billingAddress"] = billingAddress;
+  if (netTermsDays !== undefined) updates["netTermsDays"] = netTermsDays;
+  if (volumeDiscountPct !== undefined) updates["volumeDiscountPct"] = String(volumeDiscountPct);
+  if (creditLimit !== undefined) updates["creditLimit"] = creditLimit != null ? String(creditLimit) : null;
+  if (status !== undefined) updates["status"] = status;
+
+  const [updated] = await db
+    .update(corporateAccountsTable)
+    .set(updates)
+    .where(eq(corporateAccountsTable.id, id))
+    .returning({ id: corporateAccountsTable.id });
+
+  if (!updated) { res.status(404).json({ error: "Corporate account not found" }); return; }
+  res.json({ ok: true, accountId: id });
+});
+
+// POST /admin/corporate-accounts/:id/mark-invoiced — Net-30 billing run: marks every
+// currently-unbilled ride for this account as invoiced so it isn't billed twice.
+router.post("/admin/corporate-accounts/:id/mark-invoiced", requireAdmin, async (req, res): Promise<void> => {
+  const idParam = req.params["id"];
+  const id = parseInt(Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid corporate account ID" }); return; }
+
+  const userRows = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.corporateAccountId, id));
+  const userIds = userRows.map(u => u.id);
+  if (userIds.length === 0) {
+    res.json({ ok: true, accountId: id, invoicedRides: 0, invoicedTotal: 0 });
+    return;
+  }
+
+  const toInvoice = await db
+    .select({ id: bookingsTable.id, amount: sql<string>`coalesce(${bookingsTable.fareSubtotal}, ${bookingsTable.priceQuoted})` })
+    .from(bookingsTable)
+    .where(and(
+      inArray(bookingsTable.userId, userIds),
+      inArray(bookingsTable.status, ["confirmed", "completed"]),
+      isNull(bookingsTable.invoicedAt),
+    ));
+
+  if (toInvoice.length === 0) {
+    res.json({ ok: true, accountId: id, invoicedRides: 0, invoicedTotal: 0 });
+    return;
+  }
+
+  await db
+    .update(bookingsTable)
+    .set({ invoicedAt: new Date() })
+    .where(inArray(bookingsTable.id, toInvoice.map(b => b.id)));
+
+  const invoicedTotal = Math.round(toInvoice.reduce((sum, b) => sum + parseFloat(b.amount || "0"), 0) * 100) / 100;
+  res.json({ ok: true, accountId: id, invoicedRides: toInvoice.length, invoicedTotal });
 });
 
 export default router;

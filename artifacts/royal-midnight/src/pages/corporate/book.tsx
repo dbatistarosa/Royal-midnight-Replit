@@ -64,7 +64,9 @@ function CorporateBookInner() {
     try {
       const res = await fetch(`${API_BASE}/quote`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // Authenticated so the backend can apply this account's volume discount —
+        // an anonymous quote would silently miss it.
+        headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({
           pickupAddress: form.pickupAddress,
           dropoffAddress: form.dropoffAddress,
@@ -98,7 +100,7 @@ function CorporateBookInner() {
       if (price === null) {
         const qRes = await fetch(`${API_BASE}/quote`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeader },
           body: JSON.stringify({
             pickupAddress: form.pickupAddress,
             dropoffAddress: form.dropoffAddress,

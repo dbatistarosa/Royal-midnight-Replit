@@ -112,26 +112,34 @@ export function computeFareBreakdown(params: {
   distanceCharge: number;
   airportFee: number;
   zoneMultiplier: number;
+  /** 0-100. Corporate-account volume discount, applied after zone surge and
+   *  before tax (so tax is never charged on the discounted-away portion). */
+  corporateDiscountPct?: number;
   taxRate: number;
   cardProcessingFeeRate: number;
 }): {
   subtotalBeforeZone: number;
   subtotal: number;
   surgeAdjustment: number;
+  corporateDiscountAmount: number;
   taxAmount: number;
   cardProcessingFee: number;
   totalWithTax: number;
 } {
-  const { baseFare, distanceCharge, airportFee, zoneMultiplier, taxRate, cardProcessingFeeRate } = params;
+  const { baseFare, distanceCharge, airportFee, zoneMultiplier, corporateDiscountPct = 0, taxRate, cardProcessingFeeRate } = params;
 
   const subtotalBeforeZone = Math.round((baseFare + distanceCharge + airportFee) * 100) / 100;
-  const subtotal = Math.round(subtotalBeforeZone * zoneMultiplier * 100) / 100;
+  const subtotalAfterZone = Math.round(subtotalBeforeZone * zoneMultiplier * 100) / 100;
   // Any difference from the zone multiplier, called out as its own line so
   // nothing is folded silently into the subtotal.
-  const surgeAdjustment = Math.round((subtotal - subtotalBeforeZone) * 100) / 100;
+  const surgeAdjustment = Math.round((subtotalAfterZone - subtotalBeforeZone) * 100) / 100;
+
+  const corporateDiscountAmount = Math.round(subtotalAfterZone * (corporateDiscountPct / 100) * 100) / 100;
+  const subtotal = Math.round((subtotalAfterZone - corporateDiscountAmount) * 100) / 100;
+
   const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
   const cardProcessingFee = Math.round((subtotal + taxAmount) * cardProcessingFeeRate * 100) / 100;
   const totalWithTax = Math.round((subtotal + taxAmount + cardProcessingFee) * 100) / 100;
 
-  return { subtotalBeforeZone, subtotal, surgeAdjustment, taxAmount, cardProcessingFee, totalWithTax };
+  return { subtotalBeforeZone, subtotal, surgeAdjustment, corporateDiscountAmount, taxAmount, cardProcessingFee, totalWithTax };
 }

@@ -115,4 +115,33 @@ describe("computeFareBreakdown", () => {
     expect(result.subtotal).toBe(60);
     expect(result.surgeAdjustment).toBe(10);
   });
+
+  it("applies a corporate volume discount after zone surge and before tax", () => {
+    const result = computeFareBreakdown({
+      baseFare: 100,
+      distanceCharge: 0,
+      airportFee: 0,
+      zoneMultiplier: 1,
+      corporateDiscountPct: 10,
+      taxRate: 0.1,
+      cardProcessingFeeRate: 0,
+    });
+    expect(result.corporateDiscountAmount).toBe(10);
+    expect(result.subtotal).toBe(90);
+    // Tax is computed on the post-discount subtotal, not the original 100.
+    expect(result.taxAmount).toBe(9);
+  });
+
+  it("defaults the corporate discount to 0 when omitted (no behavior change for non-corporate quotes)", () => {
+    const result = computeFareBreakdown({
+      baseFare: 100,
+      distanceCharge: 0,
+      airportFee: 0,
+      zoneMultiplier: 1,
+      taxRate: 0,
+      cardProcessingFeeRate: 0,
+    });
+    expect(result.corporateDiscountAmount).toBe(0);
+    expect(result.subtotal).toBe(100);
+  });
 });

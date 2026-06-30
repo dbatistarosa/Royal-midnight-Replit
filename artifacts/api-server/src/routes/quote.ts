@@ -1,7 +1,8 @@
 import { Router, type IRouter } from "express";
-import { db, settingsTable, pricingRulesTable, geoZonesTable } from "@workspace/db";
+import { db, settingsTable, pricingRulesTable, geoZonesTable, usersTable, corporateAccountsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
+import { optionalAuth } from "../middleware/auth.js";
 import {
   isAirportTrip,
   resolveAddress,
@@ -183,7 +184,24 @@ export const HOURLY_RATES: Record<string, number> = {
   suv: 125,
 };
 
-router.post("/quote", async (req, res): Promise<void> => {
+/** A logged-in corporate user's company-level volume discount (0 if none, or
+ *  if the caller isn't a corporate user / has no linked billing account yet). */
+async function getCorporateDiscountPct(userId: number | undefined): Promise<number> {
+  if (!userId) return 0;
+  try {
+    const [row] = await db
+      .select({ pct: corporateAccountsTable.volumeDiscountPct, status: corporateAccountsTable.status })
+      .from(usersTable)
+      .innerJoin(corporateAccountsTable, eq(usersTable.corporateAccountId, corporateAccountsTable.id))
+      .where(eq(usersTable.id, userId));
+    if (!row || row.status !== "active") return 0;
+    return parseFloat(row.pct) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
   const parsed = GetQuoteBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json(parsed.error.errors);
@@ -266,11 +284,16 @@ router.post("/quote", async (req, res): Promise<void> => {
   const ccFeeRateStr = await getSetting("cc_fee_pct", "0");
   const cardProcessingFeeRate = normalizePercentRate(parseFloat(ccFeeRateStr));
 
+  // Corporate volume discount — only applies to a logged-in corporate user
+  // with an active billing account; anonymous/passenger quotes are unaffected.
+  const corporateDiscountPct = await getCorporateDiscountPct(req.currentUser?.userId);
+
   const { subtotal, surgeAdjustment, taxAmount, cardProcessingFee, totalWithTax } = computeFareBreakdown({
     baseFare,
     distanceCharge,
     airportFee,
     zoneMultiplier,
+    corporateDiscountPct,
     taxRate,
     cardProcessingFeeRate,
   });
