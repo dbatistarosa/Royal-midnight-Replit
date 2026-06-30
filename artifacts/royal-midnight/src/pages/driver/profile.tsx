@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, Star, Building2, ShieldCheck, Eye, EyeOff, Calendar, Lock, BarChart2, Camera, FileText } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, Star, Building2, ShieldCheck, Eye, EyeOff, Calendar, Lock, BarChart2, Camera, FileText, Car } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -25,6 +25,7 @@ const driverNavItems = [
   { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
   { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
   { label: "Documents", href: "/driver/documents", icon: FileText },
+  { label: "Vehicles",  href: "/driver/vehicles",  icon: Car },
   { label: "Profile",   href: "/driver/profile",   icon: User },
 ];
 

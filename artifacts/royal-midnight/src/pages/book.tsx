@@ -57,6 +57,8 @@ interface QuoteResult {
   totalWithTax: number;
   estimatedDistance: number;
   estimatedDuration: number;
+  fixedRoutePrice?: number | null;
+  fixedRouteId?: number | null;
 }
 
 
@@ -150,6 +152,9 @@ export default function Book() {
   const [promoValidating, setPromoValidating] = useState(false);
   const [promoResult, setPromoResult] = useState<{ valid: boolean; discountAmount: number | null; finalAmount: number | null; message: string } | null>(null);
   const [savedCards, setSavedCards] = useState<Array<{ id: string; brand: string; last4: string; expMonth: number; expYear: number; isDefault: boolean }>>([]);
+  type ExtraService = { id: number; name: string; description?: string | null; category: string; price: number; icon?: string | null };
+  const [availableExtras, setAvailableExtras] = useState<ExtraService[]>([]);
+  const [selectedExtras, setSelectedExtras] = useState<Set<number>>(new Set());
   type FavoriteDriver = { driverId: number; driverName: string | null; vehicleMake: string | null; vehicleModel: string | null; vehicleYear: string | null; rating: string | null };
   const [favoriteDrivers, setFavoriteDrivers] = useState<FavoriteDriver[]>([]);
   const [requestPreferredDriver, setRequestPreferredDriver] = useState(false);
@@ -317,6 +322,14 @@ export default function Book() {
       .then(data => setManagedTravelers(Array.isArray(data) ? data : []))
       .catch(() => {});
   }, [step, token, user]);
+
+  // Load available paid extras (fetched once, shown at step 3)
+  useEffect(() => {
+    fetch(`${API_BASE}/extras`)
+      .then(r => r.ok ? r.json() as Promise<ExtraService[]> : Promise.resolve([]))
+      .then(data => setAvailableExtras(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
 
   // When the user reaches step 3, pre-check Stripe config and show a clear error early.
   useEffect(() => {
@@ -626,9 +639,13 @@ export default function Book() {
     setIsConfirming(false);
   };
 
-  const effectiveTotal = promoResult?.valid && promoResult.finalAmount != null
+  const extrasTotal = availableExtras
+    .filter(e => selectedExtras.has(e.id))
+    .reduce((sum, e) => sum + e.price, 0);
+
+  const effectiveTotal = Math.round(((promoResult?.valid && promoResult.finalAmount != null
     ? promoResult.finalAmount
-    : selectedQuote?.totalWithTax ?? 0;
+    : selectedQuote?.totalWithTax ?? 0) + extrasTotal) * 100) / 100;
 
   const handlePromoValidate = async () => {
     if (!promoCode.trim() || !selectedQuote) return;
@@ -1382,6 +1399,41 @@ export default function Book() {
                             : <p className="text-xs text-gray-700 mt-1">All inclusive — no hidden fees</p>
                           }
                         </div>
+
+                        {/* Paid Add-ons */}
+                        {availableExtras.length > 0 && (
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.3em] text-gray-600 mb-3">Add-ons</p>
+                            <div className="space-y-2">
+                              {availableExtras.map(extra => (
+                                <button
+                                  key={extra.id}
+                                  type="button"
+                                  onClick={() => setSelectedExtras(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(extra.id)) next.delete(extra.id);
+                                    else next.add(extra.id);
+                                    return next;
+                                  })}
+                                  className={`w-full flex items-center justify-between px-4 py-3 border text-left transition-all ${
+                                    selectedExtras.has(extra.id)
+                                      ? "border-primary/50 bg-primary/5 text-white"
+                                      : "border-white/10 bg-transparent text-gray-400 hover:border-white/20 hover:text-gray-300"
+                                  }`}
+                                >
+                                  <span className="text-sm">
+                                    {extra.icon && <span className="mr-2">{extra.icon}</span>}
+                                    {extra.name}
+                                    {extra.description && <span className="block text-xs text-gray-600 mt-0.5">{extra.description}</span>}
+                                  </span>
+                                  <span className={`text-sm font-medium ml-3 ${selectedExtras.has(extra.id) ? "text-primary" : ""}`}>
+                                    +${extra.price.toFixed(2)}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
                         {/* Promo code */}
                         <div>

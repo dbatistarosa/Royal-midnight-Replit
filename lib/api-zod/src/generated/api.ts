@@ -369,6 +369,8 @@ export const GetQuoteResponse = zod.object({
   currency: zod.string(),
   promoDiscount: zod.number().nullish(),
   finalPrice: zod.number().nullish(),
+  fixedRoutePrice: zod.number().nullish(),
+  fixedRouteId: zod.number().nullish(),
 });
 
 /**
@@ -566,7 +568,19 @@ export const UpdateDriverBody = zod.object({
       zod.literal(null),
     ])
     .nullish(),
+  approvalStatus: zod
+    .union([zod.literal("pending"), zod.literal("approved"), zod.literal("rejected"), zod.literal(null)])
+    .nullish(),
   rating: zod.number().nullish(),
+  name: zod.string().nullish(),
+  phone: zod.string().nullish(),
+  vehicleMake: zod.string().nullish(),
+  vehicleModel: zod.string().nullish(),
+  vehicleYear: zod.string().nullish(),
+  vehicleColor: zod.string().nullish(),
+  vehicleClass: zod.string().nullish(),
+  passengerCapacity: zod.number().nullish(),
+  licenseNumber: zod.string().nullish(),
 });
 
 export const UpdateDriverResponse = zod.object({

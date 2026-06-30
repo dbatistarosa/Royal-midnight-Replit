@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Wallet, Smartphone, Gift, Building2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
@@ -13,6 +13,7 @@ const adminNavItems = [
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Driver App", href: "/admin/driver-app", icon: Smartphone },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
+  { label: "Extras & Routes", href: "/admin/extras", icon: Tag },
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },

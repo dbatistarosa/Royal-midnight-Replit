@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, settingsTable, pricingRulesTable, geoZonesTable, usersTable, corporateAccountsTable } from "@workspace/db";
+import { db, settingsTable, pricingRulesTable, geoZonesTable, usersTable, corporateAccountsTable, fixedRoutesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
 import { optionalAuth } from "../middleware/auth.js";
@@ -298,6 +298,30 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
     cardProcessingFeeRate,
   });
 
+  // Check for a fixed hotel-to-airport route that overrides the computed price.
+  // Match is fuzzy: we look for the pickup address inside the stored origin_address
+  // and the destination code (fll/mia/pbi) inside the dropoff address.
+  let fixedRoutePrice: number | null = null;
+  let fixedRouteId: number | null = null;
+  try {
+    const activeRoutes = await db.select().from(fixedRoutesTable)
+      .where(and(eq(fixedRoutesTable.isActive, true), eq(fixedRoutesTable.vehicleClass, vc)));
+    const pickupLower = pickupAddress.toLowerCase();
+    const dropoffLower = dropoffAddress.toLowerCase();
+    for (const route of activeRoutes) {
+      const originMatch = pickupLower.includes(route.originName.toLowerCase()) ||
+        route.originAddress.toLowerCase().split(",")[0]!.trim().length > 4 &&
+        pickupLower.includes(route.originAddress.toLowerCase().split(",")[0]!.trim());
+      const destMatch = dropoffLower.includes(route.destinationCode.toLowerCase()) ||
+        dropoffLower.includes(route.destinationName.toLowerCase());
+      if (originMatch && destMatch) {
+        fixedRoutePrice = parseFloat(String(route.fixedPrice));
+        fixedRouteId = route.id;
+        break;
+      }
+    }
+  } catch { /* fixed-route lookup is non-fatal */ }
+
   res.json(
     GetQuoteResponse.parse({
       vehicleClass: vc,
@@ -317,6 +341,7 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
       estimatedDuration,
       estimatedDistance,
       currency: "USD",
+      ...(fixedRoutePrice != null ? { fixedRoutePrice, fixedRouteId } : {}),
     })
   );
 });

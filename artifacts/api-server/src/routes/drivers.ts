@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, sql, desc, and, inArray } from "drizzle-orm";
 import crypto from "crypto";
-import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable, driverLocationsTable, passwordResetTokensTable } from "@workspace/db";
+import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable, driverLocationsTable, passwordResetTokensTable, driverVehiclesTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
@@ -178,7 +178,17 @@ router.patch("/drivers/:id", requireAdmin, async (req, res): Promise<void> => {
 
   const updateData: Record<string, unknown> = {};
   if (parsed.data.status != null) updateData.status = parsed.data.status;
+  if (parsed.data.approvalStatus != null) updateData.approvalStatus = parsed.data.approvalStatus;
   if (parsed.data.rating != null) updateData.rating = String(parsed.data.rating);
+  if (parsed.data.name != null) updateData.name = parsed.data.name;
+  if (parsed.data.phone != null) updateData.phone = parsed.data.phone;
+  if (parsed.data.vehicleMake !== undefined) updateData.vehicleMake = parsed.data.vehicleMake ?? null;
+  if (parsed.data.vehicleModel !== undefined) updateData.vehicleModel = parsed.data.vehicleModel ?? null;
+  if (parsed.data.vehicleYear !== undefined) updateData.vehicleYear = parsed.data.vehicleYear ?? null;
+  if (parsed.data.vehicleColor !== undefined) updateData.vehicleColor = parsed.data.vehicleColor ?? null;
+  if (parsed.data.vehicleClass !== undefined) updateData.vehicleClass = parsed.data.vehicleClass ?? null;
+  if (parsed.data.passengerCapacity !== undefined) updateData.passengerCapacity = parsed.data.passengerCapacity ?? null;
+  if (parsed.data.licenseNumber !== undefined) updateData.licenseNumber = parsed.data.licenseNumber ?? null;
 
   const [driver] = await db
     .update(driversTable)
@@ -815,6 +825,81 @@ router.post("/drivers/:id/documents", requireAuth, async (req, res): Promise<voi
     submittedAt: newDoc.submittedAt.toISOString(),
     reviewedAt: null,
   });
+});
+
+// ── Driver Vehicles (multi-vehicle support) ───────────────────────────────────
+
+function canAccessDriver(caller: { role: string; userId: number }, driverUserId: number | null): boolean {
+  return caller.role === "admin" || (driverUserId != null && caller.userId === driverUserId);
+}
+
+router.get("/drivers/:id/vehicles", requireAuth, async (req, res): Promise<void> => {
+  const driverId = parseInt(req.params["id"] ?? "", 10);
+  if (!driverId) { res.status(400).json({ error: "Invalid id" }); return; }
+  const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
+  if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
+  if (!canAccessDriver(req.currentUser!, driver.userId)) { res.status(403).json({ error: "Access denied" }); return; }
+  const vehicles = await db.select().from(driverVehiclesTable).where(eq(driverVehiclesTable.driverId, driverId)).orderBy(desc(driverVehiclesTable.isDefault), driverVehiclesTable.createdAt);
+  res.json(vehicles);
+});
+
+router.post("/drivers/:id/vehicles", requireAuth, async (req, res): Promise<void> => {
+  const driverId = parseInt(req.params["id"] ?? "", 10);
+  if (!driverId) { res.status(400).json({ error: "Invalid id" }); return; }
+  const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
+  if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
+  if (!canAccessDriver(req.currentUser!, driver.userId)) { res.status(403).json({ error: "Access denied" }); return; }
+  const { year, make, model, color, vehicleClass, passengerCapacity, luggageCapacity, hasCarSeat, regPlate, isDefault } = req.body as Record<string, unknown>;
+  if (!make || !model) { res.status(400).json({ error: "make and model are required" }); return; }
+  if (isDefault) {
+    await db.update(driverVehiclesTable).set({ isDefault: false }).where(eq(driverVehiclesTable.driverId, driverId));
+  }
+  const [v] = await db.insert(driverVehiclesTable).values({
+    driverId, year: year as string ?? null, make: make as string, model: model as string,
+    color: color as string ?? null, vehicleClass: vehicleClass as string ?? null,
+    passengerCapacity: passengerCapacity as number ?? null, luggageCapacity: luggageCapacity as number ?? null,
+    hasCarSeat: (hasCarSeat as boolean) ?? false, regPlate: regPlate as string ?? null,
+    isDefault: (isDefault as boolean) ?? false,
+  }).returning();
+  res.status(201).json(v);
+});
+
+router.patch("/drivers/:id/vehicles/:vehicleId", requireAuth, async (req, res): Promise<void> => {
+  const driverId = parseInt(req.params["id"] ?? "", 10);
+  const vehicleId = parseInt(req.params["vehicleId"] ?? "", 10);
+  if (!driverId || !vehicleId) { res.status(400).json({ error: "Invalid id" }); return; }
+  const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
+  if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
+  if (!canAccessDriver(req.currentUser!, driver.userId)) { res.status(403).json({ error: "Access denied" }); return; }
+  const body = req.body as Record<string, unknown>;
+  const updateData: Record<string, unknown> = {};
+  if (body.year !== undefined) updateData.year = body.year ?? null;
+  if (body.make !== undefined) updateData.make = body.make;
+  if (body.model !== undefined) updateData.model = body.model;
+  if (body.color !== undefined) updateData.color = body.color ?? null;
+  if (body.vehicleClass !== undefined) updateData.vehicleClass = body.vehicleClass ?? null;
+  if (body.passengerCapacity !== undefined) updateData.passengerCapacity = body.passengerCapacity ?? null;
+  if (body.luggageCapacity !== undefined) updateData.luggageCapacity = body.luggageCapacity ?? null;
+  if (body.hasCarSeat !== undefined) updateData.hasCarSeat = body.hasCarSeat;
+  if (body.regPlate !== undefined) updateData.regPlate = body.regPlate ?? null;
+  if (body.isDefault === true) {
+    await db.update(driverVehiclesTable).set({ isDefault: false }).where(eq(driverVehiclesTable.driverId, driverId));
+    updateData.isDefault = true;
+  }
+  const [v] = await db.update(driverVehiclesTable).set(updateData).where(and(eq(driverVehiclesTable.id, vehicleId), eq(driverVehiclesTable.driverId, driverId))).returning();
+  if (!v) { res.status(404).json({ error: "Vehicle not found" }); return; }
+  res.json(v);
+});
+
+router.delete("/drivers/:id/vehicles/:vehicleId", requireAuth, async (req, res): Promise<void> => {
+  const driverId = parseInt(req.params["id"] ?? "", 10);
+  const vehicleId = parseInt(req.params["vehicleId"] ?? "", 10);
+  if (!driverId || !vehicleId) { res.status(400).json({ error: "Invalid id" }); return; }
+  const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
+  if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
+  if (!canAccessDriver(req.currentUser!, driver.userId)) { res.status(403).json({ error: "Access denied" }); return; }
+  await db.delete(driverVehiclesTable).where(and(eq(driverVehiclesTable.id, vehicleId), eq(driverVehiclesTable.driverId, driverId)));
+  res.sendStatus(204);
 });
 
 export default router;

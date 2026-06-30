@@ -57,6 +57,7 @@ export const bookingsTable = pgTable("bookings", {
   // Set when this booking's amount has been included in a Net-30 invoice sent to a
   // corporate account — prevents double-billing the same ride across invoice runs.
   invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
+  selectedVehicleId: integer("selected_vehicle_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

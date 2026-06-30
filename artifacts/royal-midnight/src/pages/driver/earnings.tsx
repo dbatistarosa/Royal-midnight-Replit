@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
 import { generateDriverReportPdf } from "@/lib/generateDriverReportPdf";
 import {
-  LayoutDashboard, History, DollarSign, User, Loader2, BarChart2, FileText,
+  LayoutDashboard, History, DollarSign, User, Loader2, BarChart2, FileText, Car,
   FileDown, Star,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -18,6 +18,7 @@ const driverNavItems = [
   { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
   { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
   { label: "Documents", href: "/driver/documents", icon: FileText },
+  { label: "Vehicles",  href: "/driver/vehicles",  icon: Car },
   { label: "Profile",   href: "/driver/profile",   icon: User },
 ];
 

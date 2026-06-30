@@ -609,6 +609,69 @@ router.get("/bookings/:id/track", async (req, res): Promise<void> => {
   });
 });
 
+// Driver info for passenger — reveals phone, vehicle, and plate only within 48h of pickup.
+// This keeps personal contact details private until the trip is close enough to be relevant.
+router.get("/bookings/:id/driver-info", requireAuth, async (req, res): Promise<void> => {
+  const params = GetBookingParams.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, params.data.id));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "admin" && caller.role !== "driver" &&
+      booking.userId !== caller.userId && booking.passengerEmail !== (caller as any).email) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  if (!booking.driverId) {
+    res.json({ available: false, reason: "no_driver" });
+    return;
+  }
+
+  const ACTIVE_STATUSES = ["on_way", "on_location", "in_progress", "completed", "cancelled"];
+  const hoursUntilPickup = (new Date(booking.pickupAt).getTime() - Date.now()) / (1000 * 60 * 60);
+  const withinWindow = hoursUntilPickup <= 48 || ACTIVE_STATUSES.includes(booking.status);
+
+  if (!withinWindow) {
+    res.json({
+      available: false,
+      reason: "too_early",
+      hoursUntilPickup: Math.round(hoursUntilPickup),
+    });
+    return;
+  }
+
+  const [driver] = await db
+    .select({
+      name: driversTable.name,
+      phone: driversTable.phone,
+      vehicleYear: driversTable.vehicleYear,
+      vehicleMake: driversTable.vehicleMake,
+      vehicleModel: driversTable.vehicleModel,
+      vehicleColor: driversTable.vehicleColor,
+      regPlate: driversTable.regPlate,
+      profilePicture: driversTable.profilePicture,
+    })
+    .from(driversTable)
+    .where(eq(driversTable.id, booking.driverId));
+
+  if (!driver) { res.json({ available: false, reason: "driver_not_found" }); return; }
+
+  const vehicleDescription = [driver.vehicleColor, driver.vehicleYear, driver.vehicleMake, driver.vehicleModel]
+    .filter(Boolean).join(" ") || "Luxury Vehicle";
+
+  res.json({
+    available: true,
+    driverName: driver.name,
+    driverPhone: driver.phone,
+    vehicleDescription,
+    regPlate: driver.regPlate ?? null,
+    profilePicture: driver.profilePicture ?? null,
+  });
+});
+
 // Authenticated single-booking endpoint
 router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
   const params = GetBookingParams.safeParse(req.params);
@@ -954,9 +1017,15 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
   // Step 1: Atomically assign the driver (optimistic locking via isNull check).
   // We do this BEFORE Stripe capture so that if capture succeeds we have a
   // consistent DB record. If capture then fails we explicitly revert.
+  // Optional: driver may specify which of their vehicles they're using for this trip
+  const selectedVehicleId = typeof req.body?.vehicleId === "number" ? req.body.vehicleId as number : null;
+
+  const acceptSet: Record<string, unknown> = { driverId: driverRow.id, status: "confirmed" };
+  if (selectedVehicleId != null) acceptSet.selectedVehicleId = selectedVehicleId;
+
   const [updated] = await db
     .update(bookingsTable)
-    .set({ driverId: driverRow.id, status: "confirmed" })
+    .set(acceptSet)
     .where(and(eq(bookingsTable.id, id), isNull(bookingsTable.driverId)))
     .returning();
 

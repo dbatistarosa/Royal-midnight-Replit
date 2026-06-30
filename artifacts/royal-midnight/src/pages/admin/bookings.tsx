@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from "react";
+﻿import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet, Star, Gift, Building2 } from "lucide-react";
 import { format } from "date-fns";
@@ -28,6 +28,7 @@ const adminNavItems = [
   { label: "Drivers", href: "/admin/drivers", icon: Users },
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
+  { label: "Extras & Routes", href: "/admin/extras", icon: Tag },
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },

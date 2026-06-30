@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useGetRevenueStats } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
@@ -22,6 +22,7 @@ const adminNavItems = [
   { label: "Drivers", href: "/admin/drivers", icon: Users },
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
+  { label: "Extras & Routes", href: "/admin/extras", icon: Tag },
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },

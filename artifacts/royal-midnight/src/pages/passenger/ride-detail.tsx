@@ -311,6 +311,29 @@ function PassengerRideDetailInner() {
   type SavedCard = { id: string; brand: string; last4: string; expMonth: number; expYear: number };
   const [savedCard, setSavedCard] = useState<SavedCard | null>(null);
 
+  // Driver info (revealed within 48h of pickup)
+  type DriverInfo = {
+    available: boolean;
+    reason?: string;
+    hoursUntilPickup?: number;
+    driverName?: string;
+    driverPhone?: string;
+    vehicleDescription?: string;
+    regPlate?: string | null;
+  };
+  const [driverInfo, setDriverInfo] = useState<DriverInfo | null>(null);
+
+  // Fetch driver info whenever booking changes and has a driverId
+  useEffect(() => {
+    if (!id || !token || !booking?.driverId) { setDriverInfo(null); return; }
+    fetch(`${API_BASE}/bookings/${id}/driver-info`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() as Promise<DriverInfo> : Promise.resolve(null))
+      .then(data => setDriverInfo(data))
+      .catch(() => {});
+  }, [id, token, booking?.driverId, booking?.status]);
+
   // Rating state — initialized from API once booking loads
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingHover, setRatingHover] = useState(0);
@@ -571,6 +594,51 @@ function PassengerRideDetailInner() {
                 token={token}
                 status={booking.status}
               />
+            )}
+
+            {/* Driver Info — shown when driver assigned; contact details revealed within 48h */}
+            {booking.driverId && (
+              <div className="bg-card border border-border p-5 sm:p-6">
+                <h2 className="font-serif text-xl mb-4">Your Chauffeur</h2>
+                {!driverInfo ? (
+                  <p className="text-sm text-muted-foreground">Loading driver details…</p>
+                ) : driverInfo.available ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                        <span className="text-primary font-serif text-lg">{driverInfo.driverName?.[0] ?? "D"}</span>
+                      </div>
+                      <div>
+                        <p className="font-medium">{driverInfo.driverName}</p>
+                        <a href={`tel:${driverInfo.driverPhone}`} className="text-sm text-primary hover:underline">{driverInfo.driverPhone}</a>
+                      </div>
+                    </div>
+                    {driverInfo.vehicleDescription && (
+                      <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border text-sm">
+                        <div>
+                          <p className="text-xs text-muted-foreground uppercase tracking-widest mb-0.5">Vehicle</p>
+                          <p>{driverInfo.vehicleDescription}</p>
+                        </div>
+                        {driverInfo.regPlate && (
+                          <div>
+                            <p className="text-xs text-muted-foreground uppercase tracking-widest mb-0.5">Plate</p>
+                            <p className="font-mono">{driverInfo.regPlate}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : driverInfo.reason === "too_early" ? (
+                  <div className="text-sm text-muted-foreground">
+                    <p>Driver details will be shown 48 hours before your pickup.</p>
+                    {driverInfo.hoursUntilPickup != null && (
+                      <p className="mt-1 text-xs">~{driverInfo.hoursUntilPickup} hours to go.</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">A driver has been assigned — details coming soon.</p>
+                )}
+              </div>
             )}
 
             {/* Trip Details */}

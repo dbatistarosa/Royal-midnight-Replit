@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, BarChart2, FileText } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, BarChart2, FileText, Car } from "lucide-react";
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
@@ -11,6 +11,7 @@ const driverNavItems = [
   { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
   { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
   { label: "Documents", href: "/driver/documents", icon: FileText },
+  { label: "Vehicles",  href: "/driver/vehicles",  icon: Car },
   { label: "Profile",   href: "/driver/profile",   icon: User },
 ];
 

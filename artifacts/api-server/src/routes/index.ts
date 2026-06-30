@@ -20,6 +20,7 @@ import autocompleteRouter from "./autocomplete";
 import storageRouter from "./storage";
 import geoZonesRouter from "./geo-zones";
 import cronRouter from "./cron";
+import extrasRouter from "./extras";
 
 const router: IRouter = Router();
 
@@ -44,5 +45,6 @@ router.use(autocompleteRouter);
 router.use(storageRouter);
 router.use(geoZonesRouter);
 router.use(cronRouter);
+router.use(extrasRouter);
 
 export default router;

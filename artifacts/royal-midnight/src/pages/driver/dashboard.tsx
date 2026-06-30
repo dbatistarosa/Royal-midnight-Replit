@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+﻿import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock, BarChart2, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag, FileText, AlertTriangle, ShieldOff, XCircle, Upload } from "lucide-react";
 import { format, differenceInDays, parseISO, isValid } from "date-fns";
@@ -18,6 +18,7 @@ const driverNavItems = [
   { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
   { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
   { label: "Documents", href: "/driver/documents", icon: FileText },
+  { label: "Vehicles",  href: "/driver/vehicles",  icon: Car },
   { label: "Profile",   href: "/driver/profile",   icon: User },
 ];
 
@@ -725,27 +726,35 @@ function BookingCard({ booking, authHeader, onRefresh }: { booking: BookingRow; 
   );
 }
 
+type DriverVehicle = { id: number; make: string | null; model: string | null; year: string | null; color: string | null; isDefault: boolean; regPlate: string | null };
+
 function AvailableRideCard({
   booking,
   authHeader,
+  driverId,
   onAccepted,
   onRejected,
 }: {
   booking: BookingRow;
   authHeader: string;
+  driverId?: number;
   onAccepted: (b: BookingRow) => void;
   onRejected: (id: number) => void;
 }) {
   const [accepting, setAccepting] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [vehicles, setVehicles] = useState<DriverVehicle[] | null>(null);
+  const [showVehiclePicker, setShowVehiclePicker] = useState(false);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
   const { toast } = useToast();
 
-  const handleAccept = async () => {
+  const doAccept = async (vehicleId?: number) => {
     setAccepting(true);
     try {
       const res = await fetch(`${API_BASE}/bookings/${booking.id}/accept`, {
         method: "POST",
-        headers: { Authorization: authHeader },
+        headers: { Authorization: authHeader, "Content-Type": "application/json" },
+        body: vehicleId != null ? JSON.stringify({ vehicleId }) : undefined,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Failed to accept" })) as { error?: string };
@@ -758,6 +767,30 @@ function AvailableRideCard({
     } finally {
       setAccepting(false);
     }
+  };
+
+  const handleAccept = async () => {
+    if (!driverId) { await doAccept(); return; }
+    // Lazy-load vehicles on first accept click
+    if (vehicles === null) {
+      const r = await fetch(`${API_BASE}/drivers/${driverId}/vehicles`, { headers: { Authorization: authHeader } });
+      const data: DriverVehicle[] = r.ok ? await r.json() : [];
+      setVehicles(data);
+      if (data.length > 1) {
+        const def = data.find(v => v.isDefault);
+        setSelectedVehicleId(def?.id ?? data[0]?.id ?? null);
+        setShowVehiclePicker(true);
+        return;
+      }
+      // 0 or 1 vehicle — accept immediately
+      await doAccept(data[0]?.id);
+      return;
+    }
+    if (vehicles.length > 1) {
+      setShowVehiclePicker(true);
+      return;
+    }
+    await doAccept(vehicles[0]?.id);
   };
 
   return (
@@ -817,11 +850,46 @@ function AvailableRideCard({
           {accepting ? "Accepting..." : "Accept"}
         </button>
       </div>
+
+      {/* Vehicle picker — shown when driver has multiple registered vehicles */}
+      {showVehiclePicker && vehicles && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-card border border-border w-full max-w-sm">
+            <div className="px-6 py-5 border-b border-border">
+              <h3 className="font-serif text-lg">Which vehicle?</h3>
+              <p className="text-xs text-muted-foreground mt-1">Select the vehicle you'll use for this trip.</p>
+            </div>
+            <div className="p-4 space-y-2">
+              {vehicles.map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => setSelectedVehicleId(v.id)}
+                  className={`w-full text-left px-4 py-3 border text-sm transition-all ${selectedVehicleId === v.id ? "border-primary/50 bg-primary/5 text-white" : "border-white/10 text-muted-foreground hover:border-white/20"}`}
+                >
+                  {[v.color, v.year, v.make, v.model].filter(Boolean).join(" ") || `Vehicle #${v.id}`}
+                  {v.regPlate && <span className="ml-2 font-mono text-xs text-muted-foreground">({v.regPlate})</span>}
+                  {v.isDefault && <span className="ml-2 text-[10px] text-primary uppercase tracking-widest">default</span>}
+                </button>
+              ))}
+            </div>
+            <div className="px-4 pb-5 flex gap-3">
+              <button onClick={() => setShowVehiclePicker(false)} className="flex-1 py-2 text-xs uppercase tracking-widest border border-white/20 text-muted-foreground hover:bg-white/5">Cancel</button>
+              <button
+                onClick={async () => { setShowVehiclePicker(false); await doAccept(selectedVehicleId ?? undefined); }}
+                disabled={accepting || selectedVehicleId == null}
+                className="flex-1 py-2 text-xs uppercase tracking-widest bg-primary text-black font-semibold hover:bg-primary/90 disabled:opacity-50"
+              >
+                {accepting ? "Accepting..." : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function TabAvailable({ authHeader, onRideAccepted }: { authHeader: string; onRideAccepted?: () => void }) {
+function TabAvailable({ authHeader, driverId, onRideAccepted }: { authHeader: string; driverId?: number; onRideAccepted?: () => void }) {
   const [trips, setTrips] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -863,6 +931,7 @@ function TabAvailable({ authHeader, onRideAccepted }: { authHeader: string; onRi
           key={b.id}
           booking={b}
           authHeader={authHeader}
+          driverId={driverId}
           onAccepted={handleAccepted}
           onRejected={handleRejected}
         />
@@ -1476,6 +1545,7 @@ export default function DriverDashboard() {
           {activeTab === "available" && (
             <TabAvailable
               authHeader={authHeader}
+              driverId={driverRecord.id}
               onRideAccepted={() => {
                 setMyRidesRefreshKey(k => k + 1);
                 setUpcomingCount(c => (c ?? 0) + 1);

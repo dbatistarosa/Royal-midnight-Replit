@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import {
   LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag,
@@ -20,6 +20,7 @@ const adminNavItems = [
   { label: "Drivers", href: "/admin/drivers", icon: Users },
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
+  { label: "Extras & Routes", href: "/admin/extras", icon: Tag },
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },

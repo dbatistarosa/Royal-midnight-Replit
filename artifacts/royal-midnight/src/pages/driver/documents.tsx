@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import {
-  LayoutDashboard, History, DollarSign, User, BarChart2, FileText,
+  LayoutDashboard, History, DollarSign, User, BarChart2, FileText, Car,
   Loader2, Upload, CheckCircle, AlertTriangle, XCircle, Clock, ExternalLink,
   ShieldOff, RefreshCcw,
 } from "lucide-react";
@@ -18,6 +18,7 @@ const driverNavItems = [
   { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
   { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
   { label: "Documents", href: "/driver/documents", icon: FileText },
+  { label: "Vehicles",  href: "/driver/vehicles",  icon: Car },
   { label: "Profile",   href: "/driver/profile",   icon: User },
 ];
 

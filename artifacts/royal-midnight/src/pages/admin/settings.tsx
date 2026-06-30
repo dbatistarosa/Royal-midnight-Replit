@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { API_BASE } from "@/lib/constants";
@@ -18,6 +18,7 @@ const adminNavItems = [
   { label: "Drivers", href: "/admin/drivers", icon: Users },
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
+  { label: "Extras & Routes", href: "/admin/extras", icon: Tag },
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },

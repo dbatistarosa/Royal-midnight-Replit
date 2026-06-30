@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+﻿import React, { useState, useEffect, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, Plus, X, FileText, ExternalLink, Wallet, Gift, Building2 } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, Plus, X, FileText, ExternalLink, Wallet, Gift, Building2, Pencil, PauseCircle, Ban, PlayCircle } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
@@ -98,6 +98,11 @@ type AddDriverForm = {
 };
 const EMPTY_DRIVER: AddDriverForm = { name: "", email: "", phone: "", licenseNumber: "", vehicleClass: "", vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: "" };
 
+type EditDriverForm = {
+  name: string; phone: string; licenseNumber: string;
+  vehicleClass: string; vehicleYear: string; vehicleMake: string; vehicleModel: string; vehicleColor: string; passengerCapacity: string;
+};
+
 const adminNavItems = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
   { label: "Bookings", href: "/admin/bookings", icon: Calendar },
@@ -106,6 +111,7 @@ const adminNavItems = [
   { label: "Drivers", href: "/admin/drivers", icon: Users },
   { label: "Fleet", href: "/admin/fleet", icon: Car },
   { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
+  { label: "Extras & Routes", href: "/admin/extras", icon: Tag },
   { label: "Promos", href: "/admin/promos", icon: Tag },
   { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
   { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },
@@ -174,6 +180,9 @@ export default function AdminDrivers() {
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState<AddDriverForm>(EMPTY_DRIVER);
   const [addSaving, setAddSaving] = useState(false);
+  const [editingDriver, setEditingDriver] = useState<DriverRow | null>(null);
+  const [editForm, setEditForm] = useState<EditDriverForm>({ name: "", phone: "", licenseNumber: "", vehicleClass: "", vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: "" });
+  const [editSaving, setEditSaving] = useState(false);
 
   const authHeaders: Record<string, string> = {
     "Content-Type": "application/json",
@@ -273,6 +282,62 @@ export default function AdminDrivers() {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Could not create driver.", variant: "destructive" });
     }
     setAddSaving(false);
+  };
+
+  const patchDriver = async (driverId: number, body: Record<string, unknown>, successMsg: string) => {
+    setActionLoading(driverId);
+    try {
+      const res = await fetch(`${API_BASE}/drivers/${driverId}`, {
+        method: "PATCH", headers: authHeaders, body: JSON.stringify(body),
+      });
+      if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error || "Failed"); }
+      toast({ title: successMsg });
+      refetch();
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not update driver.", variant: "destructive" });
+    }
+    setActionLoading(null);
+  };
+
+  const handlePause = (d: DriverRow) => patchDriver(d.id, { status: "inactive" }, `${d.name} paused — cannot go online until reactivated.`);
+  const handleDeactivate = (d: DriverRow) => patchDriver(d.id, { status: "inactive", approvalStatus: "rejected" }, `${d.name} deactivated.`);
+  const handleReactivate = (d: DriverRow) => patchDriver(d.id, { status: "active", approvalStatus: "approved" }, `${d.name} reactivated.`);
+
+  const openEdit = (d: DriverRow) => {
+    setEditForm({
+      name: d.name ?? "", phone: d.phone ?? "", licenseNumber: d.licenseNumber ?? "",
+      vehicleClass: "", vehicleYear: d.vehicleYear ?? "", vehicleMake: d.vehicleMake ?? "",
+      vehicleModel: d.vehicleModel ?? "", vehicleColor: d.vehicleColor ?? "",
+      passengerCapacity: d.passengerCapacity != null ? String(d.passengerCapacity) : "",
+    });
+    setEditingDriver(d);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingDriver) return;
+    setEditSaving(true);
+    try {
+      const body: Record<string, unknown> = {};
+      if (editForm.name) body.name = editForm.name;
+      if (editForm.phone) body.phone = editForm.phone;
+      if (editForm.licenseNumber) body.licenseNumber = editForm.licenseNumber;
+      if (editForm.vehicleMake !== undefined) body.vehicleMake = editForm.vehicleMake || null;
+      if (editForm.vehicleModel !== undefined) body.vehicleModel = editForm.vehicleModel || null;
+      if (editForm.vehicleYear !== undefined) body.vehicleYear = editForm.vehicleYear || null;
+      if (editForm.vehicleColor !== undefined) body.vehicleColor = editForm.vehicleColor || null;
+      if (editForm.vehicleClass !== undefined) body.vehicleClass = editForm.vehicleClass || null;
+      if (editForm.passengerCapacity) body.passengerCapacity = parseInt(editForm.passengerCapacity);
+      const res = await fetch(`${API_BASE}/drivers/${editingDriver.id}`, {
+        method: "PATCH", headers: authHeaders, body: JSON.stringify(body),
+      });
+      if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error || "Failed"); }
+      toast({ title: "Driver updated" });
+      setEditingDriver(null);
+      refetch();
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not update driver.", variant: "destructive" });
+    }
+    setEditSaving(false);
   };
 
   const pendingCount = drivers?.filter(d => !d.approvalStatus || d.approvalStatus === "pending").length ?? 0;
@@ -417,6 +482,42 @@ export default function AdminDrivers() {
                       <tr className="bg-background/30">
                         <td colSpan={8} className="px-5 py-5">
                           <div className="space-y-5">
+                            {/* Admin action buttons */}
+                            <div className="flex flex-wrap gap-2 pb-3 border-b border-white/8">
+                              <button
+                                onClick={() => openEdit(driver)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-white/20 text-gray-300 hover:text-white hover:border-white/40 transition-all uppercase tracking-widest"
+                              >
+                                <Pencil className="w-3 h-3" /> Edit
+                              </button>
+                              {driver.approvalStatus === "approved" && driver.status !== "inactive" && (
+                                <button
+                                  onClick={() => handlePause(driver)}
+                                  disabled={loading}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10 transition-all uppercase tracking-widest disabled:opacity-50"
+                                >
+                                  {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <><PauseCircle className="w-3 h-3" /> Pause</>}
+                                </button>
+                              )}
+                              {driver.approvalStatus === "approved" && (
+                                <button
+                                  onClick={() => handleDeactivate(driver)}
+                                  disabled={loading}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-all uppercase tracking-widest disabled:opacity-50"
+                                >
+                                  {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Ban className="w-3 h-3" /> Deactivate</>}
+                                </button>
+                              )}
+                              {(driver.approvalStatus === "rejected" || driver.status === "inactive") && (
+                                <button
+                                  onClick={() => handleReactivate(driver)}
+                                  disabled={loading}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-all uppercase tracking-widest disabled:opacity-50"
+                                >
+                                  {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <><PlayCircle className="w-3 h-3" /> Reactivate</>}
+                                </button>
+                              )}
+                            </div>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
                               <DetailRow label="Phone" value={driver.phone} />
                               <DetailRow label="Service Area" value={driver.serviceArea} />
@@ -556,6 +657,64 @@ export default function AdminDrivers() {
               <Button variant="outline" onClick={() => { setShowAdd(false); setAddForm(EMPTY_DRIVER); }} className="rounded-none border-white/20 text-white hover:bg-white/10 text-xs uppercase tracking-widest">Cancel</Button>
               <Button onClick={handleAddDriver} disabled={addSaving} className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-6">
                 {addSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</> : "Create Driver"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Edit Driver Modal */}
+      {editingDriver && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-card border border-border w-full max-w-lg">
+            <div className="flex items-center justify-between px-7 py-5 border-b border-border">
+              <h2 className="font-serif text-xl">Edit Driver — {editingDriver.name}</h2>
+              <button onClick={() => setEditingDriver(null)} className="text-muted-foreground hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-7 space-y-4 max-h-[60vh] overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={LABEL}>Full Name</label>
+                  <Input value={editForm.name} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))} className={FINPUT} />
+                </div>
+                <div>
+                  <label className={LABEL}>Phone</label>
+                  <Input value={editForm.phone} onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))} className={FINPUT} />
+                </div>
+                <div>
+                  <label className={LABEL}>License Number</label>
+                  <Input value={editForm.licenseNumber} onChange={e => setEditForm(p => ({ ...p, licenseNumber: e.target.value }))} className={FINPUT} />
+                </div>
+              </div>
+              <div className="border-t border-white/10 pt-4">
+                <p className="text-xs text-muted-foreground mb-3 uppercase tracking-widest">Vehicle</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={LABEL}>Make</label>
+                    <Input value={editForm.vehicleMake} onChange={e => setEditForm(p => ({ ...p, vehicleMake: e.target.value }))} className={FINPUT} placeholder="Mercedes-Benz" />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Model</label>
+                    <Input value={editForm.vehicleModel} onChange={e => setEditForm(p => ({ ...p, vehicleModel: e.target.value }))} className={FINPUT} placeholder="S-Class" />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Year</label>
+                    <Input value={editForm.vehicleYear} onChange={e => setEditForm(p => ({ ...p, vehicleYear: e.target.value }))} className={FINPUT} placeholder="2026" />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Color</label>
+                    <Input value={editForm.vehicleColor} onChange={e => setEditForm(p => ({ ...p, vehicleColor: e.target.value }))} className={FINPUT} placeholder="Black" />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Passenger Capacity</label>
+                    <Input type="number" min="1" max="14" value={editForm.passengerCapacity} onChange={e => setEditForm(p => ({ ...p, passengerCapacity: e.target.value }))} className={FINPUT} placeholder="3" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="px-7 py-5 border-t border-border flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setEditingDriver(null)} className="rounded-none border-white/20 text-white hover:bg-white/10 text-xs uppercase tracking-widest">Cancel</Button>
+              <Button onClick={handleEditSave} disabled={editSaving} className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-6">
+                {editSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving...</> : "Save Changes"}
               </Button>
             </div>
           </div>

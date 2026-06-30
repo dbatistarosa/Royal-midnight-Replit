@@ -52,6 +52,7 @@ import DriverEarnings from "@/pages/driver/earnings";
 import DriverStats from "@/pages/driver/stats";
 import DriverProfile from "@/pages/driver/profile";
 import DriverDocuments from "@/pages/driver/documents";
+import DriverVehicles from "@/pages/driver/vehicles";
 
 // Corporate Portal
 import CorporateDashboard from "@/pages/corporate/dashboard";
@@ -69,6 +70,7 @@ import AdminDispatch from "@/pages/admin/dispatch";
 import AdminDriverApp from "@/pages/admin/driver-app";
 import AdminPricing from "@/pages/admin/pricing";
 import AdminPromos from "@/pages/admin/promos";
+import AdminExtras from "@/pages/admin/extras";
 import AdminAffiliates from "@/pages/admin/affiliates";
 import AdminCorporateAccounts from "@/pages/admin/corporate-accounts";
 import AdminSupport from "@/pages/admin/support";
@@ -282,6 +284,9 @@ function Router() {
       <Route path="/driver/documents">
         <DriverRoute component={DriverDocuments} />
       </Route>
+      <Route path="/driver/vehicles">
+        <DriverRoute component={DriverVehicles} />
+      </Route>
       <Route path="/driver/dashboard">
         <DriverRoute component={DriverDashboard} />
       </Route>
@@ -313,6 +318,9 @@ function Router() {
       </Route>
       <Route path="/admin/promos">
         <AdminRoute component={AdminPromos} />
+      </Route>
+      <Route path="/admin/extras">
+        <AdminRoute component={AdminExtras} />
       </Route>
       <Route path="/admin/affiliates">
         <AdminRoute component={AdminAffiliates} />

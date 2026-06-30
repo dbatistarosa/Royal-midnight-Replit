@@ -22,3 +22,6 @@ export * from "./compliance-documents";
 export * from "./message-events";
 export * from "./driver-locations";
 export * from "./corporate-accounts";
+export * from "./driver-vehicles";
+export * from "./fixed-routes";
+export * from "./extra-services";
