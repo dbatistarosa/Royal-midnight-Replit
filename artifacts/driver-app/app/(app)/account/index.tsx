@@ -9,8 +9,9 @@ import { Card } from "@/components/Card";
 import { colors } from "@/theme/colors";
 
 const MENU_ITEMS: { label: string; icon: keyof typeof Ionicons.glyphMap; href: string; badge?: boolean }[] = [
-  { label: "Payout & Banking", icon: "card", href: "/(app)/account/payout" },
+  { label: "My Vehicle", icon: "car-sport", href: "/(app)/account/vehicle" },
   { label: "Documents", icon: "document-text", href: "/(app)/account/documents" },
+  { label: "Payout & Banking", icon: "card", href: "/(app)/account/payout" },
   { label: "Support", icon: "help-circle", href: "/(app)/account/support" },
   { label: "Notifications", icon: "notifications", href: "/(app)/notifications" },
 ];

@@ -484,8 +484,8 @@ router.patch("/admin/drivers/:id/bank", requireAdmin, async (req, res): Promise<
 
 // GET /admin/vehicle-catalog
 router.get("/admin/vehicle-catalog", requireAdmin, async (_req, res): Promise<void> => {
-  const entries = await db.select().from(vehicleCatalogTable).orderBy(vehicleCatalogTable.make, vehicleCatalogTable.model);
-  res.json(entries);
+  const entries = await db.select().from(vehicleCatalogTable).orderBy(vehicleCatalogTable.createdAt);
+  res.json(entries.map(e => ({ ...e, createdAt: e.createdAt.toISOString() })));
 });
 
 // POST /admin/vehicle-catalog
@@ -524,6 +524,21 @@ router.delete("/admin/vehicle-catalog/:id", requireAdmin, async (req, res): Prom
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   await db.delete(vehicleCatalogTable).where(eq(vehicleCatalogTable.id, id));
   res.json({ ok: true });
+});
+
+// PATCH /admin/vehicle-catalog/:id/approve — approve a driver-submitted pending entry
+router.patch("/admin/vehicle-catalog/:id/approve", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params["id"] ?? "", 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const { vehicleTypes, minYear } = req.body as { vehicleTypes?: string[]; minYear?: number };
+  if (!vehicleTypes?.length) { res.status(400).json({ error: "vehicleTypes are required" }); return; }
+  const [updated] = await db.update(vehicleCatalogTable).set({
+    isActive: true, pendingReview: false,
+    vehicleTypes: vehicleTypes.join(","),
+    minYear: minYear ?? new Date().getFullYear(),
+  }).where(eq(vehicleCatalogTable.id, id)).returning();
+  if (!updated) { res.status(404).json({ error: "Not found" }); return; }
+  res.json({ ...updated, createdAt: updated.createdAt.toISOString() });
 });
 
 // ─── Mailer ──────────────────────────────────────────────────────────────────
@@ -744,6 +759,99 @@ router.post("/admin/compliance/documents/:id/approve", requireAdmin, async (req,
   }
 
   res.json({ success: true, docId, driverId: doc.driverId, newExpiry });
+});
+
+/**
+ * POST /admin/compliance/documents/:id/reject
+ * Reject a submitted compliance document. Stores the admin's reason and notifies
+ * the driver to re-upload. Does NOT update driver expiry fields.
+ */
+router.post("/admin/compliance/documents/:id/reject", requireAdmin, async (req, res): Promise<void> => {
+  const docId = parseInt(req.params["id"] ?? "", 10);
+  const { reason } = req.body as { reason?: string };
+
+  if (isNaN(docId)) { res.status(400).json({ error: "Invalid document id" }); return; }
+  if (!reason?.trim()) { res.status(400).json({ error: "reason is required" }); return; }
+
+  const [doc] = await db.select().from(complianceDocumentsTable).where(eq(complianceDocumentsTable.id, docId));
+  if (!doc) { res.status(404).json({ error: "Document not found" }); return; }
+
+  await db.update(complianceDocumentsTable)
+    .set({ status: "rejected", adminNotes: reason.trim(), reviewedAt: new Date() })
+    .where(eq(complianceDocumentsTable.id, docId));
+
+  // Email driver to re-upload
+  const [driver] = await db.select({ name: driversTable.name, email: driversTable.email })
+    .from(driversTable).where(eq(driversTable.id, doc.driverId));
+  if (driver) {
+    const resend = new Resend(process.env["RESEND_API_KEY"]);
+    await resend.emails.send({
+      from: ADMIN_EMAIL,
+      to: driver.email,
+      subject: `Action required: Re-upload your ${doc.docType}`,
+      html: `<p>Hi ${driver.name},</p>
+        <p>Your <strong>${doc.docType}</strong> submission was not accepted.</p>
+        <p><strong>Reason:</strong> ${reason.trim()}</p>
+        <p>Please log in to the Royal Midnight Driver app and upload a new copy.</p>`,
+    }).catch(() => {});
+  }
+
+  res.json({ success: true, docId, driverId: doc.driverId });
+});
+
+/**
+ * GET /admin/compliance/pending
+ * Returns drivers who have pending_review document submissions but no expiry date
+ * on file yet (new drivers uploading for the first time). These don't appear in the
+ * regular compliance alerts (which only tracks expiring/expired docs).
+ */
+router.get("/admin/compliance/pending", requireAdmin, async (_req, res): Promise<void> => {
+  const pendingDocs = await db.select().from(complianceDocumentsTable)
+    .where(sql`status = 'pending_review' AND submitted_at >= now() - interval '90 days'`);
+
+  if (pendingDocs.length === 0) { res.json([]); return; }
+
+  const driverIds = [...new Set(pendingDocs.map(d => d.driverId))];
+  const drivers = await db.select({
+    id: driversTable.id,
+    name: driversTable.name,
+    email: driversTable.email,
+    phone: driversTable.phone,
+    complianceHold: driversTable.complianceHold,
+    licenseExpiry: driversTable.licenseExpiry,
+    regExpiry: driversTable.regExpiry,
+    insuranceExpiry: driversTable.insuranceExpiry,
+  }).from(driversTable).where(inArray(driversTable.id, driverIds));
+
+  const expiryMap: Record<string, { "Driver License": string | null; "Vehicle Registration": string | null; "Insurance": string | null }> = {};
+  for (const d of drivers) {
+    expiryMap[d.id] = { "Driver License": d.licenseExpiry, "Vehicle Registration": d.regExpiry, "Insurance": d.insuranceExpiry };
+  }
+
+  // Only include submissions where the driver has NO existing expiry for that doc type
+  // (i.e., this is a first-time upload, not a renewal — renewals are in the main alerts)
+  const result = pendingDocs
+    .filter(doc => {
+      const label = doc.docType as "Driver License" | "Vehicle Registration" | "Insurance";
+      const expiry = expiryMap[doc.driverId]?.[label];
+      return !expiry;
+    })
+    .map(doc => {
+      const driver = drivers.find(d => d.id === doc.driverId);
+      return {
+        docId: doc.id,
+        driverId: doc.driverId,
+        driverName: driver?.name ?? "Unknown",
+        driverEmail: driver?.email ?? "",
+        docType: doc.docType,
+        fileUrl: doc.fileUrl,
+        newExpiry: doc.newExpiry,
+        submittedAt: doc.submittedAt.toISOString(),
+        complianceHold: driver?.complianceHold ?? false,
+      };
+    });
+
+  res.json(result);
 });
 
 // ─── Corporate Accounts (Net-30 billing) ────────────────────────────────────

@@ -197,3 +197,30 @@ export function usePostTicketMessage(ticketId: number) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["support", "tickets", ticketId, "messages"] }),
   });
 }
+
+export function useDriverVehicles(driverId: number | null) {
+  return useQuery({
+    queryKey: ["driver", driverId, "vehicles"],
+    queryFn: () => api.getDriverVehicles(driverId!),
+    enabled: driverId != null,
+  });
+}
+
+export function usePostDriverVehicle(driverId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.postDriverVehicle>[1]) => api.postDriverVehicle(driverId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", driverId, "vehicles"] });
+      qc.invalidateQueries({ queryKey: ["driver", driverId] });
+    },
+  });
+}
+
+export function useVehicleCatalog() {
+  return useQuery({
+    queryKey: ["vehicle-catalog"],
+    queryFn: api.getVehicleCatalog,
+    staleTime: 5 * 60 * 1000,
+  });
+}

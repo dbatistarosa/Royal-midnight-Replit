@@ -50,7 +50,7 @@ export function useGetRecentBookings<TError = unknown>(
 
 export function useGetRevenueStats<TError = unknown>(
   params?: RevenueStatsParams,
-  options?: { query?: UseQueryOptions<FullRevenueStats, TError> }
+  options?: { query?: Partial<UseQueryOptions<FullRevenueStats, TError>> }
 ): UseQueryResult<FullRevenueStats, TError> {
   const qs = new URLSearchParams();
   if (params?.startDate) qs.set("startDate", params.startDate);

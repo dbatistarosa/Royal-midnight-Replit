@@ -591,7 +591,7 @@ export default function Book() {
     let existingBookingId: number | null = rawExistingId;
     if (rawExistingId) {
       try {
-        const authHeader = token ? { "Authorization": `Bearer ${token}` } : {};
+        const authHeader: Record<string, string> = token ? { "Authorization": `Bearer ${token}` } : {};
         const checkRes = await fetch(`${API_BASE}/bookings/${rawExistingId}`, {
           headers: { ...authHeader },
         });
@@ -745,11 +745,11 @@ export default function Book() {
     .filter(e => selectedExtras.has(e.id))
     .reduce((sum, e) => sum + e.price, 0);
 
-  // Fixed hotel-airport price overrides the computed rate when the quote detects a match.
-  // Promos and extras still apply on top of the fixed base.
-  const baseTotal = selectedQuote?.fixedRoutePrice != null
-    ? selectedQuote.fixedRoutePrice
-    : selectedQuote?.totalWithTax ?? 0;
+  // When a fixed route is detected, quote.ts recalculates the full breakdown
+  // (tax + CC fee) on the flat rate and returns them in the normal totalWithTax
+  // field. So we always use totalWithTax as the base — it's correct for both
+  // computed and flat-rate quotes.
+  const baseTotal = selectedQuote?.totalWithTax ?? 0;
 
   const effectiveTotal = Math.round(((promoResult?.valid && promoResult.finalAmount != null
     ? promoResult.finalAmount

@@ -1,6 +1,6 @@
-﻿import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, Plus, X, FileText, ExternalLink, Wallet, Gift, Building2, Pencil, PauseCircle, Ban, PlayCircle } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, CheckCircle, XCircle, ChevronDown, ChevronUp, Loader2, Plus, X, FileText, ExternalLink, Wallet, Gift, Building2, Pencil, PauseCircle, Ban, PlayCircle, ShieldCheck, ShieldAlert } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
@@ -18,7 +18,7 @@ function docUrl(objectPath: string | null | undefined): string | null {
 
 type DocModalState = { url: string; label: string } | null;
 
-function DocViewButton({ path, label }: { path?: string | null; label: string; }) {
+function DocViewButton({ path, label }: { path?: string | null; label: string }) {
   const [modal, setModal] = useState<DocModalState>(null);
   const [imgFailed, setImgFailed] = useState(false);
   const url = docUrl(path);
@@ -61,7 +61,6 @@ function DocViewButton({ path, label }: { path?: string | null; label: string; }
                 </button>
               </div>
             </div>
-
             <div className="flex-1 overflow-auto flex items-center justify-center p-4 min-h-[300px]">
               {imgFailed ? (
                 <div className="text-center space-y-4">
@@ -89,6 +88,189 @@ function DocViewButton({ path, label }: { path?: string | null; label: string; }
         </div>
       )}
     </>
+  );
+}
+
+const REJECT_REASONS = [
+  "Expired Document",
+  "Blurry Image",
+  "No Match",
+  "Other",
+];
+
+type DocSubmission = {
+  id: number;
+  docType: string;
+  status: string;
+  fileUrl: string;
+  newExpiry: string | null;
+  adminNotes: string | null;
+  submittedAt: string;
+};
+
+type DriverDocuments = {
+  currentExpiries: Record<string, string | undefined>;
+  complianceHold: boolean;
+  submissions: DocSubmission[];
+};
+
+type ReviewModalState = {
+  submission: DocSubmission;
+  driverId: number;
+} | null;
+
+function DocReviewModal({
+  modal,
+  onClose,
+  onApprove,
+  onReject,
+  saving,
+}: {
+  modal: ReviewModalState;
+  onClose: () => void;
+  onApprove: (docId: number, newExpiry: string, notes: string) => Promise<void>;
+  onReject: (docId: number, reason: string) => Promise<void>;
+  saving: boolean;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const [mode, setMode] = useState<"approve" | "reject" | null>(null);
+  const [newExpiry, setNewExpiry] = useState("");
+  const [approveNotes, setApproveNotes] = useState("");
+  const [rejectReason, setRejectReason] = useState(REJECT_REASONS[0]);
+
+  if (!modal) return null;
+
+  const url = docUrl(modal.submission.fileUrl);
+  const submittedAt = new Date(modal.submission.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+  return (
+    <div className="fixed inset-0 z-[300] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-[#0a0a0a] border border-white/10 w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 flex-shrink-0">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-primary">{modal.submission.docType}</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Submitted {submittedAt}{modal.submission.newExpiry ? ` · Expiry: ${modal.submission.newExpiry}` : ""}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors p-1">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Document image */}
+        <div className="flex-1 overflow-auto flex items-center justify-center p-4 min-h-[200px] max-h-[50vh]">
+          {!url ? (
+            <p className="text-muted-foreground text-sm">No file URL</p>
+          ) : imgFailed ? (
+            <div className="text-center space-y-3">
+              <FileText className="w-10 h-10 text-gray-600 mx-auto" />
+              <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-black text-xs uppercase tracking-widest hover:bg-primary/90 transition-colors">
+                <ExternalLink className="w-3.5 h-3.5" /> Open Document
+              </a>
+            </div>
+          ) : (
+            <img
+              src={url}
+              alt={modal.submission.docType}
+              className="max-w-full max-h-full object-contain"
+              onError={() => setImgFailed(true)}
+            />
+          )}
+        </div>
+
+        {/* Action area */}
+        <div className="border-t border-white/10 p-5 flex-shrink-0 space-y-4">
+          {mode === null && (
+            <div className="flex gap-3">
+              <button
+                onClick={() => setMode("approve")}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors"
+              >
+                <ShieldCheck className="w-4 h-4" /> Approve
+              </button>
+              <button
+                onClick={() => setMode("reject")}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-700 hover:bg-red-800 text-white text-sm font-medium transition-colors"
+              >
+                <ShieldAlert className="w-4 h-4" /> Reject & Request Re-upload
+              </button>
+            </div>
+          )}
+
+          {mode === "approve" && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground uppercase tracking-widest block mb-2">New Expiry Date <span className="text-red-400">*</span></label>
+                <Input
+                  type="date"
+                  value={newExpiry}
+                  onChange={e => setNewExpiry(e.target.value)}
+                  className="rounded-none bg-white/5 border-white/10 text-white"
+                  defaultValue={modal.submission.newExpiry ?? ""}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground uppercase tracking-widest block mb-2">Admin Notes (optional)</label>
+                <Input
+                  value={approveNotes}
+                  onChange={e => setApproveNotes(e.target.value)}
+                  placeholder="e.g. Verified against DL record"
+                  className="rounded-none bg-white/5 border-white/10 text-white"
+                />
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => onApprove(modal.submission.id, newExpiry, approveNotes)}
+                  disabled={!newExpiry || saving}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm transition-colors"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  Confirm Approval
+                </button>
+                <button onClick={() => setMode(null)} className="px-4 py-2.5 border border-border text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  Back
+                </button>
+              </div>
+            </div>
+          )}
+
+          {mode === "reject" && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground uppercase tracking-widest block mb-2">Reason for Rejection <span className="text-red-400">*</span></label>
+                <div className="relative">
+                  <select
+                    value={rejectReason}
+                    onChange={e => setRejectReason(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 text-white rounded-none h-10 px-3 pr-8 appearance-none text-sm focus:outline-none focus:border-red-500"
+                  >
+                    {REJECT_REASONS.map(r => (
+                      <option key={r} value={r} className="bg-zinc-900">{r}</option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1.5">The driver will be emailed and asked to re-upload.</p>
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => onReject(modal.submission.id, rejectReason)}
+                  disabled={saving}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-700 hover:bg-red-800 disabled:opacity-50 text-white text-sm transition-colors"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+                  Confirm Rejection
+                </button>
+                <button onClick={() => setMode(null)} className="px-4 py-2.5 border border-border text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  Back
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -184,6 +366,12 @@ export default function AdminDrivers() {
   const [editForm, setEditForm] = useState<EditDriverForm>({ name: "", phone: "", licenseNumber: "", vehicleClass: "", vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: "" });
   const [editSaving, setEditSaving] = useState(false);
 
+  // Per-driver compliance docs (loaded lazily when row is expanded)
+  const [driverDocs, setDriverDocs] = useState<Record<number, DriverDocuments>>({});
+  const [docsLoading, setDocsLoading] = useState<number | null>(null);
+  const [reviewModal, setReviewModal] = useState<ReviewModalState>(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
+
   const authHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -201,9 +389,77 @@ export default function AdminDrivers() {
       .finally(() => setIsLoading(false));
   }, [token]);
 
-  useEffect(() => {
-    refetch();
-  }, [refetch]);
+  useEffect(() => { refetch(); }, [refetch]);
+
+  const loadDriverDocs = useCallback(async (driverId: number) => {
+    if (driverDocs[driverId] || docsLoading === driverId) return;
+    setDocsLoading(driverId);
+    try {
+      const res = await fetch(`${API_BASE}/drivers/${driverId}/documents`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json() as DriverDocuments;
+        setDriverDocs(prev => ({ ...prev, [driverId]: data }));
+      }
+    } catch { /* non-fatal */ }
+    setDocsLoading(null);
+  }, [driverDocs, docsLoading, token]);
+
+  const handleToggleExpand = (driverId: number) => {
+    const isExpanding = expandedId !== driverId;
+    setExpandedId(isExpanding ? driverId : null);
+    if (isExpanding) loadDriverDocs(driverId);
+  };
+
+  const reloadDriverDocs = async (driverId: number) => {
+    const res = await fetch(`${API_BASE}/drivers/${driverId}/documents`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = await res.json() as DriverDocuments;
+      setDriverDocs(prev => ({ ...prev, [driverId]: data }));
+    }
+  };
+
+  const handleApproveDoc = async (docId: number, newExpiry: string, adminNotes: string) => {
+    if (!reviewModal) return;
+    setReviewSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/compliance/documents/${docId}/approve`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ newExpiry, adminNotes }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast({ title: "Document approved", description: "Expiry updated. Compliance hold lifted if all docs are valid." });
+      setReviewModal(null);
+      await reloadDriverDocs(reviewModal.driverId);
+      refetch();
+    } catch {
+      toast({ title: "Error", description: "Could not approve document.", variant: "destructive" });
+    }
+    setReviewSaving(false);
+  };
+
+  const handleRejectDoc = async (docId: number, reason: string) => {
+    if (!reviewModal) return;
+    setReviewSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/compliance/documents/${docId}/reject`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ reason }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast({ title: "Document rejected", description: "Driver will be emailed to re-upload." });
+      setReviewModal(null);
+      await reloadDriverDocs(reviewModal.driverId);
+    } catch {
+      toast({ title: "Error", description: "Could not reject document.", variant: "destructive" });
+    }
+    setReviewSaving(false);
+  };
 
   const handleApprove = async (driverId: number) => {
     setActionLoading(driverId);
@@ -256,10 +512,7 @@ export default function AdminDrivers() {
     setAddSaving(true);
     try {
       const payload: Record<string, unknown> = {
-        name: addForm.name,
-        email: addForm.email,
-        phone: addForm.phone,
-        licenseNumber: addForm.licenseNumber,
+        name: addForm.name, email: addForm.email, phone: addForm.phone, licenseNumber: addForm.licenseNumber,
       };
       if (addForm.vehicleClass) payload.vehicleClass = addForm.vehicleClass;
       if (addForm.vehicleYear) payload.vehicleYear = addForm.vehicleYear;
@@ -269,9 +522,7 @@ export default function AdminDrivers() {
       if (addForm.passengerCapacity) payload.passengerCapacity = parseInt(addForm.passengerCapacity);
 
       const res = await fetch(`${API_BASE}/drivers`, {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify(payload),
+        method: "POST", headers: authHeaders, body: JSON.stringify(payload),
       });
       if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? "Failed"); }
       toast({ title: "Driver created", description: `${addForm.name} has been added and emailed a link to set their password and upload documents.` });
@@ -393,6 +644,8 @@ export default function AdminDrivers() {
                 const isExpanded = expandedId === driver.id;
                 const isRejecting = rejectingId === driver.id;
                 const loading = actionLoading === driver.id;
+                const docs = driverDocs[driver.id];
+                const pendingSubmissions = docs?.submissions.filter(s => s.status === "pending_review") ?? [];
 
                 return (
                   <React.Fragment key={driver.id}>
@@ -403,7 +656,14 @@ export default function AdminDrivers() {
                         <div className="text-xs text-muted-foreground">{driver.email}</div>
                       </td>
                       <td className="px-5 py-4">
-                        <ApprovalBadge status={driver.approvalStatus} />
+                        <div className="flex items-center gap-2">
+                          <ApprovalBadge status={driver.approvalStatus} />
+                          {isExpanded && docsLoading !== driver.id && pendingSubmissions.length > 0 && (
+                            <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                              {pendingSubmissions.length} doc{pendingSubmissions.length > 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-4 hidden md:table-cell">
                         {driver.isOnline ? (
@@ -446,7 +706,7 @@ export default function AdminDrivers() {
                       <td className="px-5 py-4">
                         <button
                           type="button"
-                          onClick={() => setExpandedId(isExpanded ? null : driver.id)}
+                          onClick={() => handleToggleExpand(driver.id)}
                           className="text-muted-foreground hover:text-white transition-colors"
                         >
                           {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -518,6 +778,7 @@ export default function AdminDrivers() {
                                 </button>
                               )}
                             </div>
+
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
                               <DetailRow label="Phone" value={driver.phone} />
                               <DetailRow label="Service Area" value={driver.serviceArea} />
@@ -572,6 +833,56 @@ export default function AdminDrivers() {
                                   <DocViewButton path={driver.insuranceDoc} label="Insurance Certificate" />
                                 </div>
                               </div>
+                            </div>
+
+                            {/* ── Compliance Document Submissions ── */}
+                            <div>
+                              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3 border-b border-white/8 pb-1 flex items-center gap-2">
+                                Compliance Submissions
+                                {docsLoading === driver.id && <Loader2 className="w-3 h-3 animate-spin" />}
+                              </p>
+                              {docsLoading === driver.id ? (
+                                <p className="text-xs text-muted-foreground">Loading...</p>
+                              ) : !docs ? (
+                                <p className="text-xs text-muted-foreground">—</p>
+                              ) : docs.submissions.length === 0 ? (
+                                <p className="text-xs text-muted-foreground">No documents uploaded yet.</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {docs.submissions.map(sub => {
+                                    const statusColor = sub.status === "approved" ? "text-green-400 bg-green-500/10 border-green-500/20"
+                                      : sub.status === "rejected" ? "text-red-400 bg-red-500/10 border-red-500/20"
+                                      : "text-amber-400 bg-amber-500/10 border-amber-500/20";
+                                    return (
+                                      <div key={sub.id} className="flex items-center gap-3 p-3 bg-white/3 border border-white/8">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-center gap-2 mb-0.5">
+                                            <span className="text-xs text-white font-medium">{sub.docType}</span>
+                                            <span className={`px-1.5 py-0.5 text-[10px] rounded border ${statusColor}`}>
+                                              {sub.status === "pending_review" ? "Pending" : sub.status === "approved" ? "Approved" : "Rejected"}
+                                            </span>
+                                          </div>
+                                          <p className="text-[11px] text-muted-foreground">
+                                            {new Date(sub.submittedAt).toLocaleDateString()}
+                                            {sub.newExpiry ? ` · Expiry: ${sub.newExpiry}` : ""}
+                                            {sub.adminNotes ? ` · ${sub.adminNotes}` : ""}
+                                          </p>
+                                        </div>
+                                        {sub.status === "pending_review" ? (
+                                          <button
+                                            onClick={() => setReviewModal({ submission: sub, driverId: driver.id })}
+                                            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs uppercase tracking-widest transition-all"
+                                          >
+                                            <FileText className="w-3 h-3" /> Review
+                                          </button>
+                                        ) : (
+                                          <DocViewButton path={sub.fileUrl} label={sub.docType} />
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
 
                             {driver.approvalStatus === "rejected" && driver.rejectionReason && (
@@ -662,7 +973,7 @@ export default function AdminDrivers() {
           </div>
         </div>
       )}
-      {/* Edit Driver Modal */}
+
       {editingDriver && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-card border border-border w-full max-w-lg">
@@ -720,6 +1031,14 @@ export default function AdminDrivers() {
           </div>
         </div>
       )}
+
+      <DocReviewModal
+        modal={reviewModal}
+        onClose={() => setReviewModal(null)}
+        onApprove={handleApproveDoc}
+        onReject={handleRejectDoc}
+        saving={reviewSaving}
+      />
     </PortalLayout>
   );
 }

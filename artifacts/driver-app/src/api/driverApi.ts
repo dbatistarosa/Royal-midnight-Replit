@@ -7,10 +7,12 @@ import type {
   DriverEarnings,
   DriverPayout,
   DriverReview,
+  DriverVehicle,
   FlightStatus,
   LoginResponse,
   SupportTicket,
   TicketMessage,
+  VehicleCatalogEntry,
 } from "@/api/types";
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -218,6 +220,37 @@ export function postTicketMessage(ticketId: number, message: string): Promise<Ti
     method: "POST",
     body: JSON.stringify({ message }),
   });
+}
+
+// ── Vehicles ─────────────────────────────────────────────────────────────────
+
+export function getDriverVehicles(driverId: number): Promise<DriverVehicle[]> {
+  return customFetch<DriverVehicle[]>(`/drivers/${driverId}/vehicles`);
+}
+
+export function postDriverVehicle(
+  driverId: number,
+  body: {
+    make: string;
+    model: string;
+    year: number;
+    color: string;
+    regPlate?: string;
+    vehicleClass?: string;
+    passengerCapacity?: number;
+    luggageCapacity?: number;
+    hasCarSeat?: boolean;
+    isDefault?: boolean;
+  },
+): Promise<DriverVehicle> {
+  return customFetch<DriverVehicle>(`/drivers/${driverId}/vehicles`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getVehicleCatalog(): Promise<VehicleCatalogEntry[]> {
+  return customFetch<VehicleCatalogEntry[]>(`/vehicle-catalog`);
 }
 
 // ── Document/photo upload (presigned URL contract) ──────────────────────────

@@ -33,7 +33,6 @@ const config: ExpoConfig = {
       "ACCESS_BACKGROUND_LOCATION",
       "FOREGROUND_SERVICE",
       "FOREGROUND_SERVICE_LOCATION",
-      "POST_NOTIFICATIONS",
     ],
   },
   plugins: [
@@ -44,13 +43,6 @@ const config: ExpoConfig = {
       {
         locationAlwaysAndWhenInUsePermission:
           "Allow Royal Midnight to track your location during active trips, including while your screen is off.",
-      },
-    ],
-    [
-      "expo-notifications",
-      {
-        icon: "./assets/notification-icon.png",
-        color: "#c9a84c",
       },
     ],
     [

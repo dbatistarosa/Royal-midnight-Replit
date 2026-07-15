@@ -1,28 +1,68 @@
 import { Router, type IRouter } from "express";
 import { eq, asc } from "drizzle-orm";
 import { db, fixedRoutesTable, extraServicesTable } from "@workspace/db";
+import type { AirportPriceEntry } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
+function serializeRoute(r: typeof fixedRoutesTable.$inferSelect) {
+  return {
+    ...r,
+    fixedPrice: parseFloat(String(r.fixedPrice)),
+    airportsJson: r.airportsJson ?? null,
+  };
+}
+
 // ── Fixed Routes (hotel ↔ airport pricing) ───────────────────────────────────
 
+// Public — used by the quote engine to find active routes.
+// Returns all active routes (both legacy and airportsJson format).
 router.get("/fixed-routes", async (_req, res): Promise<void> => {
   const routes = await db.select().from(fixedRoutesTable)
     .where(eq(fixedRoutesTable.isActive, true))
     .orderBy(fixedRoutesTable.originName);
-  res.json(routes.map(r => ({ ...r, fixedPrice: parseFloat(String(r.fixedPrice)) })));
+  res.json(routes.map(serializeRoute));
 });
 
 router.get("/admin/fixed-routes", requireAdmin, async (_req, res): Promise<void> => {
   const routes = await db.select().from(fixedRoutesTable).orderBy(fixedRoutesTable.originName);
-  res.json(routes.map(r => ({ ...r, fixedPrice: parseFloat(String(r.fixedPrice)) })));
+  res.json(routes.map(serializeRoute));
 });
 
 router.post("/admin/fixed-routes", requireAdmin, async (req, res): Promise<void> => {
-  const { originName, originAddress, destinationCode, destinationName, vehicleClass, fixedPrice } = req.body as Record<string, unknown>;
-  if (!originName || !originAddress || !destinationCode || !destinationName || !fixedPrice) {
-    res.status(400).json({ error: "originName, originAddress, destinationCode, destinationName, and fixedPrice are required" });
+  const body = req.body as Record<string, unknown>;
+  const { originName, originAddress } = body;
+  if (!originName || !originAddress) {
+    res.status(400).json({ error: "originName and originAddress are required" });
+    return;
+  }
+
+  // New multi-airport format
+  if (body.airportsJson) {
+    const airportsJson = body.airportsJson as AirportPriceEntry[];
+    if (!Array.isArray(airportsJson) || airportsJson.length === 0) {
+      res.status(400).json({ error: "airportsJson must be a non-empty array" });
+      return;
+    }
+    const [r] = await db.insert(fixedRoutesTable).values({
+      originName: String(originName),
+      originAddress: String(originAddress),
+      destinationCode: "all",
+      destinationName: "Multiple",
+      vehicleClass: "all",
+      fixedPrice: "0",
+      airportsJson,
+      isActive: body.isActive !== false,
+    }).returning();
+    res.status(201).json(serializeRoute(r));
+    return;
+  }
+
+  // Legacy single-airport single-class format
+  const { destinationCode, destinationName, vehicleClass, fixedPrice } = body;
+  if (!destinationCode || !destinationName || !fixedPrice) {
+    res.status(400).json({ error: "destinationCode, destinationName, and fixedPrice are required" });
     return;
   }
   const [r] = await db.insert(fixedRoutesTable).values({
@@ -33,7 +73,7 @@ router.post("/admin/fixed-routes", requireAdmin, async (req, res): Promise<void>
     vehicleClass: vehicleClass ? String(vehicleClass) : "business",
     fixedPrice: String(fixedPrice),
   }).returning();
-  res.status(201).json({ ...r, fixedPrice: parseFloat(String(r.fixedPrice)) });
+  res.status(201).json(serializeRoute(r));
 });
 
 router.patch("/admin/fixed-routes/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -47,10 +87,11 @@ router.patch("/admin/fixed-routes/:id", requireAdmin, async (req, res): Promise<
   if (body.destinationName) updateData.destinationName = body.destinationName;
   if (body.vehicleClass) updateData.vehicleClass = body.vehicleClass;
   if (body.fixedPrice) updateData.fixedPrice = String(body.fixedPrice);
+  if (body.airportsJson !== undefined) updateData.airportsJson = body.airportsJson;
   if (body.isActive !== undefined) updateData.isActive = body.isActive;
   const [r] = await db.update(fixedRoutesTable).set(updateData).where(eq(fixedRoutesTable.id, id)).returning();
   if (!r) { res.status(404).json({ error: "Route not found" }); return; }
-  res.json({ ...r, fixedPrice: parseFloat(String(r.fixedPrice)) });
+  res.json(serializeRoute(r));
 });
 
 router.delete("/admin/fixed-routes/:id", requireAdmin, async (req, res): Promise<void> => {

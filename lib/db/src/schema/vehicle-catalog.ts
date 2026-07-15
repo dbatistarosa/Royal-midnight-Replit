@@ -7,6 +7,7 @@ export const vehicleCatalogTable = pgTable("vehicle_catalog", {
   minYear: integer("min_year").notNull(),
   vehicleTypes: text("vehicle_types").notNull(),
   isActive: boolean("is_active").notNull().default(true),
+  pendingReview: boolean("pending_review").notNull().default(false),
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

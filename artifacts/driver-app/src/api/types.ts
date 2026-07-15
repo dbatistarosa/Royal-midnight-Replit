@@ -189,3 +189,27 @@ export interface FlightStatus {
   status?: string;
   [key: string]: unknown;
 }
+
+export interface DriverVehicle {
+  id: number;
+  driverId: number;
+  make: string;
+  model: string;
+  year: number;
+  color: string;
+  regPlate: string | null;
+  vehicleClass: string | null;
+  passengerCapacity: number | null;
+  luggageCapacity: number | null;
+  hasCarSeat: boolean;
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export interface VehicleCatalogEntry {
+  id: number;
+  make: string;
+  model: string;
+  minYear: number;
+  vehicleTypes: string[];
+}

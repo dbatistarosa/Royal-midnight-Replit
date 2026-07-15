@@ -1,24 +1,14 @@
-import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { Redirect, Tabs, useSegments } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@/auth/store";
 import { useDriverByUserId } from "@/api/hooks";
-import { useNotificationHandlers } from "@/notifications/useNotificationHandlers";
-import { registerForPushNotifications } from "@/notifications/registerForPushNotifications";
 import { colors } from "@/theme/colors";
 
 export default function AppLayout() {
   const user = useAuthStore((s) => s.user);
-  const driverId = useAuthStore((s) => s.driverId);
   const segments = useSegments();
   const { data: driver, isLoading } = useDriverByUserId(user?.id ?? null);
-
-  useNotificationHandlers();
-
-  useEffect(() => {
-    if (driverId) registerForPushNotifications(driverId).catch((err) => console.error("[push] register failed:", err));
-  }, [driverId]);
 
   // Allow the documents screen even while on compliance hold — it's the
   // escape hatch that lets a driver actually clear the hold.

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Alert, Text, View } from "react-native";
+import { Alert, Modal, Pressable, Text, TextInput, View, Image, ScrollView } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useAuthStore } from "@/auth/store";
 import { useDriverDocuments, usePostDriverDocument } from "@/api/hooks";
@@ -8,8 +9,17 @@ import { ScreenContainer } from "@/components/ScreenContainer";
 import { Card } from "@/components/Card";
 import { GoldButton } from "@/components/GoldButton";
 import { colors } from "@/theme/colors";
+import Constants from "expo-constants";
 
 const DOC_TYPES = ["Driver License", "Vehicle Registration", "Insurance"] as const;
+
+const API_BASE = (Constants.expoConfig?.extra?.["apiBaseUrl"] as string | undefined) ?? "https://royalmidnight.com/api";
+
+function docUrl(path: string): string {
+  if (path.startsWith("http")) return path;
+  const stripped = path.replace(/^\/objects\//, "");
+  return `${API_BASE}/storage/objects/${stripped}`;
+}
 
 function statusColor(expiry: string | undefined): string {
   if (!expiry) return colors.muted;
@@ -19,13 +29,33 @@ function statusColor(expiry: string | undefined): string {
   return colors.success;
 }
 
+function isValidDate(val: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(val) && !isNaN(new Date(val).getTime());
+}
+
 export default function DocumentsScreen() {
   const driverId = useAuthStore((s) => s.driverId);
   const { data: docs, refetch } = useDriverDocuments(driverId);
   const postDocument = usePostDriverDocument(driverId ?? 0);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
+  const [expiryInputs, setExpiryInputs] = useState<Record<string, string>>({});
+  const [viewImageUrl, setViewImageUrl] = useState<string | null>(null);
+
+  function setExpiry(docType: string, val: string) {
+    setExpiryInputs(prev => ({ ...prev, [docType]: val }));
+  }
 
   async function handleUpload(docType: string) {
+    const expiry = expiryInputs[docType]?.trim();
+    if (!expiry) {
+      Alert.alert("Expiry date required", "Please enter the expiration date before uploading.");
+      return;
+    }
+    if (!isValidDate(expiry)) {
+      Alert.alert("Invalid date", "Use YYYY-MM-DD format (e.g. 2027-05-15).");
+      return;
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       quality: 0.8,
@@ -41,7 +71,8 @@ export default function DocumentsScreen() {
         asset.mimeType ?? "image/jpeg",
       );
       await uploadFileToPresignedUrl(uploadURL, asset.uri, asset.mimeType ?? "image/jpeg");
-      await postDocument.mutateAsync({ docType, fileUrl: objectPath });
+      await postDocument.mutateAsync({ docType, fileUrl: objectPath, newExpiry: expiry });
+      setExpiry(docType, "");
       refetch();
       Alert.alert("Submitted", "Your document was submitted for review.");
     } catch {
@@ -53,41 +84,110 @@ export default function DocumentsScreen() {
 
   return (
     <ScreenContainer>
-      <View className="pt-4">
-        {docs?.complianceHold ? (
-          <Card className="mb-5 border-warning">
-            <Text className="text-warning text-sm">
-              At least one document has expired. You can't accept new rides until a renewal is approved.
-            </Text>
-          </Card>
-        ) : null}
-
-        {DOC_TYPES.map((docType) => {
-          const expiry = docs?.currentExpiries[docType];
-          const latestSubmission = docs?.submissions.find((s) => s.docType === docType && s.status === "pending_review");
-
-          return (
-            <Card key={docType} className="mb-3">
-              <View className="flex-row justify-between items-center mb-2">
-                <Text className="text-white font-sans-medium">{docType}</Text>
-                <View className="h-2 w-2 rounded-full" style={{ backgroundColor: statusColor(expiry) }} />
-              </View>
-              <Text className="text-muted text-xs mb-3">
-                {expiry ? `Expires ${new Date(expiry).toLocaleDateString()}` : "No expiry on file"}
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <View className="pt-4">
+          {docs?.complianceHold ? (
+            <Card className="mb-5 border-warning">
+              <Text className="text-warning text-sm">
+                At least one document has expired. You can't accept new rides until a renewal is approved.
               </Text>
-              {latestSubmission ? (
-                <Text className="text-warning text-xs mb-2">Pending review since {new Date(latestSubmission.submittedAt).toLocaleDateString()}</Text>
-              ) : null}
-              <GoldButton
-                label="Upload Renewal"
-                variant="outline"
-                onPress={() => handleUpload(docType)}
-                loading={uploadingType === docType}
-              />
             </Card>
-          );
-        })}
-      </View>
+          ) : null}
+
+          {DOC_TYPES.map((docType) => {
+            const expiry = docs?.currentExpiries[docType];
+            const latestSubmission = docs?.submissions.find((s) => s.docType === docType && s.status === "pending_review");
+            const rejectedSubmission = docs?.submissions.find((s) => s.docType === docType && s.status === "rejected");
+            const approvedSubmission = docs?.submissions.find((s) => s.docType === docType && s.status === "approved");
+            const viewableSubmission = latestSubmission ?? approvedSubmission;
+
+            return (
+              <Card key={docType} className="mb-3">
+                <View className="flex-row justify-between items-center mb-2">
+                  <Text className="text-white font-sans-medium">{docType}</Text>
+                  <View className="h-2 w-2 rounded-full" style={{ backgroundColor: statusColor(expiry) }} />
+                </View>
+                <Text className="text-muted text-xs mb-3">
+                  {expiry ? `Expires ${new Date(expiry).toLocaleDateString()}` : "No expiry on file"}
+                </Text>
+
+                {rejectedSubmission ? (
+                  <View className="mb-3 p-2.5 rounded" style={{ backgroundColor: colors.danger + "20", borderWidth: 1, borderColor: colors.danger + "40" }}>
+                    <Text className="text-xs" style={{ color: colors.danger }}>
+                      Last upload was rejected
+                      {rejectedSubmission.adminNotes ? `: ${rejectedSubmission.adminNotes}` : ""}
+                    </Text>
+                    <Text className="text-xs text-muted mt-1">Please re-upload a valid document.</Text>
+                  </View>
+                ) : null}
+
+                {latestSubmission ? (
+                  <View className="flex-row items-center justify-between mb-3">
+                    <Text className="text-warning text-xs">
+                      Pending review since {new Date(latestSubmission.submittedAt).toLocaleDateString()}
+                    </Text>
+                    {viewableSubmission?.fileUrl ? (
+                      <Pressable onPress={() => setViewImageUrl(docUrl(viewableSubmission.fileUrl))} className="flex-row items-center gap-1">
+                        <Ionicons name="eye-outline" size={14} color={colors.gold} />
+                        <Text className="text-xs" style={{ color: colors.gold }}>View</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {/* Expiry date input — required before upload */}
+                <View className="mb-3">
+                  <Text className="text-muted text-xs mb-1">
+                    Document expiry date <Text style={{ color: colors.danger }}>*</Text>
+                  </Text>
+                  <TextInput
+                    value={expiryInputs[docType] ?? ""}
+                    onChangeText={val => setExpiry(docType, val)}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={colors.muted}
+                    keyboardType="numeric"
+                    style={{
+                      backgroundColor: colors.surface,
+                      borderWidth: 1,
+                      borderColor: colors.border ?? "#333",
+                      color: colors.white,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      fontSize: 14,
+                      borderRadius: 4,
+                    }}
+                  />
+                </View>
+
+                <GoldButton
+                  label={latestSubmission ? "Upload New Version" : "Upload Document"}
+                  variant="outline"
+                  onPress={() => handleUpload(docType)}
+                  loading={uploadingType === docType}
+                />
+              </Card>
+            );
+          })}
+        </View>
+      </ScrollView>
+
+      {/* Image viewer modal */}
+      <Modal visible={viewImageUrl !== null} transparent animationType="fade" onRequestClose={() => setViewImageUrl(null)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)", justifyContent: "center", alignItems: "center" }}>
+          <Pressable
+            style={{ position: "absolute", top: 48, right: 20, zIndex: 10, padding: 8 }}
+            onPress={() => setViewImageUrl(null)}
+          >
+            <Ionicons name="close" size={28} color="#fff" />
+          </Pressable>
+          {viewImageUrl ? (
+            <Image
+              source={{ uri: viewImageUrl }}
+              style={{ width: "90%", height: "70%", resizeMode: "contain" }}
+            />
+          ) : null}
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }

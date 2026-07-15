@@ -298,29 +298,122 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
     cardProcessingFeeRate,
   });
 
-  // Check for a fixed hotel-to-airport route that overrides the computed price.
-  // Match is fuzzy: we look for the pickup address inside the stored origin_address
-  // and the destination code (fll/mia/pbi) inside the dropoff address.
+  // ── Fixed hotel-to-airport route detection ────────────────────────────────
+  // Per-airport keywords so we can identify the destination airport code from
+  // a free-form Mapbox autocomplete address (which rarely contains the IATA code).
+  const AIRPORT_CODE_KEYWORDS: Record<string, string[]> = {
+    fll: ["fll", "fort lauderdale-hollywood", "fort lauderdale hollywood", "fort lauderdale international"],
+    mia: ["mia", "miami international", "miami intl"],
+    pbi: ["pbi", "palm beach international"],
+    opa: ["opa", "opa-locka", "opa locka", "opa locka executive"],
+    mco: ["mco", "orlando international"],
+    tpa: ["tpa", "tampa international"],
+    jax: ["jax", "jacksonville international"],
+    rsw: ["rsw", "southwest florida international", "fort myers"],
+    srq: ["srq", "sarasota bradenton"],
+    sfb: ["sfb", "orlando sanford"],
+  };
+
+  function detectAirportCode(addr: string): string | null {
+    const lower = addr.toLowerCase();
+    for (const [code, keywords] of Object.entries(AIRPORT_CODE_KEYWORDS)) {
+      if (keywords.some(k => lower.includes(k))) return code;
+    }
+    return null;
+  }
+
+  function originFuzzyMatch(pickup: string, name: string, addr: string): boolean {
+    const norm = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+    const pu = norm(pickup);
+    const n = norm(name);
+    const a = norm(addr);
+    if (n.length > 3 && pu.includes(n)) return true;
+    const street = a.split(",")[0]?.trim() ?? "";
+    if (street.length > 4 && pu.includes(street)) return true;
+    const puStreet = pu.split(",")[0]?.trim() ?? "";
+    if (puStreet.length > 4 && a.includes(puStreet)) return true;
+    return false;
+  }
+
   let fixedRoutePrice: number | null = null;
   let fixedRouteId: number | null = null;
   try {
+    // Fetch ALL active routes — class matching is done in code to support
+    // new multi-class airportsJson format alongside legacy single-class rows.
     const activeRoutes = await db.select().from(fixedRoutesTable)
-      .where(and(eq(fixedRoutesTable.isActive, true), eq(fixedRoutesTable.vehicleClass, vc)));
-    const pickupLower = pickupAddress.toLowerCase();
+      .where(eq(fixedRoutesTable.isActive, true));
+
+    const detectedAirportCode = detectAirportCode(dropoffAddress);
     const dropoffLower = dropoffAddress.toLowerCase();
+
     for (const route of activeRoutes) {
-      const originMatch = pickupLower.includes(route.originName.toLowerCase()) ||
-        route.originAddress.toLowerCase().split(",")[0]!.trim().length > 4 &&
-        pickupLower.includes(route.originAddress.toLowerCase().split(",")[0]!.trim());
-      const destMatch = dropoffLower.includes(route.destinationCode.toLowerCase()) ||
-        dropoffLower.includes(route.destinationName.toLowerCase());
-      if (originMatch && destMatch) {
-        fixedRoutePrice = parseFloat(String(route.fixedPrice));
+      if (!originFuzzyMatch(pickupAddress, route.originName, route.originAddress)) continue;
+
+      // New multi-airport format (airportsJson present)
+      if (route.airportsJson?.length) {
+        if (!detectedAirportCode) continue;
+        const apt = route.airportsJson.find(
+          a => a.code.toLowerCase() === detectedAirportCode,
+        );
+        if (!apt) continue;
+        const price = apt.prices[vc];
+        if (price == null) continue;
+        fixedRoutePrice = price;
         fixedRouteId = route.id;
         break;
       }
+
+      // Legacy single-class format
+      if (route.vehicleClass !== vc && route.vehicleClass !== "all") continue;
+      const legacyDestMatch = (detectedAirportCode &&
+        detectedAirportCode === route.destinationCode.toLowerCase()) ||
+        dropoffLower.includes(route.destinationCode.toLowerCase()) ||
+        dropoffLower.includes(route.destinationName.toLowerCase().split("(")[0]!.trim());
+      if (!legacyDestMatch) continue;
+      fixedRoutePrice = parseFloat(String(route.fixedPrice));
+      fixedRouteId = route.id;
+      break;
     }
   } catch { /* fixed-route lookup is non-fatal */ }
+
+  // When a flat rate applies, recalculate the full fare breakdown using the
+  // fixed price as the base — so tax and CC fee are computed on the flat rate,
+  // not the distance-computed price. Airport fee is $0 (already baked into flat rate).
+  if (fixedRoutePrice != null) {
+    const fixedBreakdown = computeFareBreakdown({
+      baseFare: fixedRoutePrice,
+      distanceCharge: 0,
+      airportFee: 0,
+      zoneMultiplier: 1,
+      corporateDiscountPct,
+      taxRate,
+      cardProcessingFeeRate,
+    });
+    res.json(
+      GetQuoteResponse.parse({
+        vehicleClass: vc,
+        estimatedPrice: fixedBreakdown.subtotal,
+        baseFare: fixedRoutePrice,
+        includedMiles: 0,
+        billableMiles: 0,
+        distanceCharge: 0,
+        airportFee: 0,
+        surgeAdjustment: 0,
+        subtotal: fixedBreakdown.subtotal,
+        taxRate,
+        taxAmount: fixedBreakdown.taxAmount,
+        cardProcessingFeeRate,
+        cardProcessingFee: fixedBreakdown.cardProcessingFee,
+        totalWithTax: fixedBreakdown.totalWithTax,
+        estimatedDuration,
+        estimatedDistance,
+        currency: "USD",
+        fixedRoutePrice,
+        fixedRouteId,
+      })
+    );
+    return;
+  }
 
   res.json(
     GetQuoteResponse.parse({
@@ -341,7 +434,6 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
       estimatedDuration,
       estimatedDistance,
       currency: "USD",
-      ...(fixedRoutePrice != null ? { fixedRoutePrice, fixedRouteId } : {}),
     })
   );
 });

@@ -41,7 +41,7 @@ function ProfilePhotoUpload({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { uploadFile, isUploading, progress } = useUpload({
-    requestUploadUrl: `${API_BASE}/storage/uploads/request-url`,
+    basePath: `${API_BASE}/storage`,
     onSuccess: (res) => {
       onUploaded(res.objectPath);
     },
