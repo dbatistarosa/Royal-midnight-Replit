@@ -26,9 +26,10 @@ export default function Terms() {
             Reservations must be made at least 2 hours in advance. All quoted fares are flat-rate with no
             surge pricing. Hourly charter bookings include a set number of included hours and miles; usage
             beyond that allotment is billed as an extra-time charge at the rate disclosed at booking.
-            Cancellations made more than 24 hours before the scheduled pickup time are eligible for a full
-            refund. Cancellations made within 24 hours may incur a fee, and no-shows may be charged up to the
-            full amount of the booking.
+            Cancellations made 12 hours or more before the scheduled pickup time are eligible for a full
+            refund. Cancellations made between 2 and 12 hours before pickup incur a 25% cancellation fee.
+            Cancellations made less than 2 hours before pickup, and no-shows, are charged the full amount
+            of the booking.
           </p>
 
           <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">3. Payment</h2>

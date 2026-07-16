@@ -87,7 +87,7 @@ export const FAQ_ITEMS = [
   {
     question: "What is your cancellation policy?",
     answer:
-      "Cancellation fees are based on how close to pickup you cancel: 1+ day before pickup is a full refund, 12–24 hours before is a 25% fee (75% refund), 2–12 hours before is a 50% fee, and within 2 hours of pickup (including no-shows) is a 100% fee with no refund.",
+      "Cancellation fees are based on how close to pickup you cancel: 12 or more hours before pickup is a full refund with no fee, 2–12 hours before is a 25% fee (75% refund), and within 2 hours of pickup (including no-shows) is a 100% charge with no refund.",
   },
   {
     question: "How do I find my chauffeur at the airport?",

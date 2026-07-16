@@ -32,7 +32,19 @@ const VEHICLE_OPTIONS = [
 ];
 
 type BookingResult = { id: number };
-type QuoteResult = { estimatedPrice: number };
+type QuoteResult = {
+  estimatedPrice: number;
+  baseFare: number;
+  distanceCharge: number;
+  surgeAdjustment: number;
+  fixedRoutePrice?: number | null;
+};
+
+// Driver commission base: base fare + billable miles (+surge). Airport fee,
+// taxes and card fees are company-side. Flat routes commission on the flat price.
+function driverFareBase(q: QuoteResult): number {
+  return q.fixedRoutePrice ?? (q.baseFare + q.distanceCharge + (q.surgeAdjustment ?? 0));
+}
 
 function CorporateBookInner() {
   const { user, token } = useAuth();
@@ -53,6 +65,7 @@ function CorporateBookInner() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [quotedPrice, setQuotedPrice] = useState<number | null>(null);
+  const [quotedFareBase, setQuotedFareBase] = useState<number | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
   const [confirmed, setConfirmed] = useState<{ id: number; price: number } | null>(null);
 
@@ -78,6 +91,7 @@ function CorporateBookInner() {
       if (res.ok) {
         const data = await res.json() as QuoteResult;
         setQuotedPrice(data.estimatedPrice);
+        setQuotedFareBase(driverFareBase(data));
       }
     } catch {
       // Quote not critical — silently ignore
@@ -97,6 +111,7 @@ function CorporateBookInner() {
     try {
       // Get a fresh quote if we don't have one yet
       let price = quotedPrice;
+      let fareBase = quotedFareBase;
       if (price === null) {
         const qRes = await fetch(`${API_BASE}/quote`, {
           method: "POST",
@@ -112,7 +127,9 @@ function CorporateBookInner() {
         if (qRes.ok) {
           const qData = await qRes.json() as QuoteResult;
           price = qData.estimatedPrice;
+          fareBase = driverFareBase(qData);
           setQuotedPrice(price);
+          setQuotedFareBase(fareBase);
         }
       }
 
@@ -130,6 +147,7 @@ function CorporateBookInner() {
           passengers: form.passengers,
           specialRequests: form.notes || null,
           priceQuoted: price ?? 0,
+          fareSubtotal: fareBase ?? undefined,
           userId: user?.id ?? null,
           paymentType: "corporate_account",
         }),

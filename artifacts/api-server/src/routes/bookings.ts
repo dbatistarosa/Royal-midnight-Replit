@@ -109,7 +109,7 @@ function parseBooking(b: typeof bookingsTable.$inferSelect) {
 
 // ─── Cancellation policy ─────────────────────────────────────────────────────
 
-type CancellationTier = "free" | "partial_25" | "partial_50" | "non_cancellable";
+type CancellationTier = "free" | "partial_25" | "full_100" | "non_cancellable";
 
 interface CancelPreview {
   canCancel: boolean;
@@ -148,33 +148,37 @@ function getCancellationPolicy(pickupAt: Date, priceQuoted: number, status: stri
     };
   }
 
-  if (hoursUntilPickup >= 24) {
+  // Policy (2026-07-15, set by owner):
+  //   • 12h or more before pickup ........ no charge
+  //   • 2–12h before pickup .............. 25% fee
+  //   • under 2h before pickup / no-show . 100% charge
+  if (hoursUntilPickup >= 12) {
     return {
       canCancel: true, tier: "free",
       feePercent: 0, feeAmount: 0, netRefund: priceQuoted,
       hoursUntilPickup,
-      message: "Cancellations made 24 hours or more before pickup are fully refunded — no fee applies.",
+      message: "Cancellations made 12 hours or more before pickup are fully refunded — no fee applies.",
       priceQuoted,
     };
   }
 
-  if (hoursUntilPickup >= 12) {
+  if (hoursUntilPickup >= 2) {
     const feeAmount = Math.round(priceQuoted * 0.25 * 100) / 100;
     return {
       canCancel: true, tier: "partial_25",
       feePercent: 25, feeAmount, netRefund: Math.round((priceQuoted - feeAmount) * 100) / 100,
       hoursUntilPickup,
-      message: "Cancellations made 12–24 hours before pickup incur a 25% cancellation fee.",
+      message: "Cancellations made 2–12 hours before pickup incur a 25% cancellation fee.",
       priceQuoted,
     };
   }
 
-  const feeAmount = Math.round(priceQuoted * 0.50 * 100) / 100;
+  const feeAmount = Math.round(priceQuoted * 100) / 100;
   return {
-    canCancel: true, tier: "partial_50",
-    feePercent: 50, feeAmount, netRefund: Math.round((priceQuoted - feeAmount) * 100) / 100,
+    canCancel: true, tier: "full_100",
+    feePercent: 100, feeAmount, netRefund: 0,
     hoursUntilPickup,
-    message: "Cancellations made less than 12 hours before pickup incur a 50% cancellation fee.",
+    message: "Cancellations made less than 2 hours before pickup (including no-shows) are charged in full.",
     priceQuoted,
   };
 }

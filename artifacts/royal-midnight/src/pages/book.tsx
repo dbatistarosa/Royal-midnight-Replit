@@ -63,45 +63,96 @@ interface QuoteResult {
 
 
 /** Itemized price breakdown — used in both the vehicle-selection cards and
- *  the final review/payment summary so every fee is visible before paying. */
+ *  the final review/payment summary so every fee is visible before paying.
+ *  Fare lines (what the chauffeur service itself costs) are listed first;
+ *  taxes, airport fee, and card processing are grouped as "External Fees"
+ *  with a (?) explainer, since they are pass-through costs, not our fare. */
 function PriceBreakdownLines({ quote, isHourly }: { quote: QuoteResult; isHourly: boolean }) {
+  const [showFeeInfo, setShowFeeInfo] = useState(false);
+  const isFlat = quote.fixedRoutePrice != null;
+  const fareTotal = isFlat
+    ? quote.fixedRoutePrice!
+    : Math.round((quote.baseFare + quote.distanceCharge + (quote.surgeAdjustment ?? 0)) * 100) / 100;
+  const externalFees = Math.round((quote.airportFee + quote.taxAmount + quote.cardProcessingFee) * 100) / 100;
+
   return (
     <>
-      <div className="flex justify-between items-center text-gray-500">
-        <span>Base fare{!isHourly && quote.includedMiles > 0 ? ` (includes ${quote.includedMiles.toFixed(1)} mi)` : ""}</span>
-        <span className="text-gray-300">${quote.baseFare.toFixed(2)}</span>
-      </div>
-      <div className="flex justify-between items-center text-gray-500">
-        <span>{isHourly ? "Hourly charge" : `Extra miles (${quote.billableMiles.toFixed(1)} mi)`}</span>
-        <span className="text-gray-300">${quote.distanceCharge.toFixed(2)}</span>
-      </div>
-      {quote.airportFee > 0 && (
-        <div className="flex justify-between items-center text-gray-500">
-          <span>Airport fee</span>
-          <span className="text-gray-300">${quote.airportFee.toFixed(2)}</span>
+      {/* ── Fare ── */}
+      {isFlat ? (
+        <div className="flex justify-between items-center">
+          <span className="text-primary/90 flex items-center gap-2">
+            <span className="text-[9px] uppercase tracking-widest border border-primary/40 text-primary px-1.5 py-0.5">Flat Rate</span>
+            <span className="text-gray-400">All-inclusive route price</span>
+          </span>
+          <span className="text-gray-200 font-medium">${fareTotal.toFixed(2)}</span>
         </div>
+      ) : (
+        <>
+          <div className="flex justify-between items-center text-gray-500">
+            <span>Base fare{!isHourly && quote.includedMiles > 0 ? ` · first ${quote.includedMiles.toFixed(1)} mi included` : ""}</span>
+            <span className="text-gray-300">${quote.baseFare.toFixed(2)}</span>
+          </div>
+          {(isHourly || quote.distanceCharge > 0) && (
+            <div className="flex justify-between items-center text-gray-500">
+              <span>{isHourly ? "Hourly charge" : `Extra miles · ${quote.billableMiles.toFixed(1)} mi`}</span>
+              <span className="text-gray-300">${quote.distanceCharge.toFixed(2)}</span>
+            </div>
+          )}
+          {quote.surgeAdjustment !== 0 && (
+            <div className="flex justify-between items-center text-gray-500">
+              <span>Peak/zone adjustment</span>
+              <span className="text-gray-300">${quote.surgeAdjustment.toFixed(2)}</span>
+            </div>
+          )}
+          <div className="flex justify-between items-center text-gray-400 pt-1">
+            <span className="text-[11px] uppercase tracking-widest">Fare subtotal</span>
+            <span className="text-gray-200 font-medium">${fareTotal.toFixed(2)}</span>
+          </div>
+        </>
       )}
-      {quote.surgeAdjustment !== 0 && (
-        <div className="flex justify-between items-center text-gray-500">
-          <span>Peak/zone adjustment</span>
-          <span className="text-gray-300">${quote.surgeAdjustment.toFixed(2)}</span>
-        </div>
-      )}
+
       <div className="h-px bg-white/8 my-1" />
+
+      {/* ── External fees (tax + airport + card processing) ── */}
       <div className="flex justify-between items-center text-gray-500">
-        <span>Subtotal</span>
-        <span className="text-gray-300">${quote.subtotal.toFixed(2)}</span>
+        <span className="flex items-center gap-1.5 relative">
+          External Fees
+          <button
+            type="button"
+            aria-label="What are external fees?"
+            onClick={() => setShowFeeInfo(v => !v)}
+            onBlur={() => setShowFeeInfo(false)}
+            className="group inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-600 text-[10px] text-gray-500 hover:border-primary/60 hover:text-primary transition-colors"
+          >
+            ?
+            <span className={`${showFeeInfo ? "block" : "hidden"} group-hover:block absolute bottom-full left-0 mb-2 w-64 z-20 bg-[#111] border border-white/15 p-3 text-left normal-case tracking-normal shadow-xl`}>
+              <span className="block text-[11px] text-gray-300 leading-relaxed mb-2">
+                These are external charges collected on top of the fare — they include government taxes,
+                airport access fees, and card processing. They are not part of Royal Midnight's service fare.
+              </span>
+              <span className="block space-y-1">
+                <span className="flex justify-between text-[11px] text-gray-500">
+                  <span>Florida tax ({(quote.taxRate * 100).toFixed(0)}%)</span>
+                  <span>${quote.taxAmount.toFixed(2)}</span>
+                </span>
+                {quote.airportFee > 0 && (
+                  <span className="flex justify-between text-[11px] text-gray-500">
+                    <span>Airport fee</span>
+                    <span>${quote.airportFee.toFixed(2)}</span>
+                  </span>
+                )}
+                {quote.cardProcessingFee > 0 && (
+                  <span className="flex justify-between text-[11px] text-gray-500">
+                    <span>Card processing ({(quote.cardProcessingFeeRate * 100).toFixed(1)}%)</span>
+                    <span>${quote.cardProcessingFee.toFixed(2)}</span>
+                  </span>
+                )}
+              </span>
+            </span>
+          </button>
+        </span>
+        <span className="text-gray-300">${externalFees.toFixed(2)}</span>
       </div>
-      <div className="flex justify-between items-center text-gray-500">
-        <span>Florida tax ({(quote.taxRate * 100).toFixed(0)}%)</span>
-        <span className="text-gray-300">${quote.taxAmount.toFixed(2)}</span>
-      </div>
-      {quote.cardProcessingFee > 0 && (
-        <div className="flex justify-between items-center text-gray-500">
-          <span>Card processing fee ({(quote.cardProcessingFeeRate * 100).toFixed(1)}%)</span>
-          <span className="text-gray-300">${quote.cardProcessingFee.toFixed(2)}</span>
-        </div>
-      )}
     </>
   );
 }
@@ -672,9 +723,12 @@ export default function Book() {
             flightNumber: values.flightNumber || null,
             specialRequests: values.specialRequests || null,
             priceQuoted: effectiveTotal,
-            // Driver commission is based on the pre-tax/pre-fee/pre-discount subtotal —
-            // taxes, the card fee, and any promo discount are absorbed by the company only.
-            fareSubtotal: selectedQuote.fixedRoutePrice ?? selectedQuote.subtotal,
+            // Driver commission base: base fare + billable miles (+surge) only.
+            // Taxes, the card fee, promo discounts AND the airport fee are all
+            // company-side — the driver never earns on them. Flat routes pay
+            // commission on the flat price (airport fee is baked in there).
+            fareSubtotal: selectedQuote.fixedRoutePrice
+              ?? (selectedQuote.baseFare + selectedQuote.distanceCharge + (selectedQuote.surgeAdjustment ?? 0)),
             extras: selectedExtras.size > 0
               ? [...selectedExtras].map(id => ({ id }))
               : null,
@@ -1441,21 +1495,12 @@ export default function Book() {
                       </div>
                     )}
 
-                    {/* Fixed route badge — shown when the route has a pre-negotiated flat rate */}
-                    {selectedQuote.fixedRoutePrice != null && (
-                      <div className="border border-primary/30 bg-primary/5 px-4 py-3 flex items-center justify-between text-sm">
-                        <span className="text-primary text-xs uppercase tracking-widest">Fixed Route Rate</span>
-                        <span className="text-primary font-medium">${selectedQuote.fixedRoutePrice.toFixed(2)}</span>
-                      </div>
-                    )}
-
-                    {/* Price breakdown — every fee disclosed before payment */}
-                    {selectedQuote.fixedRoutePrice == null && (
-                      <div className="border-t border-white/8 pt-5 space-y-3 text-sm">
-                        <p className="text-[10px] uppercase tracking-widest text-gray-600">Price Breakdown</p>
-                        <PriceBreakdownLines quote={selectedQuote} isHourly={charterMode === "hourly"} />
-                      </div>
-                    )}
+                    {/* Price breakdown — every fee disclosed before payment.
+                        Handles both computed fares and flat-rate routes. */}
+                    <div className="border-t border-white/8 pt-5 space-y-3 text-sm">
+                      <p className="text-[10px] uppercase tracking-widest text-gray-600">Price Breakdown</p>
+                      <PriceBreakdownLines quote={selectedQuote} isHourly={charterMode === "hourly"} />
+                    </div>
 
                     {/* Total */}
                     <div className="border-t border-white/8 pt-5">
@@ -1590,10 +1635,9 @@ export default function Book() {
                           </p>
                           <div className="space-y-2">
                             {[
-                              { time: "0–2 hours before", fee: "100%", desc: "No refund" },
-                              { time: "2–12 hours before", fee: "50%", desc: "50% refund" },
-                              { time: "12–24 hours before", fee: "25%", desc: "75% refund" },
-                              { time: "1+ day before", fee: "0%", desc: "Full refund" },
+                              { time: "No-show / 0–2 hours before", fee: "100%", desc: "No refund" },
+                              { time: "2–12 hours before", fee: "25%", desc: "75% refund" },
+                              { time: "12+ hours before", fee: "0%", desc: "Full refund" },
                             ].map(tier => (
                               <div key={tier.time} className="flex items-center justify-between text-xs">
                                 <span className="text-gray-500">{tier.time}</span>

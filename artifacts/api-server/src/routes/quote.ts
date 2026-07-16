@@ -322,16 +322,19 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
     return null;
   }
 
-  function originFuzzyMatch(pickup: string, name: string, addr: string): boolean {
-    const norm = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
-    const pu = norm(pickup);
+  const norm = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+
+  // Does this free-form address refer to the route's hotel? Matches on the
+  // hotel name OR the street line of the stored address (split on commas
+  // BEFORE normalizing — norm() strips commas, which used to break this).
+  function hotelMatch(address: string, name: string, addr: string): boolean {
+    const full = norm(address);
     const n = norm(name);
-    const a = norm(addr);
-    if (n.length > 3 && pu.includes(n)) return true;
-    const street = a.split(",")[0]?.trim() ?? "";
-    if (street.length > 4 && pu.includes(street)) return true;
-    const puStreet = pu.split(",")[0]?.trim() ?? "";
-    if (puStreet.length > 4 && a.includes(puStreet)) return true;
+    if (n.length > 3 && full.includes(n)) return true;
+    const street = norm(addr.split(",")[0] ?? "");
+    if (street.length > 4 && full.includes(street)) return true;
+    const addrStreet = norm(address.split(",")[0] ?? "");
+    if (addrStreet.length > 4 && norm(addr).includes(addrStreet)) return true;
     return false;
   }
 
@@ -343,17 +346,32 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
     const activeRoutes = await db.select().from(fixedRoutesTable)
       .where(eq(fixedRoutesTable.isActive, true));
 
-    const detectedAirportCode = detectAirportCode(dropoffAddress);
-    const dropoffLower = dropoffAddress.toLowerCase();
+    const airportInDropoff = detectAirportCode(dropoffAddress);
+    const airportInPickup = detectAirportCode(pickupAddress);
 
     for (const route of activeRoutes) {
-      if (!originFuzzyMatch(pickupAddress, route.originName, route.originAddress)) continue;
+      // Flat rates apply in BOTH directions: hotel → airport and airport → hotel.
+      let matchedAirport: string | null = null;
+      let airportSideAddress = "";
+      if (airportInDropoff && hotelMatch(pickupAddress, route.originName, route.originAddress)) {
+        matchedAirport = airportInDropoff;
+        airportSideAddress = dropoffAddress;
+      } else if (airportInPickup && hotelMatch(dropoffAddress, route.originName, route.originAddress)) {
+        matchedAirport = airportInPickup;
+        airportSideAddress = pickupAddress;
+      } else if (!route.airportsJson?.length && hotelMatch(pickupAddress, route.originName, route.originAddress)) {
+        // Legacy rows can still match the airport by destination name/code text
+        // even when keyword detection found nothing.
+        airportSideAddress = dropoffAddress;
+      } else {
+        continue;
+      }
 
       // New multi-airport format (airportsJson present)
       if (route.airportsJson?.length) {
-        if (!detectedAirportCode) continue;
+        if (!matchedAirport) continue;
         const apt = route.airportsJson.find(
-          a => a.code.toLowerCase() === detectedAirportCode,
+          a => a.code.toLowerCase() === matchedAirport,
         );
         if (!apt) continue;
         const price = apt.prices[vc];
@@ -365,10 +383,10 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
 
       // Legacy single-class format
       if (route.vehicleClass !== vc && route.vehicleClass !== "all") continue;
-      const legacyDestMatch = (detectedAirportCode &&
-        detectedAirportCode === route.destinationCode.toLowerCase()) ||
-        dropoffLower.includes(route.destinationCode.toLowerCase()) ||
-        dropoffLower.includes(route.destinationName.toLowerCase().split("(")[0]!.trim());
+      const airportSideLower = airportSideAddress.toLowerCase();
+      const legacyDestMatch = (matchedAirport && matchedAirport === route.destinationCode.toLowerCase()) ||
+        airportSideLower.includes(route.destinationCode.toLowerCase()) ||
+        airportSideLower.includes(route.destinationName.toLowerCase().split("(")[0]!.trim());
       if (!legacyDestMatch) continue;
       fixedRoutePrice = parseFloat(String(route.fixedPrice));
       fixedRouteId = route.id;
