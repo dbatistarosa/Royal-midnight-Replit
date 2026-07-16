@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { RequestHandler } from "express";
 import { sendTripReminders, runWeeklyPayoutIfNeeded, runComplianceEnforcement, sendReviewRequests } from "../lib/cron-jobs.js";
 import { logger } from "../lib/logger";
 
@@ -26,32 +27,30 @@ function verifyCronRequest(req: import("express").Request, res: import("express"
   return true;
 }
 
-router.post("/cron/trip-reminders", async (req, res) => {
-  if (!verifyCronRequest(req, res)) return;
-  logger.info("Cron: trip-reminders triggered");
-  res.json({ ok: true });
-  await sendTripReminders();
-});
+// Vercel Cron invokes cron paths with a GET request (it cannot be configured to
+// send POST); the GitHub Actions trip-reminders workflow calls them with POST.
+// Register both verbs so the job body actually runs regardless of the caller.
+// Await the job before responding: Vercel may suspend the function once the
+// response is sent, so work started after res.json() is not guaranteed to run.
+function registerCron(path: string, name: string, job: () => Promise<void>): void {
+  const handler: RequestHandler = async (req, res) => {
+    if (!verifyCronRequest(req, res)) return;
+    logger.info(`Cron: ${name} triggered`);
+    try {
+      await job();
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error({ err }, `Cron ${name} failed`);
+      res.status(500).json({ error: "Cron job failed" });
+    }
+  };
+  router.get(path, handler);
+  router.post(path, handler);
+}
 
-router.post("/cron/weekly-payouts", async (req, res) => {
-  if (!verifyCronRequest(req, res)) return;
-  logger.info("Cron: weekly-payouts triggered");
-  res.json({ ok: true });
-  await runWeeklyPayoutIfNeeded();
-});
-
-router.post("/cron/compliance-check", async (req, res) => {
-  if (!verifyCronRequest(req, res)) return;
-  logger.info("Cron: compliance-check triggered");
-  res.json({ ok: true });
-  await runComplianceEnforcement();
-});
-
-router.post("/cron/review-requests", async (req, res) => {
-  if (!verifyCronRequest(req, res)) return;
-  logger.info("Cron: review-requests triggered");
-  res.json({ ok: true });
-  await sendReviewRequests();
-});
+registerCron("/cron/trip-reminders", "trip-reminders", sendTripReminders);
+registerCron("/cron/weekly-payouts", "weekly-payouts", runWeeklyPayoutIfNeeded);
+registerCron("/cron/compliance-check", "compliance-check", runComplianceEnforcement);
+registerCron("/cron/review-requests", "review-requests", sendReviewRequests);
 
 export default router;
