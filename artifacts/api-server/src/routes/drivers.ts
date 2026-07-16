@@ -954,7 +954,21 @@ router.delete("/drivers/:id/vehicles/:vehicleId", requireAuth, async (req, res):
   const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
   if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
   if (!canAccessDriver(req.currentUser!, driver.userId)) { res.status(403).json({ error: "Access denied" }); return; }
-  await db.delete(driverVehiclesTable).where(and(eq(driverVehiclesTable.id, vehicleId), eq(driverVehiclesTable.driverId, driverId)));
+  try {
+    await db.delete(driverVehiclesTable).where(and(eq(driverVehiclesTable.id, vehicleId), eq(driverVehiclesTable.driverId, driverId)));
+  } catch (err: unknown) {
+    // FK violation: a booking's selected_vehicle_id references this vehicle.
+    // Detach the historical references (booking history keeps its own copy of
+    // the vehicle description in emails) and retry once.
+    const code = (err as { code?: string })?.code;
+    if (code === "23503") {
+      await db.update(bookingsTable).set({ selectedVehicleId: null })
+        .where(eq(bookingsTable.selectedVehicleId, vehicleId));
+      await db.delete(driverVehiclesTable).where(and(eq(driverVehiclesTable.id, vehicleId), eq(driverVehiclesTable.driverId, driverId)));
+    } else {
+      throw err;
+    }
+  }
   res.sendStatus(204);
 });
 

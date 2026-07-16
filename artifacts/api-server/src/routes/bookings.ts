@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql, inArray } from "drizzle-orm";
-import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable, extraServicesTable, bookingExtrasTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable, extraServicesTable, bookingExtrasTable, driverVehiclesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import { HOURLY_RATES, DEFAULT_RATE_PER_MILE } from "./quote.js";
@@ -694,15 +694,31 @@ router.get("/bookings/:id/driver-info", requireAuth, async (req, res): Promise<v
 
   if (!driver) { res.json({ available: false, reason: "driver_not_found" }); return; }
 
-  const vehicleDescription = [driver.vehicleColor, driver.vehicleYear, driver.vehicleMake, driver.vehicleModel]
-    .filter(Boolean).join(" ") || "Luxury Vehicle";
+  // Prefer the vehicle the driver actually chose for THIS trip (multi-vehicle
+  // drivers pick one at accept time); fall back to the legacy driver fields.
+  let vehicleDescription = "";
+  let regPlate: string | null = driver.regPlate ?? null;
+  if (booking.selectedVehicleId != null) {
+    const [selected] = await db
+      .select({ year: driverVehiclesTable.year, make: driverVehiclesTable.make, model: driverVehiclesTable.model, color: driverVehiclesTable.color, regPlate: driverVehiclesTable.regPlate })
+      .from(driverVehiclesTable)
+      .where(eq(driverVehiclesTable.id, booking.selectedVehicleId));
+    if (selected) {
+      vehicleDescription = [selected.color, selected.year, selected.make, selected.model].filter(Boolean).join(" ");
+      regPlate = selected.regPlate ?? regPlate;
+    }
+  }
+  if (!vehicleDescription) {
+    vehicleDescription = [driver.vehicleColor, driver.vehicleYear, driver.vehicleMake, driver.vehicleModel]
+      .filter(Boolean).join(" ") || "Luxury Vehicle";
+  }
 
   res.json({
     available: true,
     driverName: driver.name,
     driverPhone: driver.phone,
     vehicleDescription,
-    regPlate: driver.regPlate ?? null,
+    regPlate,
     profilePicture: driver.profilePicture ?? null,
   });
 });
