@@ -340,7 +340,10 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
 
   let fixedRoutePrice: number | null = null;
   let fixedRouteId: number | null = null;
-  try {
+  // Flat rates are point-to-point products only: hourly charters and
+  // multi-stop itineraries always use their computed pricing.
+  const flatRateEligible = charterMode === "route" && waypoints.length === 0;
+  if (flatRateEligible) try {
     // Fetch ALL active routes — class matching is done in code to support
     // new multi-class airportsJson format alongside legacy single-class rows.
     const activeRoutes = await db.select().from(fixedRoutesTable)

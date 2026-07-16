@@ -559,6 +559,10 @@ export default function Book() {
             totalWithTax: (r as any).totalWithTax ?? r.estimatedPrice,
             estimatedDistance: r.estimatedDistance,
             estimatedDuration: r.estimatedDuration,
+            // Flat-rate route fields — without these the whole fixed-price flow
+            // (Flat Rate chip, fareSubtotal, auto-applied total) goes dead.
+            fixedRoutePrice: (r as any).fixedRoutePrice ?? null,
+            fixedRouteId: (r as any).fixedRouteId ?? null,
           };
         } else {
           newQuotes[vc.id] = null;
