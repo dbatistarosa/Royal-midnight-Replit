@@ -218,7 +218,13 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   const caller = req.currentUser!;
 
   const conditions = [];
-  if (parsed.data.status) conditions.push(eq(bookingsTable.status, parsed.data.status));
+  // Driver open-pool requests get a widened status filter further down (the
+  // pool must also include unassigned corporate "confirmed" bookings), so the
+  // plain equality filter is skipped for that specific case.
+  const isDriverPoolRequest = caller.role === "driver" &&
+    (parsed.data.status === "pending" || parsed.data.status === "authorized") &&
+    parsed.data.driverId == null;
+  if (parsed.data.status && !isDriverPoolRequest) conditions.push(eq(bookingsTable.status, parsed.data.status));
   if (parsed.data.driverId != null) conditions.push(eq(bookingsTable.driverId, parsed.data.driverId));
   if (parsed.data.userId != null) conditions.push(eq(bookingsTable.userId, parsed.data.userId));
   if (parsed.data.startDate) {
@@ -310,9 +316,12 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       }
 
       if (requestedStatus === "pending" || requestedStatus === "authorized") {
-        // Requesting the open/unassigned pool — includes both pending and authorized bookings.
+        // Requesting the open/unassigned pool — includes pending and authorized
+        // bookings, plus corporate bookings (those are created directly as
+        // "confirmed" with no payment step and still need a driver to accept).
         // Pre-fetch this driver's busy windows so conflicting trips can be hidden below.
         conditions.push(isNull(bookingsTable.driverId));
+        conditions.push(inArray(bookingsTable.status, ["pending", "authorized", "confirmed"]));
         isDriverOpenPoolQuery = true;
         driverBusyWindows = await getDriverBusyWindows(driverRow.id);
       } else {
@@ -1015,7 +1024,9 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
     return;
   }
 
-  if (!["pending", "authorized"].includes(booking.status) || booking.driverId != null) {
+  // "confirmed" with no driver = corporate booking (created confirmed, no
+  // payment step) still waiting for a driver to claim it.
+  if (!["pending", "authorized", "confirmed"].includes(booking.status) || booking.driverId != null) {
     res.status(400).json({ error: "Booking is already assigned or not available" });
     return;
   }
