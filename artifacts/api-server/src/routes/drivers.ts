@@ -959,8 +959,10 @@ router.delete("/drivers/:id/vehicles/:vehicleId", requireAuth, async (req, res):
   } catch (err: unknown) {
     // FK violation: a booking's selected_vehicle_id references this vehicle.
     // Detach the historical references (booking history keeps its own copy of
-    // the vehicle description in emails) and retry once.
-    const code = (err as { code?: string })?.code;
+    // the vehicle description in emails) and retry once. Drizzle wraps the pg
+    // error, so the SQLSTATE lives on err.cause, not err itself.
+    const e = err as { code?: string; cause?: { code?: string } };
+    const code = e?.code ?? e?.cause?.code;
     if (code === "23503") {
       await db.update(bookingsTable).set({ selectedVehicleId: null })
         .where(eq(bookingsTable.selectedVehicleId, vehicleId));
