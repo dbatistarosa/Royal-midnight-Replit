@@ -164,25 +164,28 @@ export async function runWeeklyPayoutIfNeeded(): Promise<void> {
       new Date(weekEnd.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
     const drivers = await db.select().from(driversTable).where(sql`approval_status = 'approved'`).orderBy(driversTable.name);
-    const bookings = await db.select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted, fareSubtotal: bookingsTable.fareSubtotal })
+    const bookings = await db.select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted, fareSubtotal: bookingsTable.fareSubtotal, tipAmount: bookingsTable.tipAmount })
       .from(bookingsTable)
       .where(sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
 
-    const earningsByDriver = new Map<number, { rides: number; gross: number }>();
+    const earningsByDriver = new Map<number, { rides: number; gross: number; tips: number }>();
     for (const b of bookings) {
       if (!b.driverId) continue;
-      const e = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0 };
+      const e = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0, tips: 0 };
       const fareBase = b.fareSubtotal != null ? parseFloat(String(b.fareSubtotal)) : parseFloat(String(b.priceQuoted ?? "0"));
-      earningsByDriver.set(b.driverId, { rides: e.rides + 1, gross: e.gross + fareBase });
+      const tip = b.tipAmount != null ? parseFloat(String(b.tipAmount)) : 0;
+      earningsByDriver.set(b.driverId, { rides: e.rides + 1, gross: e.gross + fareBase, tips: e.tips + tip });
     }
 
     const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("./mailer.js");
     const payouts = drivers.map(d => {
-      const e = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0 };
-      const driverNet = Math.round(e.gross * commissionPct * 100) / 100;
+      const e = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0, tips: 0 };
+      // Tips are 100% the driver's — commission applies only to the fare base.
+      const driverNet = Math.round((e.gross * commissionPct + e.tips) * 100) / 100;
       return {
         driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
         rides: e.rides, grossEarnings: Math.round(e.gross * 100) / 100,
+        tipsTotal: Math.round(e.tips * 100) / 100,
         commissionPct, driverNet, weekLabel,
         bankName: d.payoutBankName ?? null, routingNumber: safeDecryptField(d.payoutRoutingNumber),
         accountNumber: safeDecryptField(d.payoutAccountNumber), legalName: d.payoutLegalName ?? null,

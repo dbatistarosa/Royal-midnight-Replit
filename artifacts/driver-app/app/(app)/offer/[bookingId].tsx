@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { Text, View } from "react-native";
+import { Modal, Pressable, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { ApiError } from "@workspace/api-client-react";
-import { useBooking, useAcceptBooking } from "@/api/hooks";
+import { useAuthStore } from "@/auth/store";
+import { useBooking, useAcceptBooking, useDriverVehicles } from "@/api/hooks";
 import { ScreenContainer } from "@/components/ScreenContainer";
 import { Card } from "@/components/Card";
 import { GoldButton } from "@/components/GoldButton";
+import { colors } from "@/theme/colors";
 
 const OFFER_WINDOW_SECONDS = 25;
 
@@ -14,8 +16,11 @@ export default function OfferScreen() {
   const id = Number(bookingId);
   const { data: booking, isLoading } = useBooking(id);
   const acceptBooking = useAcceptBooking();
+  const driverId = useAuthStore((s) => s.driverId);
+  const { data: vehicles } = useDriverVehicles(driverId);
   const [secondsLeft, setSecondsLeft] = useState(OFFER_WINDOW_SECONDS);
   const [error, setError] = useState<string | null>(null);
+  const [showVehiclePicker, setShowVehiclePicker] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -30,16 +35,27 @@ export default function OfferScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  async function handleAccept() {
+  async function acceptWithVehicle(vehicleId?: number) {
     setError(null);
+    setShowVehiclePicker(false);
     try {
-      await acceptBooking.mutateAsync(id);
+      await acceptBooking.mutateAsync({ bookingId: id, vehicleId });
       router.replace(`/trip/${id}`);
     } catch (err) {
       setError(err instanceof ApiError && err.status === 409
         ? "This ride was already taken by another driver."
         : "Could not accept this ride. Please try again.");
     }
+  }
+
+  function handleAccept() {
+    // Mirror the web dashboard: 2+ vehicles → pick which one; 0–1 → accept
+    // immediately (sending the single vehicle's id when there is one).
+    if (vehicles && vehicles.length > 1) {
+      setShowVehiclePicker(true);
+      return;
+    }
+    void acceptWithVehicle(vehicles?.[0]?.id);
   }
 
   if (isLoading || !booking) {
@@ -84,6 +100,40 @@ export default function OfferScreen() {
           <GoldButton label="Decline" variant="outline" onPress={() => router.back()} />
         </View>
       </View>
+
+      {/* Vehicle picker — shown when the driver has more than one vehicle */}
+      <Modal visible={showVehiclePicker} transparent animationType="fade" onRequestClose={() => setShowVehiclePicker(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", padding: 24 }}>
+          <Card>
+            <Text className="text-white font-sans-medium text-base mb-3">Which vehicle will you use?</Text>
+            {(vehicles ?? []).map((v) => (
+              <Pressable
+                key={v.id}
+                onPress={() => void acceptWithVehicle(v.id)}
+                style={{
+                  flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                  paddingVertical: 12, paddingHorizontal: 12, marginBottom: 8,
+                  borderWidth: 1, borderColor: v.isDefault ? colors.gold : "#333",
+                  borderRadius: 4, backgroundColor: colors.surface,
+                }}
+              >
+                <View>
+                  <Text style={{ color: colors.white, fontSize: 14 }}>
+                    {v.year} {v.make} {v.model}
+                  </Text>
+                  <Text style={{ color: colors.muted, fontSize: 12 }}>
+                    {[v.color, v.regPlate].filter(Boolean).join(" · ")}
+                  </Text>
+                </View>
+                {v.isDefault ? <Text style={{ color: colors.gold, fontSize: 11 }}>Default</Text> : null}
+              </Pressable>
+            ))}
+            <Pressable onPress={() => setShowVehiclePicker(false)} style={{ alignItems: "center", paddingVertical: 10 }}>
+              <Text style={{ color: colors.muted }}>Cancel</Text>
+            </Pressable>
+          </Card>
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }

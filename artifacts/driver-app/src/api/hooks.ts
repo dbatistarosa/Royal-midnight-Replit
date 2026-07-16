@@ -119,7 +119,8 @@ function useTripMutation(invalidateBookingId?: number) {
 export function useAcceptBooking() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (bookingId: number) => api.acceptBooking(bookingId),
+    mutationFn: ({ bookingId, vehicleId }: { bookingId: number; vehicleId?: number }) =>
+      api.acceptBooking(bookingId, vehicleId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["bookings"] }),
   });
 }

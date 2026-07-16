@@ -148,8 +148,11 @@ interface BookingActionResult {
   status: string;
 }
 
-export function acceptBooking(bookingId: number): Promise<BookingActionResult> {
-  return customFetch(`/bookings/${bookingId}/accept`, { method: "POST" });
+export function acceptBooking(bookingId: number, vehicleId?: number): Promise<BookingActionResult> {
+  return customFetch(`/bookings/${bookingId}/accept`, {
+    method: "POST",
+    ...(vehicleId != null ? { body: JSON.stringify({ vehicleId }) } : {}),
+  });
 }
 
 export function postTripChecklist(bookingId: number): Promise<{ ok: true; checklistCompletedAt: string }> {
@@ -249,8 +252,13 @@ export function postDriverVehicle(
   });
 }
 
-export function getVehicleCatalog(): Promise<VehicleCatalogEntry[]> {
-  return customFetch<VehicleCatalogEntry[]>(`/vehicle-catalog`);
+export async function getVehicleCatalog(): Promise<VehicleCatalogEntry[]> {
+  // The public route returns vehicleTypes as a comma-joined string — normalize.
+  const rows = await customFetch<Array<Omit<VehicleCatalogEntry, "vehicleTypes"> & { vehicleTypes: string }>>(`/vehicle-catalog`);
+  return rows.map(r => ({
+    ...r,
+    vehicleTypes: r.vehicleTypes.split(",").map(t => t.trim()).filter(Boolean),
+  }));
 }
 
 // ── Document/photo upload (presigned URL contract) ──────────────────────────

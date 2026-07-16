@@ -958,15 +958,7 @@ router.delete("/drivers/:id/vehicles/:vehicleId", requireAuth, async (req, res):
   res.sendStatus(204);
 });
 
-// ── Public vehicle catalog (for driver app onboarding/registration) ───────────
-
-router.get("/vehicle-catalog", requireAuth, async (_req, res): Promise<void> => {
-  const entries = await db.select().from(vehicleCatalogTable)
-    .where(eq(vehicleCatalogTable.isActive, true));
-  res.json(entries.map(e => ({
-    id: e.id, make: e.make, model: e.model, minYear: e.minYear,
-    vehicleTypes: e.vehicleTypes.split(",").map(t => t.trim()).filter(Boolean),
-  })));
-});
+// Note: GET /vehicle-catalog intentionally lives in routes/vehicles.ts (public,
+// registered first) — do not re-add a duplicate here; it would be shadowed.
 
 export default router;

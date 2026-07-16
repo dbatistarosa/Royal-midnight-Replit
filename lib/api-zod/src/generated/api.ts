@@ -1012,6 +1012,9 @@ export const UpdatePromoParams = zod.object({
 export const UpdatePromoBody = zod.object({
   isActive: zod.boolean().nullish(),
   expiresAt: zod.string().nullish(),
+  // Hand-patched (like ErrorEnvelope/cabin prefs): without this key zod strips
+  // `description` from the parsed body and promo-description edits silently no-op.
+  description: zod.string().nullish(),
 });
 
 export const UpdatePromoResponse = zod.object({

@@ -1594,23 +1594,11 @@ router.post("/bookings/:id/rate", requireAuth, async (req, res): Promise<void> =
     .values({ bookingId: id, driverId: booking.driverId, userId: caller.userId, rating, comment: comment ?? null })
     .returning();
 
-  // Recalculate driver avg rating (fire-and-forget)
-  db.select({ avg: sql<number>`coalesce(avg(rating::numeric), 0)::float` })
-    .from(reviewsTable)
-    .where(eq(reviewsTable.driverId, booking.driverId))
-    .then(([row]) => {
-      if (row != null) {
-        const newRating = String(Math.round((row.avg ?? 0) * 10) / 10);
-        return db.update(driversTable)
-          .set({ rating: newRating })
-          .where(eq(driversTable.id, booking.driverId!));
-      }
-    })
-    .catch(err => console.error("[bookings/rate] failed to update driver rating:", err));
-
   res.json({ success: true, reviewId: review.id });
 
-  // Recompute and persist driver's average rating (fire-and-forget)
+  // Recompute and persist driver's average rating (fire-and-forget).
+  // Note: this used to run twice with different rounding (merge artifact from
+  // two parallel sessions) — deduplicated to this single pass.
   const driverId = booking.driverId;
   db.select({ avg: sql<string>`avg(rating)::numeric(3,2)` })
     .from(reviewsTable)
@@ -1621,6 +1609,7 @@ router.post("/bookings/:id/rate", requireAuth, async (req, res): Promise<void> =
           .set({ rating: row.avg })
           .where(eq(driversTable.id, driverId));
       }
+      return undefined;
     })
     .catch(err => console.error("[bookings] failed to update driver rating:", err));
 });
