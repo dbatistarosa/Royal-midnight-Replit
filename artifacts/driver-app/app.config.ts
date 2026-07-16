@@ -4,7 +4,7 @@ const config: ExpoConfig = {
   name: "Royal Midnight Driver",
   slug: "royal-midnight-driver",
   scheme: "royalmidnightdriver",
-  version: "1.0.0",
+  version: "1.1.0",
   orientation: "portrait",
   userInterfaceStyle: "dark",
   icon: "./assets/icon.png",
@@ -22,7 +22,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: "com.royalmidnight.driver",
-    versionCode: 1,
+    versionCode: 2,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#0a0a0f",
