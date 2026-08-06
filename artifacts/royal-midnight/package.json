@@ -82,6 +82,7 @@
     "@sentry/react": "^10.62.0",
     "@stripe/react-stripe-js": "^6.1.0",
     "@stripe/stripe-js": "^9.0.1",
+    "@vercel/analytics": "^2.0.1",
     "@workspace/object-storage-web": "workspace:*",
     "jspdf": "^4.2.1",
     "mapbox-gl": "^3.9.0",

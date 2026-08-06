@@ -269,7 +269,7 @@ importers:
         version: 3.1.0
       vitest:
         specifier: 'catalog:'
-        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.2)
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.3.5)(vite@7.3.2(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.2))
 
   artifacts/driver-app:
     dependencies:
@@ -571,6 +571,9 @@ importers:
       '@stripe/stripe-js':
         specifier: ^9.0.1
         version: 9.0.1
+      '@vercel/analytics':
+        specifier: ^2.0.1
+        version: 2.0.1(react@19.1.0)
       '@workspace/object-storage-web':
         specifier: workspace:*
         version: link:../../lib/object-storage-web
@@ -772,7 +775,7 @@ importers:
         version: 7.3.2(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.2)
       vitest:
         specifier: 'catalog:'
-        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.2)
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.3.5)(vite@7.3.2(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.2))
       wouter:
         specifier: ^3.3.5
         version: 3.9.0(react@19.1.0)
@@ -2903,6 +2906,35 @@ packages:
 
   '@uppy/utils@7.2.0':
     resolution: {integrity: sha512-6lC246qszMv6bTyl/+QyHwrudgeguWkA94ME1wHn+a6uRAvmtAEaUManIfGqTJfoKvWAiCJqdJPl5xRJjhAloQ==}
+
+  '@vercel/analytics@2.0.1':
+    resolution: {integrity: sha512-MTQG6V9qQrt1tsDeF+2Uoo5aPjqbVPys1xvnIftXSJYG2SrwXRHnqEvVoYID7BTruDz4lCd2Z7rM1BdkUehk2g==}
+    peerDependencies:
+      '@remix-run/react': ^2
+      '@sveltejs/kit': ^1 || ^2
+      next: '>= 13'
+      nuxt: '>= 3'
+      react: ^18 || ^19 || ^19.0.0-rc
+      svelte: '>= 4'
+      vue: ^3
+      vue-router: ^4
+    peerDependenciesMeta:
+      '@remix-run/react':
+        optional: true
+      '@sveltejs/kit':
+        optional: true
+      next:
+        optional: true
+      nuxt:
+        optional: true
+      react:
+        optional: true
+      svelte:
+        optional: true
+      vue:
+        optional: true
+      vue-router:
+        optional: true
 
   '@vitejs/plugin-react@5.1.4':
     resolution: {integrity: sha512-VIcFLdRi/VYRU8OL/puL7QXMYafHmqOnwTZY50U1JPlCNj30PxCMx65c494b1K9be9hX83KVt0+gTEwTWLqToA==}
@@ -6204,6 +6236,7 @@ packages:
       '@vitest/ui': 4.1.9
       happy-dom: '*'
       jsdom: '*'
+      vite: ^6.0.0 || ^7.0.0 || ^8.0.0
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
@@ -7181,6 +7214,7 @@ snapshots:
 
   '@expo/log-box@56.0.13(expo@56.0.12)(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)':
     dependencies:
+      '@expo/dom-webview': 56.0.5(expo@56.0.12)(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
       anser: 1.4.10
       expo: 56.0.12(@babel/core@7.29.0)(@expo/metro-runtime@56.0.15)(expo-router@56.2.11)(react-dom@19.1.0(react@19.1.0))(react-native-worklets@0.8.3(@babel/core@7.29.0)(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0))(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)(typescript@5.9.3)
       react: 19.1.0
@@ -7233,6 +7267,7 @@ snapshots:
 
   '@expo/metro-runtime@56.0.15(expo@56.0.12)(react-dom@19.1.0(react@19.1.0))(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)':
     dependencies:
+      '@expo/log-box': 56.0.13(expo@56.0.12)(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)
       anser: 1.4.10
       expo: 56.0.12(@babel/core@7.29.0)(@expo/metro-runtime@56.0.15)(expo-router@56.2.11)(react-dom@19.1.0(react@19.1.0))(react-native-worklets@0.8.3(@babel/core@7.29.0)(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0))(react-native@0.85.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)(typescript@5.9.3)
       pretty-format: 29.7.0
@@ -8957,6 +8992,10 @@ snapshots:
     dependencies:
       lodash: 4.18.1
       preact: 10.29.1
+
+  '@vercel/analytics@2.0.1(react@19.1.0)':
+    optionalDependencies:
+      react: 19.1.0
 
   '@vitejs/plugin-react@5.1.4(vite@7.3.2(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.2))':
     dependencies:
@@ -12379,7 +12418,7 @@ snapshots:
       tsx: 4.21.0
       yaml: 2.8.2
 
-  vitest@4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.2):
+  vitest@4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.3.5)(vite@7.3.2(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.2)):
     dependencies:
       '@vitest/expect': 4.1.9
       '@vitest/mocker': 4.1.9(vite@7.3.2(@types/node@25.3.5)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.2))
@@ -12405,17 +12444,7 @@ snapshots:
       '@opentelemetry/api': 1.9.1
       '@types/node': 25.3.5
     transitivePeerDependencies:
-      - jiti
-      - less
-      - lightningcss
       - msw
-      - sass
-      - sass-embedded
-      - stylus
-      - sugarss
-      - terser
-      - tsx
-      - yaml
 
   vlq@1.0.1: {}
 
