@@ -242,7 +242,14 @@ router.get("/payments/find-booking", async (req, res): Promise<void> => {
       trackingToken = b?.trackingToken ?? null;
     } catch (lookupErr: unknown) {
       // Migration 0004 not applied yet — degrade instead of failing the lookup.
-      if ((lookupErr as { code?: string })?.code !== "42703") throw lookupErr;
+      // Drizzle wraps driver errors, so the pg code sits down the cause chain.
+      let cur: unknown = lookupErr;
+      let undefinedColumn = false;
+      for (let d = 0; cur && d < 5; d++) {
+        if ((cur as { code?: string }).code === "42703") { undefinedColumn = true; break; }
+        cur = (cur as { cause?: unknown }).cause;
+      }
+      if (!undefinedColumn) throw lookupErr;
     }
     res.set("Cache-Control", "no-store");
     res.json({ bookingId: bId, trackingToken });

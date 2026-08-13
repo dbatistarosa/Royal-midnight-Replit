@@ -93,6 +93,22 @@ function hasConflict(pickupAt: Date, windows: BusyWindow[]): boolean {
   return windows.some(w => t >= w.start.getTime() && t <= w.end.getTime());
 }
 
+/**
+ * True when this error is Postgres 42703 (undefined_column).
+ *
+ * Drizzle wraps driver errors, so the pg error code is not on the object it
+ * throws — it sits somewhere down the `cause` chain. Checking only the top
+ * level silently misses every one of them.
+ */
+function isUndefinedColumn(err: unknown): boolean {
+  let cur: unknown = err;
+  for (let depth = 0; cur && depth < 5; depth++) {
+    if ((cur as { code?: string }).code === "42703") return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 function parseBooking(b: typeof bookingsTable.$inferSelect) {
   return {
     ...b,
@@ -587,7 +603,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
   try {
     [booking] = await db.insert(bookingsTable).values(bookingValues).returning() as [typeof bookingsTable.$inferSelect];
   } catch (err: unknown) {
-    if ((err as { code?: string })?.code !== "42703") throw err;
+    if (!isUndefinedColumn(err)) throw err;
     console.error(
       "[bookings] tracking_token column is missing — run migration 0004_booking_tracking_token.sql. " +
       "Falling back to creating this booking without a tracking token.",
@@ -752,7 +768,7 @@ router.get("/bookings/track/:token", async (req, res): Promise<void> => {
     [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.trackingToken, token));
   } catch (err: unknown) {
     // Same migration window as booking creation — see the insert above.
-    if ((err as { code?: string })?.code !== "42703") throw err;
+    if (!isUndefinedColumn(err)) throw err;
     console.error("[bookings] tracking_token column is missing — run migration 0004_booking_tracking_token.sql");
     res.status(404).json({ error: "Booking not found" });
     return;
