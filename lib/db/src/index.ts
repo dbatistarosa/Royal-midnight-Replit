@@ -31,16 +31,24 @@ function buildSsl(): { rejectUnauthorized: boolean; ca?: string[] } | undefined 
   if (!process.env.DATABASE_URL?.includes("supabase")) return undefined;
 
   const raw = process.env.SUPABASE_CA_CERT?.trim();
-  const extra = raw ? [raw.replace(/\\n/g, "\n")] : [];
-  if (!extra.length) {
+
+  // Without the CA there is nothing to verify against: Supabase signs with its
+  // own root, so demanding verification here rejects every connection and takes
+  // the whole API down with 500s — which is exactly what happened when this was
+  // first shipped. Falling back keeps the service up, and the warning is what
+  // gets it fixed properly.
+  if (!raw) {
     console.warn(
-      "[db] SUPABASE_CA_CERT is not set — verifying against public roots only. " +
-      "If connections fail with SELF_SIGNED_CERT_IN_CHAIN, add the CA from " +
-      "Supabase → Settings → Database → SSL Configuration.",
+      "[db] SUPABASE_CA_CERT is not set — TLS certificate verification is DISABLED (CN-010). " +
+      "Paste the certificate from Supabase → Settings → Database → SSL Configuration " +
+      "into the SUPABASE_CA_CERT environment variable to close this.",
     );
+    return { rejectUnauthorized: false };
   }
 
-  return { rejectUnauthorized: true, ca: [...extra, ...tls.rootCertificates] };
+  // Concatenate rather than replace: passing `ca` alone drops every public root,
+  // which would break the pooler if it presents a publicly-trusted certificate.
+  return { rejectUnauthorized: true, ca: [raw.replace(/\\n/g, "\n"), ...tls.rootCertificates] };
 }
 
 export const pool = new Pool({
