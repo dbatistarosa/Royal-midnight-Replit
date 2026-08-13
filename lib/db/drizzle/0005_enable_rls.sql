@@ -1,64 +1,48 @@
 -- CN-007 — Row Level Security as schema-as-code.
 --
--- RLS was only ever enabled by runStartupMigrations() in api-server/src/index.ts.
--- Vercel boots from dist/app.mjs, not dist/index.mjs, so that function never runs
--- in production — it only ever ran on Railway. Production is Vercel + Supabase,
--- and Supabase exposes PostgREST on the anon/authenticated roles at all times,
--- so those tables were reachable with no database-layer control at all.
+-- The only ENABLE ROW LEVEL SECURITY in the codebase lived inside
+-- runStartupMigrations() in api-server/src/index.ts. Vercel boots from
+-- dist/app.mjs, not dist/index.mjs, so that path never runs in production — it
+-- only ever ran on Railway. Any table added from now on would silently ship
+-- without RLS.
 --
--- Two things happen here:
---   1. RLS is turned on for every table.
---   2. Access is granted explicitly rather than relying on "the app user owns
---      the table so it bypasses RLS". That assumption holds only while the app
---      connects as the owner; Supabase's pooler and any future read-replica or
---      analytics role would not, and the app would break in a way that looks
---      like data loss. FORCE is deliberately NOT used, so the owner keeps its
---      bypass and the API server is unaffected.
+-- Deliberately NO policies.
 --
--- Effect on PostgREST: with RLS on and no policy granting anon/authenticated,
--- those roles see zero rows. That is the intent — this app talks to Postgres
--- through the Express API, never through PostgREST from the browser.
+-- Checking production before writing this showed RLS already enabled on all 28
+-- tables with zero policies. That is not a gap — it is the correct posture for
+-- this app. RLS with no policy denies every non-owner role, and the API is the
+-- only thing that talks to this database; it connects as the table owner, which
+-- bypasses RLS. Adding a permissive "app can do everything" policy, as an
+-- earlier draft of this migration did, would have loosened that for no gain.
+--
+-- The REVOKE is the part that adds something. anon and authenticated hold table
+-- grants from Supabase's defaults, and they are unused here — nothing outside
+-- api-server touches Postgres, and the one supabase-js client in the codebase
+-- (lib/objectStorage.ts) is server-side. Dropping the grants means that if a
+-- permissive policy is ever added by accident — the dashboard's "enable read
+-- access for all users" button is one click — PostgREST still cannot read the
+-- table. RLS alone would not save you there.
+--
+-- Iterates over the live table list rather than a hardcoded array so tables
+-- added later are covered without editing this file.
 
 DO $$
 DECLARE
-  tbl    TEXT;
-  tables TEXT[] := ARRAY[
-    'users', 'drivers', 'bookings', 'vehicles', 'saved_addresses',
-    'reviews', 'support_tickets', 'ticket_messages', 'notifications',
-    'promo_codes', 'pricing_rules', 'settings', 'sessions',
-    'password_reset_tokens', 'email_logs', 'vehicle_catalog', 'otp_codes',
-    'user_favorite_drivers', 'geo_zones', 'managed_travelers',
-    'compliance_documents', 'extra_services', 'booking_extras',
-    'driver_vehicles', 'fixed_routes'
-  ];
+  tbl TEXT;
 BEGIN
-  FOREACH tbl IN ARRAY tables LOOP
-    -- Skip tables that do not exist in this environment rather than aborting
-    -- the whole migration.
-    IF NOT EXISTS (
-      SELECT 1 FROM information_schema.tables
-       WHERE table_schema = 'public' AND table_name = tbl
-    ) THEN
-      RAISE NOTICE 'skipping missing table %', tbl;
-      CONTINUE;
-    END IF;
-
+  FOR tbl IN
+    SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+  LOOP
     -- Stale policy from an earlier attempt embedded an environment-specific
     -- role name and broke cross-environment deploys.
     EXECUTE format('DROP POLICY IF EXISTS app_full_access ON public.%I', tbl);
 
+    -- Idempotent: already enabled on every existing table.
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', tbl);
 
-    -- Explicit grant for the role the API actually connects as, so the app
-    -- keeps working even if it stops being the table owner.
-    EXECUTE format('DROP POLICY IF EXISTS app_service_access ON public.%I', tbl);
-    EXECUTE format(
-      'CREATE POLICY app_service_access ON public.%I FOR ALL TO CURRENT_USER USING (true) WITH CHECK (true)',
-      tbl
-    );
-
-    -- Belt and braces: PostgREST's public roles are never meant to reach these
-    -- tables directly. Revoking is independent of RLS and survives policy edits.
     EXECUTE format('REVOKE ALL ON public.%I FROM anon, authenticated', tbl);
   END LOOP;
 END $$;
+
+-- Stop Supabase handing those grants to future tables automatically.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;

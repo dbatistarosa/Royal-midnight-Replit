@@ -104,8 +104,23 @@ Deno.serve(async (req: Request) => {
   //
   // Fail closed: with no secret configured the function refuses to run rather
   // than silently reverting to being world-invokable.
-  if (!FUNCTION_INVOKE_SECRET) {
-    console.error("[check-reservation-status] FUNCTION_INVOKE_SECRET is not set — refusing to run");
+  // The secret can come from an Edge Function env var or from the settings
+  // table. The settings row is what the pg_cron job that drives this function
+  // every minute can actually read — cron.job.command is SQL, so it looks the
+  // value up at call time instead of storing it literally.
+  let expectedSecret = FUNCTION_INVOKE_SECRET ?? "";
+  if (!expectedSecret) {
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { data } = await admin
+      .from("settings")
+      .select("value")
+      .eq("key", "edge_function_invoke_secret")
+      .maybeSingle();
+    expectedSecret = (data?.value as string | undefined) ?? "";
+  }
+
+  if (!expectedSecret) {
+    console.error("[check-reservation-status] no invoke secret configured — refusing to run");
     return new Response(JSON.stringify({ success: false, error: "Not configured" }), {
       status: 503,
       headers: { "Content-Type": "application/json" },
@@ -113,7 +128,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const authHeader = req.headers.get("authorization") ?? "";
-  if (!(await secretMatches(authHeader, `Bearer ${FUNCTION_INVOKE_SECRET}`))) {
+  if (!(await secretMatches(authHeader, `Bearer ${expectedSecret}`))) {
     return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },

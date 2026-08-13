@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import tls from "node:tls";
 import pg from "pg";
 import * as schema from "./schema";
+import { SUPABASE_ROOT_CA_2021 } from "./supabaseCa";
 
 const { Pool } = pg;
 
@@ -30,25 +31,24 @@ if (!process.env.DATABASE_URL) {
 function buildSsl(): { rejectUnauthorized: boolean; ca?: string[] } | undefined {
   if (!process.env.DATABASE_URL?.includes("supabase")) return undefined;
 
-  const raw = process.env.SUPABASE_CA_CERT?.trim();
-
-  // Without the CA there is nothing to verify against: Supabase signs with its
-  // own root, so demanding verification here rejects every connection and takes
-  // the whole API down with 500s — which is exactly what happened when this was
-  // first shipped. Falling back keeps the service up, and the warning is what
-  // gets it fixed properly.
-  if (!raw) {
-    console.warn(
-      "[db] SUPABASE_CA_CERT is not set — TLS certificate verification is DISABLED (CN-010). " +
-      "Paste the certificate from Supabase → Settings → Database → SSL Configuration " +
-      "into the SUPABASE_CA_CERT environment variable to close this.",
-    );
+  // DB_TLS_INSECURE=1 is the escape hatch. If Supabase ever rotates its root and
+  // connections start failing with SELF_SIGNED_CERT_IN_CHAIN, setting this in
+  // Vercel restores service in one redeploy without a code change. It is not the
+  // default, because the default silently unverified is how this started.
+  if (process.env.DB_TLS_INSECURE === "1") {
+    console.warn("[db] DB_TLS_INSECURE=1 — TLS certificate verification is DISABLED (CN-010).");
     return { rejectUnauthorized: false };
   }
 
+  // An override always wins, so a rotated certificate can be fixed from the
+  // dashboard. Dashboard env vars mangle real newlines, so \n escapes are fine.
+  const override = process.env.SUPABASE_CA_CERT?.trim();
+  const ca = override ? override.replace(/\\n/g, "\n") : SUPABASE_ROOT_CA_2021;
+
   // Concatenate rather than replace: passing `ca` alone drops every public root,
   // which would break the pooler if it presents a publicly-trusted certificate.
-  return { rejectUnauthorized: true, ca: [raw.replace(/\\n/g, "\n"), ...tls.rootCertificates] };
+  // With both, verification succeeds whichever way the host is signed.
+  return { rejectUnauthorized: true, ca: [ca, ...tls.rootCertificates] };
 }
 
 export const pool = new Pool({
