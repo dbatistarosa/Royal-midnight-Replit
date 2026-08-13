@@ -550,9 +550,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
   // server-derived price, so a client can no longer force it.
   const isFreeBooking = !isCorporate && priceQuoted <= 0;
 
-  const [booking] = await db
-    .insert(bookingsTable)
-    .values({
+  const bookingValues = {
       // Explicit field list — never spread the request body, which would let a
       // caller set columns the schema does not intend them to control.
       passengerName: parsed.data.passengerName,
@@ -576,10 +574,27 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       // payment and go straight to pending (open driver pool). Everyone else
       // (including admin-manual) awaits payment.
       status: isCorporate ? "confirmed" : isFreeBooking ? "pending" : "awaiting_payment",
-      // Public handle for the confirmation and tracking pages (CN-005).
-      trackingToken: crypto.randomBytes(16).toString("hex"),
-    })
-    .returning();
+    // Public handle for the confirmation and tracking pages (CN-005).
+    trackingToken: crypto.randomBytes(16).toString("hex"),
+  };
+
+  // The tracking_token column arrives via migration 0004. Deploys and migrations
+  // are applied separately here, so tolerate the window where the code is ahead
+  // of the schema: a booking that cannot be created is a far worse outcome than
+  // one without a token. Postgres 42703 is undefined_column. Once the migration
+  // lands this branch simply stops being taken.
+  let booking: typeof bookingsTable.$inferSelect;
+  try {
+    [booking] = await db.insert(bookingsTable).values(bookingValues).returning() as [typeof bookingsTable.$inferSelect];
+  } catch (err: unknown) {
+    if ((err as { code?: string })?.code !== "42703") throw err;
+    console.error(
+      "[bookings] tracking_token column is missing — run migration 0004_booking_tracking_token.sql. " +
+      "Falling back to creating this booking without a tracking token.",
+    );
+    const { trackingToken: _omitted, ...withoutToken } = bookingValues;
+    [booking] = await db.insert(bookingsTable).values(withoutToken).returning() as [typeof bookingsTable.$inferSelect];
+  }
 
   // trackingToken rides alongside the contract response rather than inside it:
   // it is the one field the creator must receive and nobody else ever should,
@@ -732,7 +747,16 @@ router.get("/bookings/track/:token", async (req, res): Promise<void> => {
     return;
   }
 
-  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.trackingToken, token));
+  let booking: typeof bookingsTable.$inferSelect | undefined;
+  try {
+    [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.trackingToken, token));
+  } catch (err: unknown) {
+    // Same migration window as booking creation — see the insert above.
+    if ((err as { code?: string })?.code !== "42703") throw err;
+    console.error("[bookings] tracking_token column is missing — run migration 0004_booking_tracking_token.sql");
+    res.status(404).json({ error: "Booking not found" });
+    return;
+  }
   if (!booking) {
     res.status(404).json({ error: "Booking not found" });
     return;

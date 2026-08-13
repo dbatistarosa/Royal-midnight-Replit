@@ -233,12 +233,19 @@ router.get("/payments/find-booking", async (req, res): Promise<void> => {
     // wiped can still reach the confirmation page (CN-005). Safe here: the
     // caller had to present the PaymentIntent id, which is itself unguessable
     // and is only ever given to the person who started this payment.
-    const [b] = await db
-      .select({ trackingToken: bookings.trackingToken })
-      .from(bookings)
-      .where(eq(bookings.id, bId));
+    let trackingToken: string | null = null;
+    try {
+      const [b] = await db
+        .select({ trackingToken: bookings.trackingToken })
+        .from(bookings)
+        .where(eq(bookings.id, bId));
+      trackingToken = b?.trackingToken ?? null;
+    } catch (lookupErr: unknown) {
+      // Migration 0004 not applied yet — degrade instead of failing the lookup.
+      if ((lookupErr as { code?: string })?.code !== "42703") throw lookupErr;
+    }
     res.set("Cache-Control", "no-store");
-    res.json({ bookingId: bId, trackingToken: b?.trackingToken ?? null });
+    res.json({ bookingId: bId, trackingToken });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
