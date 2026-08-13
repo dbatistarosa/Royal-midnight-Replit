@@ -9,12 +9,62 @@ on:
     - cron: "*/10 * * * *"
   workflow_dispatch: {}
 
+# Least privilege: this job only calls an external URL, it never touches the repo.
+permissions: {}
+
 jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
       - name: Call trip-reminders endpoint
+        env:
+          # Passed through the environment rather than interpolated into the
+          # script body, so the value never appears in the runner's process list
+          # or in the generated script on disk.
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -sf -X POST "https://royal-midnight.vercel.app/api/cron/trip-reminders" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Length: 0"
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning title=CRON_SECRET not configured::Skipping trip reminders."
+            echo ""
+            echo "The repository secret CRON_SECRET is empty or missing, so this job"
+            echo "cannot authenticate against /api/cron/trip-reminders."
+            echo ""
+            echo "To fix: copy the CRON_SECRET value from Vercel"
+            echo "  (Project -> Settings -> Environment Variables -> CRON_SECRET)"
+            echo "into GitHub"
+            echo "  (Repo -> Settings -> Secrets and variables -> Actions -> New repository secret)."
+            echo ""
+            echo "Exiting 0 on purpose: a missing secret is a configuration task, not a"
+            echo "broken run, and failing every 10 minutes just buries real alerts."
+            exit 0
+          fi
+
+          # --fail-with-body so a non-2xx still prints what the server said,
+          # instead of curl exiting silently and leaving nothing to debug.
+          http_status=$(curl -sS --fail-with-body \
+            -o /tmp/cron-response.txt -w '%{http_code}' \
+            -X POST "https://www.royalmidnight.com/api/cron/trip-reminders" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Length: 0") || true
+
+          echo "HTTP $http_status"
+          cat /tmp/cron-response.txt || true
+
+          case "$http_status" in
+            2*)
+              echo "Trip reminders dispatched."
+              ;;
+            401)
+              echo "::error title=Cron auth rejected::The API rejected this secret (401)."
+              echo "The CRON_SECRET in GitHub does not match the one set in Vercel."
+              exit 1
+              ;;
+            503)
+              echo "::error title=Cron secret missing on the server::The API has no CRON_SECRET configured (503)."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Cron call failed::Unexpected HTTP $http_status."
+              exit 1
+              ;;
+          esac

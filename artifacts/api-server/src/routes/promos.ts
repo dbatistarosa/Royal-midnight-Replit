@@ -55,6 +55,56 @@ router.post("/promos", requireAdmin, async (req, res): Promise<void> => {
   });
 });
 
+export interface PromoEvaluation {
+  valid: boolean;
+  /** Normalised (upper-cased) code, only set when valid. */
+  code: string | null;
+  discountAmount: number | null;
+  finalAmount: number | null;
+  message: string;
+}
+
+/** Evaluate a promo code against a booking amount.
+ *
+ *  Extracted from the POST /promos/validate handler so booking creation can
+ *  re-derive the discount server-side instead of trusting the amount the client
+ *  claims (CN-001). This is read-only — it does not redeem the code. */
+export async function evaluatePromoCode(
+  rawCode: string,
+  bookingAmount: number,
+): Promise<PromoEvaluation> {
+  const invalid = (message: string): PromoEvaluation => ({
+    valid: false, code: null, discountAmount: null, finalAmount: null, message,
+  });
+
+  const code = rawCode.trim().toUpperCase();
+  if (!code) return invalid("Invalid or expired promo code");
+
+  const [promo] = await db.select().from(promoCodesTable).where(eq(promoCodesTable.code, code));
+
+  if (!promo || !promo.isActive) return invalid("Invalid or expired promo code");
+  if (promo.expiresAt && new Date(promo.expiresAt) < new Date()) return invalid("Promo code has expired");
+  if (promo.maxUses && promo.usedCount >= promo.maxUses) return invalid("Promo code usage limit reached");
+
+  const minAmount = promo.minBookingAmount ? parseFloat(promo.minBookingAmount) : 0;
+  if (bookingAmount < minAmount) {
+    return invalid(`Minimum booking amount of $${minAmount} required`);
+  }
+
+  const discountValue = parseFloat(promo.discountValue ?? "0");
+  const discountAmount = promo.discountType === "percentage"
+    ? Math.round(bookingAmount * (discountValue / 100) * 100) / 100
+    : Math.min(discountValue, bookingAmount);
+
+  return {
+    valid: true,
+    code,
+    discountAmount,
+    finalAmount: Math.round((bookingAmount - discountAmount) * 100) / 100,
+    message: `${promo.description} applied`,
+  };
+}
+
 router.post("/promos/validate", async (req, res): Promise<void> => {
   const parsed = ValidatePromoBody.safeParse(req.body);
   if (!parsed.success) {
@@ -63,39 +113,13 @@ router.post("/promos/validate", async (req, res): Promise<void> => {
   }
 
   const { code, bookingAmount } = parsed.data;
-  const [promo] = await db.select().from(promoCodesTable).where(eq(promoCodesTable.code, code.toUpperCase()));
-
-  if (!promo || !promo.isActive) {
-    res.json({ valid: false, discountAmount: null, finalAmount: null, message: "Invalid or expired promo code" });
-    return;
-  }
-
-  if (promo.expiresAt && new Date(promo.expiresAt) < new Date()) {
-    res.json({ valid: false, discountAmount: null, finalAmount: null, message: "Promo code has expired" });
-    return;
-  }
-
-  if (promo.maxUses && promo.usedCount >= promo.maxUses) {
-    res.json({ valid: false, discountAmount: null, finalAmount: null, message: "Promo code usage limit reached" });
-    return;
-  }
-
-  const minAmount = promo.minBookingAmount ? parseFloat(promo.minBookingAmount) : 0;
-  if (bookingAmount < minAmount) {
-    res.json({ valid: false, discountAmount: null, finalAmount: null, message: `Minimum booking amount of $${minAmount} required` });
-    return;
-  }
-
-  const discountValue = parseFloat(promo.discountValue ?? "0");
-  let discountAmount: number;
-  if (promo.discountType === "percentage") {
-    discountAmount = Math.round(bookingAmount * (discountValue / 100) * 100) / 100;
-  } else {
-    discountAmount = Math.min(discountValue, bookingAmount);
-  }
-
-  const finalAmount = Math.round((bookingAmount - discountAmount) * 100) / 100;
-  res.json({ valid: true, discountAmount, finalAmount, message: `${promo.description} applied` });
+  const result = await evaluatePromoCode(code, bookingAmount);
+  res.json({
+    valid: result.valid,
+    discountAmount: result.discountAmount,
+    finalAmount: result.finalAmount,
+    message: result.message,
+  });
 });
 
 router.patch("/promos/:id", requireAdmin, async (req, res): Promise<void> => {

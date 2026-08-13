@@ -8,13 +8,8 @@ import { format } from "date-fns";
 import { Loader2, LayoutDashboard, Car, User, BookOpen, Plus, Calendar, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { STATUS_COLORS } from "@/lib/constants";
+import { corporateNavItems } from "@/config/portalNav";
 
-const corporateNavItems = [
-  { label: "Dashboard", href: "/corporate/dashboard", icon: LayoutDashboard },
-  { label: "Book a Trip", href: "/corporate/book", icon: Plus },
-  { label: "All Bookings", href: "/corporate/bookings", icon: BookOpen },
-  { label: "Profile", href: "/corporate/profile", icon: User },
-];
 
 type Booking = {
   id: number;

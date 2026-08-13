@@ -58,6 +58,12 @@ export const bookingsTable = pgTable("bookings", {
   // corporate account — prevents double-billing the same ride across invoice runs.
   invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
   selectedVehicleId: integer("selected_vehicle_id"),
+  // Unguessable public handle for the tracking and confirmation pages. Booking
+  // ids are sequential, so routing those pages on the id let anyone enumerate
+  // every customer's name, home address and travel time (CN-005). Nullable only
+  // so the column can be added to a table that already has rows; every insert
+  // sets it, and the migration backfills the existing ones.
+  trackingToken: text("tracking_token"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

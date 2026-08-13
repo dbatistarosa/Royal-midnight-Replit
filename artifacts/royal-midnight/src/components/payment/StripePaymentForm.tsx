@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
@@ -60,6 +60,22 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
   const [isProcessing, setIsProcessing] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [stripeReady, setStripeReady] = useState(false);
+  // When Stripe fails to initialise — blocked script, malformed publishable key,
+  // a client_secret from a different account/mode, or a CSP that forbids
+  // js.stripe.com — PaymentElement simply never fires onReady. The form used to
+  // sit on "Loading payment form…" forever with nothing in the UI to act on.
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (stripeReady || loadError) return;
+    const t = setTimeout(() => {
+      setLoadError(
+        "The payment form could not load. This is usually a browser extension or ad-blocker blocking Stripe. " +
+        "Try again in a private window, or use the payment link we email you."
+      );
+    }, 12_000);
+    return () => clearTimeout(t);
+  }, [stripeReady, loadError]);
 
   const handlePayClick = async () => {
     if (!stripe || !elements) return;
@@ -125,13 +141,24 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
           {" "}— use card number <span className="font-mono font-semibold">4242 4242 4242 4242</span>, any future expiry, any CVC.
         </div>
       )}
-      {!stripeReady && (
+      {loadError && (
+        <div className="rounded-none border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300 leading-relaxed">
+          {loadError}
+        </div>
+      )}
+      {!stripeReady && !loadError && (
         <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-500">
           <Loader2 className="w-4 h-4 animate-spin" />
           Loading payment form…
         </div>
       )}
-      <PaymentElement onReady={() => setStripeReady(true)} />
+      <PaymentElement
+        onReady={() => { setStripeReady(true); setLoadError(null); }}
+        onLoadError={(e) => {
+          console.error("[payment] PaymentElement failed to load:", e.error);
+          setLoadError(e.error?.message || "The payment form could not load. Please refresh and try again.");
+        }}
+      />
       <div className="flex items-center justify-between pt-4 border-t border-white/10">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Lock className="w-3.5 h-3.5" />
@@ -178,6 +205,25 @@ export function StripePaymentForm({
   const stripePromise = getStripePromise(publishableKey);
   const isTestMode = publishableKey.startsWith("pk_test_");
   const resolvedReturnUrl = returnUrl ?? window.location.href;
+  const [scriptBlocked, setScriptBlocked] = useState(false);
+
+  // loadStripe resolves to null when js.stripe.com could not be fetched at all.
+  // Elements renders nothing in that case, so catch it here rather than letting
+  // the inner spinner run out its timeout.
+  useEffect(() => {
+    let alive = true;
+    void stripePromise.then(s => { if (alive && !s) setScriptBlocked(true); }).catch(() => { if (alive) setScriptBlocked(true); });
+    return () => { alive = false; };
+  }, [stripePromise]);
+
+  if (scriptBlocked) {
+    return (
+      <div className="rounded-none border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300 leading-relaxed">
+        Stripe could not be reached, so the card form cannot be shown. An ad-blocker or privacy extension is the
+        usual cause. Try a private window, or ask us to email you a payment link instead.
+      </div>
+    );
+  }
 
   return (
     <Elements stripe={stripePromise} options={{ clientSecret, appearance }}>

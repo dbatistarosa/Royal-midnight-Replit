@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
 import path from "path";
@@ -88,6 +89,10 @@ app.use("/api/webhook/stripe", express.raw({ type: "application/json" }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Reads the HttpOnly session cookie the web app authenticates with (CN-014).
+// The package was already a dependency but had never been mounted.
+app.use(cookieParser());
 
 app.use("/api", router);
 

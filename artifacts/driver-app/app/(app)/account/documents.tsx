@@ -15,10 +15,22 @@ const DOC_TYPES = ["Driver License", "Vehicle Registration", "Insurance"] as con
 
 const API_BASE = (Constants.expoConfig?.extra?.["apiBaseUrl"] as string | undefined) ?? "https://royalmidnight.com/api";
 
-function docUrl(path: string): string {
-  if (path.startsWith("http")) return path;
-  const stripped = path.replace(/^\/objects\//, "");
-  return `${API_BASE}/storage/objects/${stripped}`;
+/** Build the download URL for a private object.
+ *
+ *  A stored fileUrl is user-supplied, so an absolute URL is never followed —
+ *  only the key inside our own object storage is used (CN-041). The route now
+ *  requires authentication (CN-003); unlike a browser, React Native's <Image>
+ *  can send headers, so the bearer token is attached at the call site rather
+ *  than needing a signed URL. */
+function docUrl(path: string): string | null {
+  const key = path
+    .replace(/^https?:\/\/[^/]+/i, "")
+    .replace(/^\/+/, "")
+    .replace(/^api\/storage\/objects\//, "")
+    .replace(/^storage\/objects\//, "")
+    .replace(/^objects\//, "");
+  if (!key || key.includes("..")) return null;
+  return `${API_BASE}/storage/objects/${key}`;
 }
 
 function statusColor(expiry: string | undefined): string {
@@ -35,6 +47,7 @@ function isValidDate(val: string): boolean {
 
 export default function DocumentsScreen() {
   const driverId = useAuthStore((s) => s.driverId);
+  const authToken = useAuthStore((s) => s.token);
   const { data: docs, refetch } = useDriverDocuments(driverId);
   const postDocument = usePostDriverDocument(driverId ?? 0);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
@@ -182,7 +195,11 @@ export default function DocumentsScreen() {
           </Pressable>
           {viewImageUrl ? (
             <Image
-              source={{ uri: viewImageUrl }}
+              source={{
+                uri: viewImageUrl,
+                // The private object route requires a session (CN-003).
+                ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
+              }}
               style={{ width: "90%", height: "70%", resizeMode: "contain" }}
             />
           ) : null}

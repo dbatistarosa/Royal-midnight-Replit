@@ -6,24 +6,8 @@ import { useState } from "react";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
+import { adminNavItems } from "@/config/portalNav";
 
-const adminNavItems = [
-  { label: "Overview", href: "/admin", icon: LayoutDashboard },
-  { label: "Bookings", href: "/admin/bookings", icon: Calendar },
-  { label: "Dispatch", href: "/admin/dispatch", icon: Map },
-  { label: "Passengers", href: "/admin/passengers", icon: Users },
-  { label: "Drivers", href: "/admin/drivers", icon: Users },
-  { label: "Fleet", href: "/admin/fleet", icon: Car },
-  { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
-  { label: "Extras & Routes", href: "/admin/extras", icon: Tag },
-  { label: "Promos", href: "/admin/promos", icon: Tag },
-  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
-  { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },
-  { label: "Support", href: "/admin/support", icon: MessageSquare },
-  { label: "Reports", href: "/admin/reports", icon: BarChart },
-  { label: "Payouts", href: "/admin/payouts", icon: Wallet },
-  { label: "Settings", href: "/admin/settings", icon: Settings },
-];
 
 type Passenger = {
   id: number;

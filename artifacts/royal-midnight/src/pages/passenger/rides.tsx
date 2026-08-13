@@ -7,15 +7,9 @@ import { LayoutDashboard, Car, MapPin, User, MessageSquare, ChevronDown, Chevron
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
+import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
+import { passengerNavItems } from "@/config/portalNav";
 
-const passengerNavItems = [
-  { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
-  { label: "My Rides", href: "/passenger/rides", icon: Car },
-  { label: "Reports", href: "/passenger/reports", icon: BarChart2 },
-  { label: "Saved Addresses", href: "/passenger/addresses", icon: MapPin },
-  { label: "Profile", href: "/passenger/profile", icon: User },
-  { label: "Support", href: "/passenger/support", icon: MessageSquare },
-];
 
 function vehicleLabel(vc?: string | null) {
   if (vc === "business") return "Business Class Sedan";
@@ -53,12 +47,6 @@ type PublicDriver = {
   rating?: number | null;
 };
 
-function driverPicUrl(path: string | null | undefined): string | null {
-  if (!path) return null;
-  const stripped = path.replace(/^\/objects\//, "");
-  return `${API_BASE}/storage/objects/${stripped}`;
-}
-
 function DriverInfoCard({ driverId }: { driverId: number }) {
   const [driver, setDriver] = useState<PublicDriver | null>(null);
 
@@ -69,9 +57,12 @@ function DriverInfoCard({ driverId }: { driverId: number }) {
       .catch(() => null);
   }, [driverId]);
 
+  // Driver photos live in the private bucket, so the URL has to be signed
+  // (CN-003). Hook must run before the early return.
+  const { url: picUrl } = useSignedDocUrl(driver?.profilePicture ?? null);
+
   if (!driver) return null;
 
-  const picUrl = driverPicUrl(driver.profilePicture);
   const vehicleDesc = [driver.vehicleColor, driver.vehicleYear, driver.vehicleMake, driver.vehicleModel].filter(Boolean).join(" ") || null;
   const initials = driver.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
 

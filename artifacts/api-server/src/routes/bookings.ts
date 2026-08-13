@@ -1,10 +1,12 @@
 import { Router, type IRouter } from "express";
+import crypto from "node:crypto";
 import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql, inArray } from "drizzle-orm";
-import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable, extraServicesTable, bookingExtrasTable, driverVehiclesTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable, extraServicesTable, bookingExtrasTable, driverVehiclesTable, managedTravelersTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
-import { HOURLY_RATES, DEFAULT_RATE_PER_MILE } from "./quote.js";
+import { HOURLY_RATES, DEFAULT_RATE_PER_MILE, computeQuote, readQuoteExtensions } from "./quote.js";
+import { evaluatePromoCode } from "./promos.js";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -440,39 +442,152 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
 
   const caller = req.currentUser;
   const isCorporate = parsed.data.paymentType === "corporate_account";
-  // A promo code can discount a booking down to $0 — there's no card to charge,
-  // so skip the awaiting_payment/Stripe step entirely and drop it straight into
-  // the same "pending" state a successfully-paid booking reaches.
-  const isFreeBooking = !isCorporate && parsed.data.priceQuoted <= 0;
 
   if (isCorporate) {
     if (!caller || (caller.role !== "corporate" && caller.role !== "admin")) {
       res.status(403).json({ error: "Corporate account bookings require a corporate or admin account" });
       return;
     }
-    // Force userId to caller's own id (unless admin is booking on behalf)
-    if (caller.role === "corporate") {
-      parsed.data.userId = caller.userId;
+  }
+
+  // ── Booking owner ───────────────────────────────────────────────────────────
+  // userId is never taken from the body on trust: an anonymous caller could
+  // otherwise attribute bookings to any account. Admins may book on anyone's
+  // behalf, and an executive assistant may book for a traveler they manage;
+  // everyone else is pinned to their own id.
+  let bookingUserId: number | null = caller?.userId ?? null;
+  const requestedUserId = parsed.data.userId ?? null;
+  if (requestedUserId != null && requestedUserId !== caller?.userId) {
+    if (caller?.role === "admin") {
+      bookingUserId = requestedUserId;
+    } else if (caller) {
+      const [managed] = await db
+        .select({ travelerId: managedTravelersTable.travelerId })
+        .from(managedTravelersTable)
+        .where(and(
+          eq(managedTravelersTable.eaUserId, caller.userId),
+          eq(managedTravelersTable.travelerId, requestedUserId),
+        ));
+      if (managed) bookingUserId = requestedUserId;
     }
   }
+
+  // ── Server-side fare derivation (CN-001) ────────────────────────────────────
+  // The fare is never taken from the request body. It is recomputed here with
+  // the same engine that answers POST /quote, then extras and any promo are
+  // applied on top using database values. A client-supplied priceQuoted that
+  // disagrees is logged and ignored, so a tampered request cannot produce a
+  // free ride and an honest one is never rejected over rounding.
+  const ext = readQuoteExtensions(req.body);
+  const quoteOutcome = await computeQuote({
+    pickupAddress: parsed.data.pickupAddress,
+    dropoffAddress: parsed.data.dropoffAddress,
+    vehicleClass: parsed.data.vehicleClass as string,
+    pickupAt: parsed.data.pickupAt,
+    waypoints: ext.waypoints,
+    charterMode: ext.charterMode,
+    charterHours: ext.charterHours,
+    userId: isCorporate && caller?.role === "corporate" ? caller.userId : (bookingUserId ?? undefined),
+    // Admins take phone bookings for trips that may be imminent.
+    skipLeadTimeCheck: caller?.role === "admin",
+  });
+  if (!quoteOutcome.ok) {
+    res.status(quoteOutcome.status).json(quoteOutcome.body);
+    return;
+  }
+  const quote = quoteOutcome.quote;
+
+  // Extras are priced from extra_services, never from the body.
+  const requestedExtras = parsed.data.extras ?? [];
+  const pricedExtras: Array<{ id: number; quantity: number; price: number }> = [];
+  if (requestedExtras.length) {
+    const services = await db
+      .select({ id: extraServicesTable.id, price: extraServicesTable.price })
+      .from(extraServicesTable)
+      .where(and(
+        inArray(extraServicesTable.id, requestedExtras.map(e => e.id)),
+        eq(extraServicesTable.isActive, true),
+      ));
+    for (const s of services) {
+      pricedExtras.push({
+        id: s.id,
+        quantity: requestedExtras.find(e => e.id === s.id)?.quantity ?? 1,
+        price: parseFloat(String(s.price)) || 0,
+      });
+    }
+  }
+  const extrasTotal = pricedExtras.reduce((sum, e) => sum + e.price * e.quantity, 0);
+
+  // Promo discount is re-derived from the promo_codes row. An invalid or
+  // exhausted code yields no discount rather than failing the whole booking.
+  const grossTotal = Math.round((quote.totalWithTax + extrasTotal) * 100) / 100;
+  let discountAmount = 0;
+  let appliedPromoCode: string | null = null;
+  if (parsed.data.promoCode) {
+    const promo = await evaluatePromoCode(parsed.data.promoCode, grossTotal);
+    if (promo.valid && promo.discountAmount != null) {
+      discountAmount = promo.discountAmount;
+      appliedPromoCode = promo.code;
+    }
+  }
+
+  const priceQuoted = Math.max(0, Math.round((grossTotal - discountAmount) * 100) / 100);
+  // Driver commission base: base fare + billable miles (+surge) only. Taxes,
+  // the card fee, promo discounts and the airport fee are all company-side —
+  // the driver never earns on them. Flat routes pay commission on the flat price.
+  const fareSubtotal = quote.fixedRoutePrice
+    ?? Math.round((quote.baseFare + quote.distanceCharge + quote.surgeAdjustment) * 100) / 100;
+
+  if (Math.abs(parsed.data.priceQuoted - priceQuoted) > 0.01) {
+    console.warn(
+      `[bookings] fare mismatch — client sent ${parsed.data.priceQuoted}, server derived ${priceQuoted}; using server value`,
+    );
+  }
+
+  // A promo can legitimately discount a booking to $0 — there is no card to
+  // charge, so skip the awaiting_payment/Stripe step and drop it straight into
+  // the same "pending" state a paid booking reaches. This is now driven by the
+  // server-derived price, so a client can no longer force it.
+  const isFreeBooking = !isCorporate && priceQuoted <= 0;
 
   const [booking] = await db
     .insert(bookingsTable)
     .values({
-      ...parsed.data,
+      // Explicit field list — never spread the request body, which would let a
+      // caller set columns the schema does not intend them to control.
+      passengerName: parsed.data.passengerName,
+      passengerEmail: parsed.data.passengerEmail,
+      passengerPhone: parsed.data.passengerPhone,
+      pickupAddress: parsed.data.pickupAddress,
+      dropoffAddress: parsed.data.dropoffAddress,
       pickupAt: new Date(parsed.data.pickupAt),
-      priceQuoted: String(parsed.data.priceQuoted),
-      fareSubtotal: String(parsed.data.fareSubtotal ?? parsed.data.priceQuoted),
-      discountAmount: parsed.data.discountAmount != null ? String(parsed.data.discountAmount) : null,
+      vehicleClass: parsed.data.vehicleClass,
+      passengers: parsed.data.passengers,
+      luggageCount: parsed.data.luggageCount,
+      flightNumber: parsed.data.flightNumber ?? null,
+      specialRequests: parsed.data.specialRequests ?? null,
+      userId: bookingUserId,
+      promoCode: appliedPromoCode,
+      priceQuoted: String(priceQuoted),
+      fareSubtotal: String(fareSubtotal),
+      discountAmount: discountAmount > 0 ? String(discountAmount) : null,
       paymentType: parsed.data.paymentType ?? "standard",
       // Corporate bookings are confirmed immediately; fully-discounted bookings skip
       // payment and go straight to pending (open driver pool). Everyone else
       // (including admin-manual) awaits payment.
       status: isCorporate ? "confirmed" : isFreeBooking ? "pending" : "awaiting_payment",
+      // Public handle for the confirmation and tracking pages (CN-005).
+      trackingToken: crypto.randomBytes(16).toString("hex"),
     })
     .returning();
 
-  res.status(201).json(GetBookingResponse.parse(parseBooking(booking)));
+  // trackingToken rides alongside the contract response rather than inside it:
+  // it is the one field the creator must receive and nobody else ever should,
+  // so it stays out of the shared booking shape that other endpoints return.
+  res.status(201).json({
+    ...GetBookingResponse.parse(parseBooking(booking)),
+    trackingToken: booking.trackingToken,
+  });
 
   // ── Route estimate (non-blocking) ────────────────────────────────────────────
   // Fetch driving time and distance from Google Maps so the driver scheduling
@@ -527,24 +642,20 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     })();
   }
 
-  // Persist selected extras (non-blocking — validates each id exists and is active)
-  if (parsed.data.extras?.length) {
+  // Persist selected extras (non-blocking). The ids were already validated as
+  // existing and active above, and priced from the extra_services table, so the
+  // stored priceAtBooking matches what the fare was actually computed from.
+  if (pricedExtras.length) {
     (async () => {
       try {
-        const ids = parsed.data.extras!.map(e => e.id);
-        const services = await db.select({ id: extraServicesTable.id, price: extraServicesTable.price })
-          .from(extraServicesTable)
-          .where(and(inArray(extraServicesTable.id, ids), eq(extraServicesTable.isActive, true)));
-        if (services.length) {
-          await db.insert(bookingExtrasTable).values(
-            services.map(s => ({
-              bookingId: booking.id,
-              extraServiceId: s.id,
-              quantity: parsed.data.extras!.find(e => e.id === s.id)?.quantity ?? 1,
-              priceAtBooking: String(s.price),
-            }))
-          ).onConflictDoNothing();
-        }
+        await db.insert(bookingExtrasTable).values(
+          pricedExtras.map(e => ({
+            bookingId: booking.id,
+            extraServiceId: e.id,
+            quantity: e.quantity,
+            priceAtBooking: String(e.price),
+          }))
+        ).onConflictDoNothing();
       } catch (err) { console.error("[bookings] extras insert failed:", err); }
     })();
   }
@@ -601,27 +712,38 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
   }
 });
 
-// Public tracking endpoint — returns only non-sensitive status fields (no fare/PII)
-router.get("/bookings/:id/track", async (req, res): Promise<void> => {
-  const params = GetBookingParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
+// Public receipt/tracking endpoint, addressed by an unguessable token (CN-005).
+//
+// This replaces GET /bookings/:id/track. Booking ids are sequential, so that
+// route let anyone walk id=1..N and harvest every customer's name, home
+// address, destination and pickup time — for a chauffeur service that is a
+// physical-safety exposure, not just a privacy one.
+//
+// Holding the token is the authorization: it is only ever returned to whoever
+// created the booking, so returning the full receipt to a token holder is the
+// same trust model as any "manage my booking" link. The email stays masked
+// because the page only needs to show where the receipt went.
+router.get("/bookings/track/:token", async (req, res): Promise<void> => {
+  const token = String(req.params["token"] ?? "");
+  // Reject anything that is not a well-formed token before touching the DB, so
+  // this endpoint can never be used as a scan surface.
+  if (!/^[0-9a-f]{32,64}$/.test(token)) {
+    res.status(404).json({ error: "Booking not found" });
     return;
   }
 
-  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, params.data.id));
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.trackingToken, token));
   if (!booking) {
     res.status(404).json({ error: "Booking not found" });
     return;
   }
 
-  // Public view: status, identity, routing, and fare for receipt display.
-  // passengerEmail is masked to first char + domain (e.g. a***@example.com) to
-  // avoid exposing full PII on an unauthenticated endpoint while still
-  // allowing the confirmation page to show where the receipt was sent.
   const maskedEmail = booking.passengerEmail
     ? booking.passengerEmail.replace(/^(.).+(@.+)$/, "$1***$2")
     : null;
+
+  // Never cached by a shared proxy — the URL is a bearer credential.
+  res.set("Cache-Control", "no-store");
 
   res.json({
     id: booking.id,

@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request: {}
 
+# Least privilege. Without this, GITHUB_TOKEN inherits the repository default,
+# which is read-write on contents unless the org changed it — and this job runs
+# dependency install scripts plus workspace test scripts.
+permissions:
+  contents: read
+
 jobs:
   typecheck-and-test:
     runs-on: ubuntu-latest

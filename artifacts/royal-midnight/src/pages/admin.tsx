@@ -5,22 +5,8 @@ import { STATUS_COLORS } from "@/lib/constants";
 import { format } from "date-fns";
 import { Loader2, Users, Car, DollarSign, Calendar, Activity, Map, Tag, MessageSquare, BarChart, LayoutDashboard, Settings, Wallet, Gift } from "lucide-react";
 import { Link } from "wouter";
+import { adminNavItems } from "@/config/portalNav";
 
-const adminNavItems = [
-  { label: "Overview", href: "/admin", icon: LayoutDashboard },
-  { label: "Bookings", href: "/admin/bookings", icon: Calendar },
-  { label: "Dispatch", href: "/admin/dispatch", icon: Map },
-  { label: "Passengers", href: "/admin/passengers", icon: Users },
-  { label: "Drivers", href: "/admin/drivers", icon: Users },
-  { label: "Fleet", href: "/admin/fleet", icon: Car },
-  { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
-  { label: "Promos", href: "/admin/promos", icon: Tag },
-  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
-  { label: "Support", href: "/admin/support", icon: MessageSquare },
-  { label: "Reports", href: "/admin/reports", icon: BarChart },
-  { label: "Payouts", href: "/admin/payouts", icon: Wallet },
-  { label: "Settings", href: "/admin/settings", icon: Settings },
-];
 
 function AdminInner() {
   const { data: stats, isLoading: statsLoading } = useGetAdminStats();

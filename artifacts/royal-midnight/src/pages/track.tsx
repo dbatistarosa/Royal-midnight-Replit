@@ -23,20 +23,20 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function Track() {
-  const [, params] = useRoute("/track/:id");
-  const id = params?.id ? parseInt(params.id) : 0;
+  const [, params] = useRoute("/track/:token");
+  const token = params?.token ?? "";
 
   const [booking, setBooking] = useState<PublicBooking | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!id) return;
-    fetch(`${API_BASE}/bookings/${id}/track`)
+    if (!token) { setIsLoading(false); return; }
+    fetch(`${API_BASE}/bookings/track/${encodeURIComponent(token)}`)
       .then(r => r.ok ? r.json() as Promise<PublicBooking> : Promise.resolve(null))
       .then(data => setBooking(data))
       .catch(() => setBooking(null))
       .finally(() => setIsLoading(false));
-  }, [id]);
+  }, [token]);
 
   if (isLoading) {
     return (

@@ -9,15 +9,8 @@ import {
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
 import { format, startOfMonth, endOfMonth } from "date-fns";
+import { passengerNavItems } from "@/config/portalNav";
 
-const passengerNavItems = [
-  { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
-  { label: "My Rides", href: "/passenger/rides", icon: Car },
-  { label: "Reports", href: "/passenger/reports", icon: BarChart2 },
-  { label: "Saved Addresses", href: "/passenger/addresses", icon: MapPin },
-  { label: "Profile", href: "/passenger/profile", icon: User },
-  { label: "Support", href: "/passenger/support", icon: MessageSquare },
-];
 
 type BookingRow = {
   id: number;

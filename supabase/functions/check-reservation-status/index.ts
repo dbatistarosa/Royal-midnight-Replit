@@ -9,9 +9,35 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") ?? "Royal Midnight <noreply@royalmidnight.com>";
 
+// Shared secret that gates this function (CN-008). Set with:
+//   supabase secrets set FUNCTION_INVOKE_SECRET=<value> --project-ref <ref>
+// Callers send it as `Authorization: Bearer <value>`.
+const FUNCTION_INVOKE_SECRET = Deno.env.get("FUNCTION_INVOKE_SECRET");
+
 // Re-notify at most every 15 minutes while a trip continues to run over, so a
 // customer isn't emailed every single minute of an ongoing overage.
 const RENOTIFY_INTERVAL_MINUTES = 15;
+
+/**
+ * Constant-time string comparison.
+ *
+ * Hashing first means the comparison always runs over two fixed-length 32-byte
+ * digests, so neither the length nor the content of the supplied value leaks
+ * through timing. Deno does expose crypto.subtle.timingSafeEqual, but it is a
+ * non-standard extension — this keeps the function portable.
+ */
+async function secretMatches(supplied: string, expected: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(supplied)),
+    crypto.subtle.digest("SHA-256", enc.encode(expected)),
+  ]);
+  const av = new Uint8Array(a);
+  const bv = new Uint8Array(b);
+  let diff = 0;
+  for (let i = 0; i < av.length; i++) diff |= av[i]! ^ bv[i]!;
+  return diff === 0;
+}
 
 interface OverdueBooking {
   id: number;
@@ -65,6 +91,31 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ success: false, error: "Method not allowed" }), {
       status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // ── Authorization ──────────────────────────────────────────────────────────
+  // This must be the first thing that happens. Everything below runs with the
+  // service_role key, which bypasses RLS entirely: it reads passenger names and
+  // emails, writes extra_charge onto live bookings, and sends customers billing
+  // emails from our domain. Supabase's own verify_jwt is not sufficient, because
+  // the anon key is a valid JWT and the anon key is public by design (CN-008).
+  //
+  // Fail closed: with no secret configured the function refuses to run rather
+  // than silently reverting to being world-invokable.
+  if (!FUNCTION_INVOKE_SECRET) {
+    console.error("[check-reservation-status] FUNCTION_INVOKE_SECRET is not set — refusing to run");
+    return new Response(JSON.stringify({ success: false, error: "Not configured" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const authHeader = req.headers.get("authorization") ?? "";
+  if (!(await secretMatches(authHeader, `Bearer ${FUNCTION_INVOKE_SECRET}`))) {
+    return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), {
+      status: 401,
       headers: { "Content-Type": "application/json" },
     });
   }

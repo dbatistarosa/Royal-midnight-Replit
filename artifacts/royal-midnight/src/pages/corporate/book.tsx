@@ -10,13 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, LayoutDashboard, Plus, BookOpen, User, Car, CheckCircle2 } from "lucide-react";
+import { corporateNavItems } from "@/config/portalNav";
 
-const corporateNavItems = [
-  { label: "Dashboard", href: "/corporate/dashboard", icon: LayoutDashboard },
-  { label: "Book a Trip", href: "/corporate/book", icon: Plus },
-  { label: "All Bookings", href: "/corporate/bookings", icon: BookOpen },
-  { label: "Profile", href: "/corporate/profile", icon: User },
-];
 
 const VEHICLE_OPTIONS = [
   {

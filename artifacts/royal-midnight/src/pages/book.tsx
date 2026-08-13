@@ -87,28 +87,14 @@ function PriceBreakdownLines({ quote, isHourly }: { quote: QuoteResult; isHourly
           <span className="text-gray-200 font-medium">${fareTotal.toFixed(2)}</span>
         </div>
       ) : (
-        <>
-          <div className="flex justify-between items-center text-gray-500">
-            <span>Base fare{!isHourly && quote.includedMiles > 0 ? ` · first ${quote.includedMiles.toFixed(1)} mi included` : ""}</span>
-            <span className="text-gray-300">${quote.baseFare.toFixed(2)}</span>
-          </div>
-          {(isHourly || quote.distanceCharge > 0) && (
-            <div className="flex justify-between items-center text-gray-500">
-              <span>{isHourly ? "Hourly charge" : `Extra miles · ${quote.billableMiles.toFixed(1)} mi`}</span>
-              <span className="text-gray-300">${quote.distanceCharge.toFixed(2)}</span>
-            </div>
-          )}
-          {quote.surgeAdjustment !== 0 && (
-            <div className="flex justify-between items-center text-gray-500">
-              <span>Peak/zone adjustment</span>
-              <span className="text-gray-300">${quote.surgeAdjustment.toFixed(2)}</span>
-            </div>
-          )}
-          <div className="flex justify-between items-center text-gray-400 pt-1">
-            <span className="text-[11px] uppercase tracking-widest">Fare subtotal</span>
-            <span className="text-gray-200 font-medium">${fareTotal.toFixed(2)}</span>
-          </div>
-        </>
+        // One line for the whole fare. The base/extra-miles/surge split — and the
+        // mileage itself — used to be itemised here; the customer only needs the
+        // number they are being charged, and the breakdown invited questions
+        // about distance that the flat-rate routes don't even have an answer for.
+        <div className="flex justify-between items-center">
+          <span className="text-gray-400">Fare Price</span>
+          <span className="text-gray-200 font-medium">${fareTotal.toFixed(2)}</span>
+        </div>
       )}
 
       <div className="h-px bg-white/8 my-1" />
@@ -196,6 +182,10 @@ export default function Book() {
   const [stripeReturnUrl, setStripeReturnUrl] = useState<string | null>(null);
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
   const pendingBookingIdRef = useRef<number | null>(null);
+  // The confirmation page is addressed by this token, never by the booking id
+  // (CN-005). Kept in a ref + sessionStorage so it survives the 3DS redirect,
+  // exactly like the id it travels with.
+  const pendingBookingTokenRef = useRef<string | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [minBookingHours, setMinBookingHours] = useState(2);
@@ -264,16 +254,20 @@ export default function Book() {
     void (async () => {
       // Prefer sessionStorage, fall back to server lookup (in case storage was cleared)
       const savedId = sessionStorage.getItem("rm_pending_booking_id");
+      const savedToken = sessionStorage.getItem("rm_pending_booking_token");
       sessionStorage.removeItem("rm_pending_booking_id");
+      sessionStorage.removeItem("rm_pending_booking_token");
       let bookingId = savedId ? parseInt(savedId, 10) : 0;
+      let bookingToken = savedToken ?? "";
 
-      if (!bookingId) {
+      if (!bookingId || !bookingToken) {
         // Ask the server which booking this PI belongs to
         try {
           const lookupRes = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`);
           if (lookupRes.ok) {
-            const lookup = await lookupRes.json() as { bookingId?: number };
+            const lookup = await lookupRes.json() as { bookingId?: number; trackingToken?: string | null };
             if (lookup.bookingId) bookingId = lookup.bookingId;
+            if (lookup.trackingToken) bookingToken = lookup.trackingToken;
           }
         } catch {
           console.warn("[book] 3DS find-booking lookup failed");
@@ -299,7 +293,9 @@ export default function Book() {
         console.warn("[book] 3DS confirm network error — webhook will finalise booking");
       }
       sessionStorage.removeItem(DRAFT_KEY);
-      setLocation(`/booking-confirmation/${bookingId}`);
+      // Without the token there is no receipt URL to send them to; the ride is
+      // still booked and paid, so fall back to their trip list.
+      setLocation(bookingToken ? `/booking-confirmation/${bookingToken}` : "/passenger/rides");
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -658,21 +654,27 @@ export default function Book() {
             existingBookingId = null;
             setPendingBookingId(null);
             pendingBookingIdRef.current = null;
+            pendingBookingTokenRef.current = null;
             sessionStorage.removeItem("rm_pending_booking_id");
+            sessionStorage.removeItem("rm_pending_booking_token");
           }
         } else {
           // Booking not found or access denied — discard stale ID
           existingBookingId = null;
           setPendingBookingId(null);
           pendingBookingIdRef.current = null;
+          pendingBookingTokenRef.current = null;
           sessionStorage.removeItem("rm_pending_booking_id");
+          sessionStorage.removeItem("rm_pending_booking_token");
         }
       } catch {
         // Network error — discard stale ID to be safe
         existingBookingId = null;
         setPendingBookingId(null);
         pendingBookingIdRef.current = null;
+        pendingBookingTokenRef.current = null;
         sessionStorage.removeItem("rm_pending_booking_id");
+        sessionStorage.removeItem("rm_pending_booking_token");
       }
     }
 
@@ -751,28 +753,35 @@ export default function Book() {
           const err = await bookingRes.json() as { error?: string };
           throw new Error(err.error || "Could not create reservation. Please try again.");
         }
-        const booking = await bookingRes.json() as { id: number };
+        const booking = await bookingRes.json() as { id: number; trackingToken?: string | null };
         bookingId = booking.id;
         setPendingBookingId(bookingId);
         pendingBookingIdRef.current = bookingId;
+        pendingBookingTokenRef.current = booking.trackingToken ?? null;
         // Persist for 3DS redirect recovery (page reload wipes React state)
         sessionStorage.setItem("rm_pending_booking_id", String(bookingId));
+        if (booking.trackingToken) sessionStorage.setItem("rm_pending_booking_token", booking.trackingToken);
       }
 
       // A 100%-off promo code can bring the total to $0 — there's no card to charge.
       // The booking was already created server-side as "pending" (no awaiting_payment
       // step), so skip Stripe entirely and go straight to the confirmation page.
+      const bookingToken = pendingBookingTokenRef.current ?? sessionStorage.getItem("rm_pending_booking_token") ?? "";
+
       if (effectiveTotal <= 0) {
         sessionStorage.removeItem("rm_pending_booking_id");
+        sessionStorage.removeItem("rm_pending_booking_token");
         sessionStorage.removeItem(DRAFT_KEY);
-        setLocation(`/booking-confirmation/${bookingId}`);
+        setLocation(bookingToken ? `/booking-confirmation/${bookingToken}` : "/passenger/rides");
         setIsConfirming(false);
         return;
       }
 
       // Build the 3DS return URL — confirmation page handles the redirect_status params from Stripe.
+      // If the token is somehow unavailable the page recovers it from the
+      // PaymentIntent via find-booking, so /pending is a safe placeholder.
       const baseUrl = `${window.location.origin}${(import.meta.env.BASE_URL ?? "/").replace(/\/$/, "")}`;
-      const confirmationReturnUrl = `${baseUrl}/booking-confirmation/${bookingId}`;
+      const confirmationReturnUrl = `${baseUrl}/booking-confirmation/${bookingToken || "pending"}`;
       setStripeReturnUrl(confirmationReturnUrl);
 
       // Step 4: Create a payment intent tied to this booking
@@ -843,9 +852,11 @@ export default function Book() {
       return s ? parseInt(s, 10) : null;
     })();
     if (!bookingId) return;
+    const bookingToken = pendingBookingTokenRef.current ?? sessionStorage.getItem("rm_pending_booking_token") ?? "";
 
     // Clean up sessionStorage — payment completed without redirect
     sessionStorage.removeItem("rm_pending_booking_id");
+    sessionStorage.removeItem("rm_pending_booking_token");
 
     // Confirm server-side using the same flow as admin Charge Card:
     // call /payments/confirm, check res.ok, then navigate.
@@ -876,7 +887,7 @@ export default function Book() {
     }
 
     sessionStorage.removeItem(DRAFT_KEY);
-    setLocation(`/booking-confirmation/${bookingId}`);
+    setLocation(bookingToken ? `/booking-confirmation/${bookingToken}` : "/passenger/rides");
   };
 
   const handlePaymentError = (message: string) => {
@@ -1421,7 +1432,7 @@ export default function Book() {
                 })}
 
                 <div className="flex justify-between pt-3">
-                  <Button type="button" variant="outline" onClick={() => { sessionStorage.removeItem("rm_pending_booking_id"); setPendingBookingId(null); pendingBookingIdRef.current = null; setStep(1); }} className="border-white/15 text-white/60 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs px-6 h-11">
+                  <Button type="button" variant="outline" onClick={() => { sessionStorage.removeItem("rm_pending_booking_id"); sessionStorage.removeItem("rm_pending_booking_token"); setPendingBookingId(null); pendingBookingIdRef.current = null; pendingBookingTokenRef.current = null; setStep(1); }} className="border-white/15 text-white/60 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs px-6 h-11">
                     <ChevronLeft className="w-4 h-4 mr-1" /> Back
                   </Button>
                   <Button
@@ -1703,7 +1714,7 @@ export default function Book() {
                         <Button
                           type="button"
                           variant="outline"
-                          onClick={() => { sessionStorage.removeItem("rm_pending_booking_id"); setPendingBookingId(null); pendingBookingIdRef.current = null; setStep(2); }}
+                          onClick={() => { sessionStorage.removeItem("rm_pending_booking_id"); sessionStorage.removeItem("rm_pending_booking_token"); setPendingBookingId(null); pendingBookingIdRef.current = null; pendingBookingTokenRef.current = null; setStep(2); }}
                           className="w-full border-white/12 text-white/50 hover:text-white hover:bg-white/5 rounded-none uppercase tracking-widest text-xs h-10"
                         >
                           <ChevronLeft className="w-4 h-4 mr-1" /> Change Vehicle

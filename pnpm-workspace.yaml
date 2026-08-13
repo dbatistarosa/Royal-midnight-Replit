@@ -31,7 +31,7 @@ catalog:
   tailwind-merge: ^3.3.1
   tailwindcss: ^4.1.14
   tsx: ^4.21.0
-  vite: ^7.3.2
+  vite: ^7.3.5
   vitest: ^4.1.9
   zod: ^3.25.76
 
@@ -40,8 +40,6 @@ minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - '@replit/*'
   - stripe-replit-sync
-  # Temporarily excluded for security fix: vite@7.3.2
-  - vite
 
 onlyBuiltDependencies:
   - '@swc/core'
@@ -52,6 +50,11 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # vitest pins its own vite, which kept 7.3.2 alive after the catalog moved to
+  # 7.3.5. Both advisories (GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3) cover
+  # <=7.3.4. A range, not an exact pin, so this does not block future patches
+  # the way the exact esbuild pin does.
+  vite: '>=7.3.5'
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
@@ -135,4 +138,8 @@ overrides:
   rollup>@rollup/rollup-win32-arm64-msvc: '-'
   rollup>@rollup/rollup-win32-ia32-msvc: '-'
   rollup>@rollup/rollup-win32-x64-gnu: '-'
-  rollup>@rollup/rollup-win32-x64-msvc: '-'
+  # NOT excluded: this is the only rollup binary that lets `pnpm test` and
+  # `vite build` run on a Windows dev machine. Vercel builds on Linux and uses
+  # rollup-linux-x64-gnu, which is likewise not excluded, so this costs one
+  # optional package in the lockfile and nothing at deploy time.
+  # rollup>@rollup/rollup-win32-x64-msvc: '-'

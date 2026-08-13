@@ -2,13 +2,8 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { useAuth } from "@/contexts/auth";
 import { LayoutDashboard, Plus, BookOpen, User, Building2, Mail, Phone } from "lucide-react";
+import { corporateNavItems } from "@/config/portalNav";
 
-const corporateNavItems = [
-  { label: "Dashboard", href: "/corporate/dashboard", icon: LayoutDashboard },
-  { label: "Book a Trip", href: "/corporate/book", icon: Plus },
-  { label: "All Bookings", href: "/corporate/bookings", icon: BookOpen },
-  { label: "Profile", href: "/corporate/profile", icon: User },
-];
 
 function CorporateProfileInner() {
   const { user } = useAuth();

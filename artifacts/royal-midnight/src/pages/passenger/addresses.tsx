@@ -7,15 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { API_BASE } from "@/lib/constants";
+import { passengerNavItems } from "@/config/portalNav";
 
-const passengerNavItems = [
-  { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
-  { label: "My Rides", href: "/passenger/rides", icon: Car },
-  { label: "Reports", href: "/passenger/reports", icon: BarChart2 },
-  { label: "Saved Addresses", href: "/passenger/addresses", icon: MapPin },
-  { label: "Profile", href: "/passenger/profile", icon: User },
-  { label: "Support", href: "/passenger/support", icon: MessageSquare },
-];
 
 const labelClass = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const inputClass = "bg-white/5 border-white/10 text-white rounded-none h-10 text-sm";

@@ -5,8 +5,8 @@ import { db, usersTable, driversTable, sessionsTable, passwordResetTokensTable, 
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
-import { requireAdmin } from "../middleware/auth.js";
-import { hashPassword, verifyPassword } from "../lib/hash.js";
+import { requireAdmin, SESSION_COOKIE } from "../middleware/auth.js";
+import { hashPassword, verifyPassword, isLegacyHash } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
 import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
@@ -38,8 +38,36 @@ function generateToken(_userId: number): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
+/** Issue the session as an HttpOnly cookie.
+ *
+ *  The web app used to keep this token in localStorage, where any script on the
+ *  origin could read it — a single XSS anywhere in the SPA exfiltrated a full
+ *  30-day admin session (CN-014). As a cookie it is invisible to page
+ *  JavaScript. The token is still returned in the response body because the
+ *  React Native driver app has no cookie jar and stores it in expo-secure-store.
+ *
+ *  SameSite=Lax is correct here: the SPA calls the API on its own origin via the
+ *  Vercel /api rewrite, so the cookie is never a cross-site request. */
+function setSessionCookie(res: import("express").Response, token: string): void {
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production" || !!process.env.VERCEL_ENV,
+    sameSite: "lax",
+    maxAge: SESSION_TTL_MS,
+    path: "/",
+  });
+}
+
 // In-memory OTP store (production would use Redis)
-const otpStore = new Map<string, { otp: string; expiresAt: number }>();
+// NOTE: on serverless each instance keeps its own Map, so a verify can land on
+// an instance that never saw the send. Moving this to the existing otp_codes
+// table is tracked as CN-035 and should happen before launch.
+const otpStore = new Map<string, { otp: string; expiresAt: number; attempts: number }>();
+
+/** Maximum wrong guesses accepted for a single issued code. The IP-keyed
+ *  rate limiter alone does not stop a distributed guess against one phone
+ *  number, so the code itself is burned after a few failures. */
+const MAX_OTP_ATTEMPTS = 5;
 
 // Purge expired OTPs every 5 minutes to prevent memory leak
 setInterval(() => {
@@ -98,6 +126,7 @@ router.post("/auth/register", credentialLimiter, async (req, res): Promise<void>
 
   const token = generateToken(user.id);
   await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+  setSessionCookie(res, token);
 
   if (referredByUserId) {
     issueRefereeWelcomePromo(user.name)
@@ -139,12 +168,26 @@ router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> =>
   }
 
   if (!user.passwordHash || !verifyPassword(password, user.passwordHash)) {
+    req.log.warn({ ip: req.ip, email: user.email }, "authentication_failed");
     res.status(401).json({ error: "Invalid credentials" });
     return;
   }
 
+  // Transparently migrate a legacy SHA-256 hash to bcrypt — this is the only
+  // moment the plaintext is available. Non-blocking: a write failure must not
+  // stop a valid login, the account just gets upgraded on the next one (CN-012).
+  if (isLegacyHash(user.passwordHash)) {
+    const upgraded = hashPassword(password);
+    db.update(usersTable)
+      .set({ passwordHash: upgraded })
+      .where(eq(usersTable.id, user.id))
+      .then(() => req.log.info({ userId: user.id }, "legacy password hash upgraded to bcrypt"))
+      .catch(err => req.log.error({ err, userId: user.id }, "legacy password upgrade failed"));
+  }
+
   const token = generateToken(user.id);
   await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+  setSessionCookie(res, token);
 
   let driverId: number | null = null;
   if (user.role === "driver") {
@@ -166,6 +209,26 @@ router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> =>
   });
 });
 
+/** End the current session.
+ *
+ *  Previously there was no logout route at all, so a token could only expire,
+ *  never be revoked. With an HttpOnly cookie the client cannot clear it itself,
+ *  so this endpoint is required rather than optional (CN-014). */
+router.post("/auth/logout", async (req, res): Promise<void> => {
+  const cookies = req.cookies as Record<string, string> | undefined;
+  const authHeader = req.headers.authorization;
+  const token =
+    cookies?.[SESSION_COOKIE]?.trim() ||
+    (authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : "");
+
+  if (token) {
+    await db.delete(sessionsTable).where(eq(sessionsTable.token, token));
+  }
+
+  res.clearCookie(SESSION_COOKIE, { path: "/" });
+  res.json({ message: "Signed out" });
+});
+
 router.post("/auth/send-otp", otpLimiter, async (req, res): Promise<void> => {
   const parsed = SendOtpBody.safeParse(req.body);
   if (!parsed.success) {
@@ -174,10 +237,17 @@ router.post("/auth/send-otp", otpLimiter, async (req, res): Promise<void> => {
   }
 
   const { phone } = parsed.data;
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  otpStore.set(phone, { otp, expiresAt: Date.now() + 10 * 60 * 1000 });
 
-  req.log.info({ phone }, "OTP generated — sending via SMS");
+  // Math.random() is not a CSPRNG: V8's internal state is recoverable from a
+  // handful of observed outputs, which would let an attacker who can request
+  // codes to their own phone predict the code issued to anyone else — including
+  // an admin (CN-011). crypto.randomInt is uniform and unpredictable.
+  const otp = String(crypto.randomInt(100000, 1000000));
+  otpStore.set(phone, { otp, expiresAt: Date.now() + 10 * 60 * 1000, attempts: 0 });
+
+  // Log only the last 4 digits — the full number is PII and this line is not
+  // covered by the redaction list (CN-050).
+  req.log.info({ phone: `••••${phone.slice(-4)}` }, "OTP generated — sending via SMS");
   sendOtpSms(phone, otp).catch(err => req.log.error({ err }, "OTP SMS failed (non-fatal)"));
   res.json({ message: "OTP sent successfully" });
 });
@@ -192,7 +262,29 @@ router.post("/auth/verify-otp", otpLimiter, async (req, res): Promise<void> => {
   const { phone, otp } = parsed.data;
   const stored = otpStore.get(phone);
 
-  if (!stored || stored.otp !== otp || Date.now() > stored.expiresAt) {
+  if (!stored || Date.now() > stored.expiresAt) {
+    otpStore.delete(phone);
+    res.status(400).json({ error: "Invalid or expired OTP" });
+    return;
+  }
+
+  // Burn the code after too many wrong guesses, so a single issued code cannot
+  // be ground down by requests spread across many IPs.
+  stored.attempts += 1;
+  if (stored.attempts > MAX_OTP_ATTEMPTS) {
+    otpStore.delete(phone);
+    req.log.warn({ phone: `••••${phone.slice(-4)}` }, "otp_attempts_exceeded");
+    res.status(400).json({ error: "Invalid or expired OTP" });
+    return;
+  }
+
+  // Constant-time compare: a plain !== leaks the shared prefix length through
+  // timing, which shortens a brute force.
+  const provided = Buffer.from(String(otp));
+  const expected = Buffer.from(stored.otp);
+  const matches =
+    provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  if (!matches) {
     res.status(400).json({ error: "Invalid or expired OTP" });
     return;
   }
@@ -200,6 +292,15 @@ router.post("/auth/verify-otp", otpLimiter, async (req, res): Promise<void> => {
   otpStore.delete(phone);
 
   let [user] = await db.select().from(usersTable).where(eq(usersTable.phone, phone));
+
+  // An SMS code is a weaker factor than a password, and phone numbers get
+  // recycled or SIM-swapped. Privileged accounts must use the password flow.
+  if (user && (user.role === "admin" || user.role === "corporate")) {
+    req.log.warn({ userId: user.id, role: user.role }, "otp_login_refused_privileged_account");
+    res.status(403).json({ error: "This account must sign in with its password." });
+    return;
+  }
+
   if (!user) {
     const [newUser] = await db
       .insert(usersTable)
@@ -210,6 +311,7 @@ router.post("/auth/verify-otp", otpLimiter, async (req, res): Promise<void> => {
 
   const token = generateToken(user.id);
   await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+  setSessionCookie(res, token);
 
   res.json({
     token,
@@ -294,6 +396,7 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
 
     const token = generateToken(user.id);
     await tx.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+    setSessionCookie(res, token);
 
     return { user, driver, token };
   });

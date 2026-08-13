@@ -11,16 +11,8 @@ import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
 import { format, startOfMonth, endOfMonth } from "date-fns";
+import { driverNavItems } from "@/config/portalNav";
 
-const driverNavItems = [
-  { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "Finished",  href: "/driver/history",   icon: History },
-  { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
-  { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
-  { label: "Documents", href: "/driver/documents", icon: FileText },
-  { label: "Vehicles",  href: "/driver/vehicles",  icon: Car },
-  { label: "Profile",   href: "/driver/profile",   icon: User },
-];
 
 type EarningsData = {
   totalRides: number;

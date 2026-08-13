@@ -6,9 +6,11 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
+import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { API_BASE } from "@/lib/constants";
 import { format } from "date-fns";
 import { useUpload } from "@workspace/object-storage-web";
+import { driverNavItems } from "@/config/portalNav";
 
 type Review = {
   id: number;
@@ -19,15 +21,6 @@ type Review = {
 };
 
 
-const driverNavItems = [
-  { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "Finished",  href: "/driver/history",   icon: History },
-  { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
-  { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
-  { label: "Documents", href: "/driver/documents", icon: FileText },
-  { label: "Vehicles",  href: "/driver/vehicles",  icon: Car },
-  { label: "Profile",   href: "/driver/profile",   icon: User },
-];
 
 const labelClass = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const inputClass = "bg-white/5 border-white/10 text-white rounded-none h-11";
@@ -40,6 +33,7 @@ function ProfilePhotoUpload({
   onUploaded: (objectPath: string) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { url: signedPhotoUrl } = useSignedDocUrl(currentUrl ?? null);
   const { uploadFile, isUploading, progress } = useUpload({
     basePath: `${API_BASE}/storage`,
     onSuccess: (res) => {
@@ -53,11 +47,9 @@ function ProfilePhotoUpload({
     void uploadFile(file);
   };
 
-  const photoSrc = currentUrl
-    ? currentUrl.startsWith("http")
-      ? currentUrl
-      : `${API_BASE}/storage/objects${currentUrl.replace(/^\/objects/, "")}`
-    : null;
+  // Signed, short-lived URL — the photo lives in the private bucket, and a
+  // stored absolute URL is never followed directly (CN-003, CN-041).
+  const photoSrc = signedPhotoUrl;
 
   return (
     <div className="flex items-center gap-6">

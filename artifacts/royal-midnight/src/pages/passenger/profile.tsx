@@ -9,15 +9,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { API_BASE } from "@/lib/constants";
+import { passengerNavItems } from "@/config/portalNav";
 
-const passengerNavItems = [
-  { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
-  { label: "My Rides", href: "/passenger/rides", icon: Car },
-  { label: "Reports", href: "/passenger/reports", icon: BarChart2 },
-  { label: "Saved Addresses", href: "/passenger/addresses", icon: MapPin },
-  { label: "Profile", href: "/passenger/profile", icon: User },
-  { label: "Support", href: "/passenger/support", icon: MessageSquare },
-];
 
 const MUSIC_OPTIONS = ["No Preference", "Jazz", "Classical", "R&B / Soul", "Pop", "Rock", "Hip-Hop", "Latin", "Silence"];
 const BEVERAGE_OPTIONS = ["No Preference", "Sparkling Water", "Still Water", "None"];

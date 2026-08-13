@@ -12,15 +12,8 @@ import { useToast } from "@/hooks/use-toast";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
+import { passengerNavItems } from "@/config/portalNav";
 
-const passengerNavItems = [
-  { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
-  { label: "My Rides", href: "/passenger/rides", icon: Car },
-  { label: "Reports", href: "/passenger/reports", icon: BarChart2 },
-  { label: "Saved Addresses", href: "/passenger/addresses", icon: MapPin },
-  { label: "Profile", href: "/passenger/profile", icon: User },
-  { label: "Support", href: "/passenger/support", icon: MessageSquare },
-];
 
 type BookingDetail = {
   id: number;

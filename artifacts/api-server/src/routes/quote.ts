@@ -201,36 +201,81 @@ async function getCorporateDiscountPct(userId: number | undefined): Promise<numb
   }
 }
 
-router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
-  const parsed = GetQuoteBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json(parsed.error.errors);
-    return;
-  }
+// ── Shared quote engine ───────────────────────────────────────────────────────
+// This logic used to live inline in the POST /quote handler, which meant the
+// only way to price a trip was to answer an HTTP request. Booking creation
+// therefore had no choice but to trust the price the client sent. Extracting it
+// lets the server re-derive the fare itself at booking time (CN-001).
+// The /quote handler below is now a thin wrapper — behaviour is unchanged.
 
-  const { pickupAddress, dropoffAddress, vehicleClass, passengers, pickupAt } = parsed.data;
-  const vc = vehicleClass as string;
+export interface QuoteInput {
+  pickupAddress: string;
+  dropoffAddress: string;
+  vehicleClass: string;
+  pickupAt: string;
+  waypoints?: string[] | undefined;
+  charterMode?: string | undefined;
+  charterHours?: number | undefined;
+  /** Logged-in caller, used for the corporate volume discount. */
+  userId?: number | undefined;
+  /** Admin-created bookings bypass the customer-facing lead-time rule. */
+  skipLeadTimeCheck?: boolean | undefined;
+}
 
-  // Multi-stop + charter extensions (not in generated Zod schema yet — read from raw body)
-  const rawBody = req.body as Record<string, unknown>;
-  const waypoints: string[] = Array.isArray(rawBody.waypoints)
-    ? (rawBody.waypoints as string[]).filter(w => typeof w === "string" && w.trim())
-    : [];
-  const charterMode: string = typeof rawBody.charterMode === "string" ? rawBody.charterMode : "route";
-  const charterHours: number = typeof rawBody.charterHours === "number" ? rawBody.charterHours : 0;
+export interface QuoteBreakdown {
+  vehicleClass: string;
+  estimatedPrice: number;
+  baseFare: number;
+  includedMiles: number;
+  billableMiles: number;
+  distanceCharge: number;
+  airportFee: number;
+  surgeAdjustment: number;
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  cardProcessingFeeRate: number;
+  cardProcessingFee: number;
+  totalWithTax: number;
+  estimatedDuration: number;
+  estimatedDistance: number;
+  currency: string;
+  fixedRoutePrice?: number | null;
+  fixedRouteId?: number | null;
+}
+
+export type QuoteOutcome =
+  | { ok: true; quote: QuoteBreakdown }
+  | { ok: false; status: number; body: unknown };
+
+export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
+  const { pickupAddress, dropoffAddress, pickupAt } = input;
+  const vc = input.vehicleClass;
+
+  // Multi-stop + charter extensions (not in the generated Zod schema yet)
+  const waypoints: string[] = (input.waypoints ?? []).filter(
+    w => typeof w === "string" && w.trim(),
+  );
+  const charterMode: string = input.charterMode ?? "route";
+  const charterHours: number = input.charterHours ?? 0;
 
   // Validate minimum lead time
-  const minHoursStr = await getSetting("min_booking_hours", "2");
-  const minHours = parseFloat(minHoursStr);
-  const pickupDate = new Date(pickupAt);
-  const leadTimeHours = (pickupDate.getTime() - Date.now()) / (1000 * 60 * 60);
-  if (leadTimeHours < minHours) {
-    res.status(400).json({
-      error: `Bookings require at least ${minHours} hour${minHours !== 1 ? "s" : ""} advance notice. Please select a later time.`,
-      code: "LEAD_TIME_VIOLATION",
-      minHours,
-    });
-    return;
+  if (!input.skipLeadTimeCheck) {
+    const minHoursStr = await getSetting("min_booking_hours", "2");
+    const minHours = parseFloat(minHoursStr);
+    const pickupDate = new Date(pickupAt);
+    const leadTimeHours = (pickupDate.getTime() - Date.now()) / (1000 * 60 * 60);
+    if (leadTimeHours < minHours) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: `Bookings require at least ${minHours} hour${minHours !== 1 ? "s" : ""} advance notice. Please select a later time.`,
+          code: "LEAD_TIME_VIOLATION",
+          minHours,
+        },
+      };
+    }
   }
 
   // Get Florida tax rate from settings (stored as decimal: 0.07 = 7%, or as a
@@ -286,7 +331,7 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
 
   // Corporate volume discount — only applies to a logged-in corporate user
   // with an active billing account; anonymous/passenger quotes are unaffected.
-  const corporateDiscountPct = await getCorporateDiscountPct(req.currentUser?.userId);
+  const corporateDiscountPct = await getCorporateDiscountPct(input.userId);
 
   const { subtotal, surgeAdjustment, taxAmount, cardProcessingFee, totalWithTax } = computeFareBreakdown({
     baseFare,
@@ -410,8 +455,9 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
       taxRate,
       cardProcessingFeeRate,
     });
-    res.json(
-      GetQuoteResponse.parse({
+    return {
+      ok: true,
+      quote: {
         vehicleClass: vc,
         estimatedPrice: fixedBreakdown.subtotal,
         baseFare: fixedRoutePrice,
@@ -431,13 +477,13 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
         currency: "USD",
         fixedRoutePrice,
         fixedRouteId,
-      })
-    );
-    return;
+      },
+    };
   }
 
-  res.json(
-    GetQuoteResponse.parse({
+  return {
+    ok: true,
+    quote: {
       vehicleClass: vc,
       estimatedPrice: subtotal,
       baseFare,
@@ -455,8 +501,64 @@ router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
       estimatedDuration,
       estimatedDistance,
       currency: "USD",
-    })
-  );
+    },
+  };
+}
+
+/** Read the multi-stop / charter extensions that aren't in the generated Zod
+ *  schema yet. `waypoints` arrives as an array from /quote but as a JSON string
+ *  from the booking form, so both shapes are accepted. */
+export function readQuoteExtensions(rawBody: unknown): {
+  waypoints: string[];
+  charterMode: string;
+  charterHours: number;
+} {
+  const body = (rawBody ?? {}) as Record<string, unknown>;
+
+  let waypoints: string[] = [];
+  if (Array.isArray(body["waypoints"])) {
+    waypoints = body["waypoints"] as string[];
+  } else if (typeof body["waypoints"] === "string" && body["waypoints"]) {
+    try {
+      const decoded = JSON.parse(body["waypoints"] as string);
+      if (Array.isArray(decoded)) waypoints = decoded as string[];
+    } catch {
+      // malformed waypoints — price as a point-to-point trip
+    }
+  }
+
+  return {
+    waypoints: waypoints.filter(w => typeof w === "string" && w.trim()),
+    charterMode: typeof body["charterMode"] === "string" ? (body["charterMode"] as string) : "route",
+    charterHours: typeof body["charterHours"] === "number" ? (body["charterHours"] as number) : 0,
+  };
+}
+
+router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
+  const parsed = GetQuoteBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json(parsed.error.errors);
+    return;
+  }
+
+  const ext = readQuoteExtensions(req.body);
+  const outcome = await computeQuote({
+    pickupAddress: parsed.data.pickupAddress,
+    dropoffAddress: parsed.data.dropoffAddress,
+    vehicleClass: parsed.data.vehicleClass as string,
+    pickupAt: parsed.data.pickupAt,
+    waypoints: ext.waypoints,
+    charterMode: ext.charterMode,
+    charterHours: ext.charterHours,
+    userId: req.currentUser?.userId,
+  });
+
+  if (!outcome.ok) {
+    res.status(outcome.status).json(outcome.body);
+    return;
+  }
+
+  res.json(GetQuoteResponse.parse(outcome.quote));
 });
 
 export default router;

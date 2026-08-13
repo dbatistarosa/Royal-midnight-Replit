@@ -5,22 +5,15 @@ import { format, differenceInDays, parseISO, isValid } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
+import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { driverNavItems } from "@/config/portalNav";
 
 const LOCATION_LS_KEY = "rm_driver_location_sharing";
 
-const driverNavItems = [
-  { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "Finished",  href: "/driver/history",   icon: History },
-  { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
-  { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
-  { label: "Documents", href: "/driver/documents", icon: FileText },
-  { label: "Vehicles",  href: "/driver/vehicles",  icon: Car },
-  { label: "Profile",   href: "/driver/profile",   icon: User },
-];
 
 type DocType = "Driver License" | "Vehicle Registration" | "Insurance";
 const DOC_TYPES: DocType[] = ["Driver License", "Vehicle Registration", "Insurance"];
@@ -1325,6 +1318,9 @@ export default function DriverDashboard() {
   const [upcomingCount, setUpcomingCount] = useState<number | null>(null);
   const [myRidesRefreshKey, setMyRidesRefreshKey] = useState(0);
   const [compliance, setCompliance] = useState<ComplianceDocs | null>(null);
+  // Profile photos live in the private bucket and need a signed URL (CN-003).
+  // Declared here so the hook runs before any early return below.
+  const { url: signedProfilePicUrl } = useSignedDocUrl(driverRecord?.profilePicture ?? null);
 
   const authHeader = `Bearer ${token ?? ""}`;
 
@@ -1367,9 +1363,8 @@ export default function DriverDashboard() {
 
   const initials = user?.name?.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() ?? "DR";
   const currentStatus = driverRecord?.status ?? "unavailable";
-  const profilePicUrl = driverRecord?.profilePicture
-    ? `${API_BASE}/storage/objects/${driverRecord.profilePicture.replace(/^\/objects\//, "")}`
-    : null;
+  // Signed URL — the profile photo lives in the private bucket (CN-003).
+  const profilePicUrl = signedProfilePicUrl;
   const normalizedStatus: DriverAvailability = ["available", "on_break", "unavailable"].includes(currentStatus)
     ? (currentStatus as DriverAvailability)
     : "unavailable";

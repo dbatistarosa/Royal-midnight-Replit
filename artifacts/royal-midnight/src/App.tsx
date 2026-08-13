@@ -390,10 +390,11 @@ function Router() {
       <Route path="/book">
         <Layout><Book /></Layout>
       </Route>
-      <Route path="/booking-confirmation/:id">
+      {/* Addressed by the booking's tracking token, never its id — see CN-005. */}
+      <Route path="/booking-confirmation/:token">
         <Layout><BookingConfirmation /></Layout>
       </Route>
-      <Route path="/track/:id">
+      <Route path="/track/:token">
         <Layout><Track /></Layout>
       </Route>
 

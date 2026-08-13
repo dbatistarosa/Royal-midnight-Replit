@@ -6,16 +6,10 @@ import { initSentry } from "./lib/sentry";
 
 initSentry();
 
-setAuthTokenGetter(() => {
-  try {
-    const raw = localStorage.getItem("rm_auth");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { token?: string };
-    return parsed.token ?? null;
-  } catch {
-    return null;
-  }
-});
+// No bootstrap token getter on the web build: the session lives in an HttpOnly
+// cookie that is sent automatically with same-origin API requests, and is
+// deliberately unreadable from JavaScript (CN-014). AuthProvider still
+// registers an in-memory getter for the current tab after a fresh login.
 
 const rootEl = document.getElementById("root")!;
 

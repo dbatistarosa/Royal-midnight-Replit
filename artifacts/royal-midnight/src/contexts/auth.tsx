@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import { setAuthTokenGetter } from "@workspace/api-client-react";
+import { API_BASE } from "@/lib/constants";
 
 export interface AuthUser {
   id: number;
@@ -30,13 +31,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [driverId, setDriverId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // The session token is NOT persisted. It lives in an HttpOnly cookie that
+  // page JavaScript cannot read, so an XSS can no longer steal a 30-day admin
+  // session (CN-014). Only non-sensitive display fields are cached here so the
+  // UI can render immediately on reload; the cookie is what actually
+  // authenticates, and it is sent automatically because the API is same-origin.
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        const parsed = JSON.parse(stored) as { user: AuthUser; token: string; driverId?: number | null };
+        const parsed = JSON.parse(stored) as { user: AuthUser; driverId?: number | null };
         setUser(parsed.user);
-        setToken(parsed.token);
         setDriverId(parsed.driverId ?? null);
       }
     } catch {
@@ -53,9 +58,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function login(user: AuthUser, token: string, driverIdArg?: number | null) {
     const did = driverIdArg ?? null;
     setUser(user);
+    // Kept in memory only, for the current tab. After a reload it is gone and
+    // requests authenticate with the cookie instead.
     setToken(token);
     setDriverId(did);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ user, token, driverId: did }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ user, driverId: did }));
   }
 
   function logout() {
@@ -63,6 +70,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setDriverId(null);
     localStorage.removeItem(STORAGE_KEY);
+    // The cookie is HttpOnly, so only the server can clear it.
+    void fetch(`${API_BASE}/auth/logout`, { method: "POST" }).catch(() => undefined);
   }
 
   return (

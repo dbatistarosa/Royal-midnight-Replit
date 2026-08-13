@@ -25,15 +25,23 @@ type PublicBooking = {
   paymentType?: string | null;
 };
 
-async function fetchBooking(id: number): Promise<PublicBooking> {
-  const res = await fetch(`${API_BASE}/bookings/${id}/track`);
+async function fetchBooking(token: string): Promise<PublicBooking> {
+  const res = await fetch(`${API_BASE}/bookings/track/${encodeURIComponent(token)}`);
   if (!res.ok) throw new Error("Not found");
   return res.json() as Promise<PublicBooking>;
 }
 
 export default function BookingConfirmation() {
-  const [, params] = useRoute("/booking-confirmation/:id");
-  const id = params?.id ? parseInt(params.id) : 0;
+  // Keyed by the booking's tracking token, not its id — booking ids are
+  // sequential, so an id-addressed receipt page was enumerable (CN-005).
+  const [, params] = useRoute("/booking-confirmation/:token");
+  const routeToken = params?.token ?? "";
+  // A real token is 32-64 hex chars. Anything else (notably the "pending"
+  // placeholder Stripe may return to) means we must recover it from the
+  // PaymentIntent before the receipt can be loaded.
+  const routeTokenIsValid = /^[0-9a-f]{32,64}$/.test(routeToken);
+  const [recoveredToken, setRecoveredToken] = useState("");
+  const token = routeTokenIsValid ? routeToken : recoveredToken;
   const { user } = useAuth();
   const viewBookingsHref = user?.role === "admin"
     ? "/admin/bookings"
@@ -53,7 +61,7 @@ export default function BookingConfirmation() {
   // Handle 3DS redirect return: Stripe sends payment_intent + redirect_status in the URL.
   // Call /payments/confirm so the booking status is updated even when the webhook is slow.
   useEffect(() => {
-    if (!id || confirmed3DS.current) return;
+    if (confirmed3DS.current) return;
     const urlParams = new URLSearchParams(window.location.search);
     const pi = urlParams.get("payment_intent");
     const redirectStatus = urlParams.get("redirect_status");
@@ -65,28 +73,46 @@ export default function BookingConfirmation() {
     window.history.replaceState({}, "", window.location.pathname);
 
     setPaymentConfirming(true);
-    fetch(`${API_BASE}/payments/confirm/${id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paymentIntentId: pi }),
-    })
-      .catch(() => {})
-      .finally(() => setPaymentConfirming(false));
-  }, [id]);
+    // /payments/confirm is keyed by the numeric booking id, which this page no
+    // longer carries. find-booking maps the PaymentIntent back to it — the PI id
+    // is itself unguessable and only the payer has it.
+    void (async () => {
+      try {
+        const lookup = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`);
+        if (!lookup.ok) return;
+        const { bookingId, trackingToken } = await lookup.json() as { bookingId?: number; trackingToken?: string | null };
+        if (trackingToken) setRecoveredToken(trackingToken);
+        if (!bookingId) return;
+        await fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentIntentId: pi }),
+        });
+      } catch {
+        // Webhook is the safety net.
+      } finally {
+        setPaymentConfirming(false);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
-    if (!id) return;
+    // Still waiting on token recovery from the 3DS lookup — not an error yet.
+    if (!token) {
+      if (!paymentConfirming && !routeTokenIsValid && !confirmed3DS.current) { setIsLoading(false); setError(true); }
+      return;
+    }
     // Small delay when coming back from 3DS so the confirm call above has time to settle
     const delay = confirmed3DS.current ? 800 : 0;
     const t = setTimeout(() => {
       setIsLoading(true);
-      fetchBooking(id)
+      fetchBooking(token)
         .then(data => { setBooking(data); setError(false); })
         .catch(() => setError(true))
         .finally(() => setIsLoading(false));
     }, delay);
     return () => clearTimeout(t);
-  }, [id, paymentConfirming]);
+  }, [token, paymentConfirming]);
 
   // If booking is loaded and still awaiting_payment, poll for webhook confirmation.
   // The direct /payments/confirm call above is the fast path; this is the safety net.
@@ -96,7 +122,7 @@ export default function BookingConfirmation() {
 
     pollTimer.current = setTimeout(() => {
       pollCount.current += 1;
-      fetchBooking(id)
+      fetchBooking(token)
         .then(data => { setBooking(data); })
         .catch(() => {});
     }, 2000);
@@ -104,7 +130,7 @@ export default function BookingConfirmation() {
     return () => {
       if (pollTimer.current) clearTimeout(pollTimer.current);
     };
-  }, [booking, id]);
+  }, [booking, token]);
 
   if (isLoading || paymentConfirming) {
     return (

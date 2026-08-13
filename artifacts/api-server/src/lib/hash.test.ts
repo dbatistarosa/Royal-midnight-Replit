@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import crypto from "crypto";
-import { hashPassword, verifyPassword, isValidHash } from "./hash";
+import { hashPassword, verifyPassword, isValidHash, isLegacyHash } from "./hash";
 
 describe("hashPassword / verifyPassword", () => {
   it("round-trips a password through bcrypt", () => {
@@ -19,6 +19,21 @@ describe("hashPassword / verifyPassword", () => {
     const legacyHash = crypto.createHash("sha256").update("legacy-password" + "royal_midnight_salt").digest("hex");
     expect(verifyPassword("legacy-password", legacyHash)).toBe(true);
     expect(verifyPassword("wrong-password", legacyHash)).toBe(false);
+  });
+});
+
+describe("isLegacyHash", () => {
+  it("flags a SHA-256 hex digest so the login handler can upgrade it", () => {
+    const legacyHash = crypto.createHash("sha256").update("x" + "royal_midnight_salt").digest("hex");
+    expect(isLegacyHash(legacyHash)).toBe(true);
+  });
+
+  it("does not flag a bcrypt hash", () => {
+    expect(isLegacyHash(hashPassword("anything"))).toBe(false);
+  });
+
+  it("does not flag a 64-char value that is not lowercase hex", () => {
+    expect(isLegacyHash("Z".repeat(64))).toBe(false);
   });
 });
 

@@ -7,22 +7,37 @@ import {
 } from "lucide-react";
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
+import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@workspace/object-storage-web";
 import { differenceInDays, parseISO, isValid } from "date-fns";
+import { driverNavItems } from "@/config/portalNav";
 
-const driverNavItems = [
-  { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
-  { label: "Finished",  href: "/driver/history",   icon: History },
-  { label: "Earnings",  href: "/driver/earnings",  icon: DollarSign },
-  { label: "Stats",     href: "/driver/stats",     icon: BarChart2 },
-  { label: "Documents", href: "/driver/documents", icon: FileText },
-  { label: "Vehicles",  href: "/driver/vehicles",  icon: Car },
-  { label: "Profile",   href: "/driver/profile",   icon: User },
-];
 
 const DOC_TYPES = ["Driver License", "Vehicle Registration", "Insurance"] as const;
+
+/** Link to a submitted document. Its own component because the link is rendered
+ *  inside a list and hooks cannot be called in a loop. The private bucket needs
+ *  a signed, short-lived URL (CN-003). */
+function SubmittedFileLink({ fileUrl }: { fileUrl: string }) {
+  const { url, loading } = useSignedDocUrl(fileUrl);
+
+  if (loading) return <span className="text-gray-500 text-xs">Loading file…</span>;
+  if (!url) return null;
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-primary hover:underline"
+    >
+      <ExternalLink className="w-3 h-3" />
+      View submitted file
+    </a>
+  );
+}
 type DocType = typeof DOC_TYPES[number];
 
 type DocSubmission = {
@@ -189,15 +204,7 @@ function DocCard({
             </div>
           )}
           {latestForType.fileUrl && (
-            <a
-              href={latestForType.fileUrl.startsWith("http") ? latestForType.fileUrl : `${API_BASE}/storage/objects${latestForType.fileUrl}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-primary hover:underline"
-            >
-              <ExternalLink className="w-3 h-3" />
-              View submitted file
-            </a>
+            <SubmittedFileLink fileUrl={latestForType.fileUrl} />
           )}
         </div>
       )}

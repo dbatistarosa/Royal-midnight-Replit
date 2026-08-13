@@ -4,70 +4,72 @@ import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSqu
 import { API_BASE } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
+import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { adminNavItems } from "@/config/portalNav";
 
 const LABEL = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const FINPUT = "bg-white/5 border-white/10 text-white rounded-none h-10 text-sm";
 
-function docUrl(objectPath: string | null | undefined): string | null {
-  if (!objectPath) return null;
-  const stripped = objectPath.replace(/^\/objects\//, "");
-  return `${API_BASE}/storage/objects/${stripped}`;
-}
-
-type DocModalState = { url: string; label: string } | null;
-
 function DocViewButton({ path, label }: { path?: string | null; label: string }) {
-  const [modal, setModal] = useState<DocModalState>(null);
+  const [open, setOpen] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
-  const url = docUrl(path);
+  // Private documents need a signed, short-lived URL — minted only once the
+  // admin actually opens the viewer (CN-003).
+  const { url, loading } = useSignedDocUrl(open ? path : null);
 
-  if (!url) return <span className="text-gray-700 text-sm">—</span>;
+  if (!path) return <span className="text-gray-700 text-sm">—</span>;
 
   return (
     <>
       <button
         type="button"
-        onClick={() => { setImgFailed(false); setModal({ url, label }); }}
+        onClick={() => { setImgFailed(false); setOpen(true); }}
         className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-primary/30 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 text-primary text-xs uppercase tracking-widest transition-all"
       >
         <FileText className="w-3 h-3" />
         View
       </button>
 
-      {modal && (
+      {open && (
         <div
           className="fixed inset-0 z-[200] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setModal(null)}
+          onClick={() => setOpen(false)}
         >
           <div
             className="relative bg-[#0a0a0a] border border-white/10 max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 flex-shrink-0">
-              <p className="text-xs uppercase tracking-widest text-primary">{modal.label}</p>
+              <p className="text-xs uppercase tracking-widest text-primary">{label}</p>
               <div className="flex items-center gap-3">
-                <a
-                  href={modal.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> Open in new tab
-                </a>
-                <button onClick={() => setModal(null)} className="text-gray-500 hover:text-white transition-colors p-1">
+                {url && (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Open in new tab
+                  </a>
+                )}
+                <button onClick={() => setOpen(false)} className="text-gray-500 hover:text-white transition-colors p-1">
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
             <div className="flex-1 overflow-auto flex items-center justify-center p-4 min-h-[300px]">
-              {imgFailed ? (
+              {loading ? (
+                <Loader2 className="w-6 h-6 text-primary animate-spin" />
+              ) : !url ? (
+                <p className="text-gray-400 text-sm">This document could not be loaded.</p>
+              ) : imgFailed ? (
                 <div className="text-center space-y-4">
                   <FileText className="w-12 h-12 text-gray-600 mx-auto" />
                   <p className="text-gray-400 text-sm">This document cannot be previewed inline.</p>
                   <a
-                    href={modal.url}
+                    href={url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-black text-xs uppercase tracking-widest hover:bg-primary/90 transition-colors"
@@ -77,8 +79,8 @@ function DocViewButton({ path, label }: { path?: string | null; label: string })
                 </div>
               ) : (
                 <img
-                  src={modal.url}
-                  alt={modal.label}
+                  src={url}
+                  alt={label}
                   className="max-w-full max-h-[70vh] object-contain"
                   onError={() => setImgFailed(true)}
                 />
@@ -137,10 +139,11 @@ function DocReviewModal({
   const [newExpiry, setNewExpiry] = useState("");
   const [approveNotes, setApproveNotes] = useState("");
   const [rejectReason, setRejectReason] = useState(REJECT_REASONS[0]);
+  // Must run before the early return — hooks cannot be called conditionally.
+  const { url, loading: urlLoading } = useSignedDocUrl(modal?.submission.fileUrl ?? null);
 
   if (!modal) return null;
 
-  const url = docUrl(modal.submission.fileUrl);
   const submittedAt = new Date(modal.submission.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   return (
@@ -161,7 +164,9 @@ function DocReviewModal({
 
         {/* Document image */}
         <div className="flex-1 overflow-auto flex items-center justify-center p-4 min-h-[200px] max-h-[50vh]">
-          {!url ? (
+          {urlLoading ? (
+            <Loader2 className="w-6 h-6 text-primary animate-spin" />
+          ) : !url ? (
             <p className="text-muted-foreground text-sm">No file URL</p>
           ) : imgFailed ? (
             <div className="text-center space-y-3">
@@ -285,23 +290,6 @@ type EditDriverForm = {
   vehicleClass: string; vehicleYear: string; vehicleMake: string; vehicleModel: string; vehicleColor: string; passengerCapacity: string;
 };
 
-const adminNavItems = [
-  { label: "Overview", href: "/admin", icon: LayoutDashboard },
-  { label: "Bookings", href: "/admin/bookings", icon: Calendar },
-  { label: "Dispatch", href: "/admin/dispatch", icon: Map },
-  { label: "Passengers", href: "/admin/passengers", icon: Users },
-  { label: "Drivers", href: "/admin/drivers", icon: Users },
-  { label: "Fleet", href: "/admin/fleet", icon: Car },
-  { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
-  { label: "Extras & Routes", href: "/admin/extras", icon: Tag },
-  { label: "Promos", href: "/admin/promos", icon: Tag },
-  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
-  { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },
-  { label: "Support", href: "/admin/support", icon: MessageSquare },
-  { label: "Reports", href: "/admin/reports", icon: BarChart },
-  { label: "Payouts", href: "/admin/payouts", icon: Wallet },
-  { label: "Settings", href: "/admin/settings", icon: Settings },
-];
 
 type DriverRow = {
   id: number;

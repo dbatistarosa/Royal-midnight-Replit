@@ -8,6 +8,7 @@ import { Link } from "wouter";
 import { format } from "date-fns";
 import { useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { passengerNavItems } from "@/config/portalNav";
 
 type ReferralInfo = { referralCode: string; referralLink: string; creditAmount: number; referredCount: number; rewardedCount: number };
 
@@ -66,14 +67,6 @@ function ReferralCard({ userId, token }: { userId: number; token: string | null 
   );
 }
 
-const passengerNavItems = [
-  { label: "Dashboard", href: "/passenger/dashboard", icon: LayoutDashboard },
-  { label: "My Rides", href: "/passenger/rides", icon: Car },
-  { label: "Reports", href: "/passenger/reports", icon: BarChart2 },
-  { label: "Saved Addresses", href: "/passenger/addresses", icon: MapPin },
-  { label: "Profile", href: "/passenger/profile", icon: User },
-  { label: "Support", href: "/passenger/support", icon: MessageSquare },
-];
 
 function PassengerDashboardInner() {
   const { user, token } = useAuth();

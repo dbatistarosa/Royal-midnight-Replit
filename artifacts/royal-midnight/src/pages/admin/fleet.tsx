@@ -8,27 +8,12 @@ import {
 } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
+import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { adminNavItems } from "@/config/portalNav";
 
-const adminNavItems = [
-  { label: "Overview", href: "/admin", icon: LayoutDashboard },
-  { label: "Bookings", href: "/admin/bookings", icon: Calendar },
-  { label: "Dispatch", href: "/admin/dispatch", icon: Map },
-  { label: "Passengers", href: "/admin/passengers", icon: Users },
-  { label: "Drivers", href: "/admin/drivers", icon: Users },
-  { label: "Fleet", href: "/admin/fleet", icon: Car },
-  { label: "Pricing", href: "/admin/pricing", icon: DollarSign },
-  { label: "Extras & Routes", href: "/admin/extras", icon: Tag },
-  { label: "Promos", href: "/admin/promos", icon: Tag },
-  { label: "Affiliates", href: "/admin/affiliates", icon: Gift },
-  { label: "Corporate Accounts", href: "/admin/corporate-accounts", icon: Building2 },
-  { label: "Support", href: "/admin/support", icon: MessageSquare },
-  { label: "Reports", href: "/admin/reports", icon: BarChart },
-  { label: "Payouts", href: "/admin/payouts", icon: Wallet },
-  { label: "Settings", href: "/admin/settings", icon: Settings },
-];
 
 type Vehicle = {
   id: number;
@@ -107,11 +92,6 @@ type NewSubmission = {
   complianceHold: boolean;
 };
 
-function docUrl(path: string) {
-  const stripped = path.replace(/^\/objects\//, "");
-  return path.startsWith("http") ? path : `${API_BASE}/storage/objects/${stripped}`;
-}
-
 export default function AdminFleet() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -137,6 +117,10 @@ export default function AdminFleet() {
   const [rejectReason, setRejectReason] = useState(REJECT_REASONS[0]);
   const [reviewSaving, setReviewSaving] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
+  // Compliance documents live in the private bucket — resolve a signed,
+  // short-lived URL rather than linking the raw object path (CN-003), and never
+  // follow a driver-supplied absolute URL (CN-041).
+  const { url: reviewDocUrl, loading: reviewDocLoading } = useSignedDocUrl(reviewModal?.fileUrl ?? null);
 
   // Vehicle catalog
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -820,16 +804,20 @@ export default function AdminFleet() {
 
             {/* Inline image preview */}
             <div className="flex-1 overflow-auto flex items-center justify-center p-4 min-h-[200px] max-h-[50vh]">
-              {imgFailed ? (
+              {reviewDocLoading ? (
+                <Loader2 className="w-6 h-6 text-primary animate-spin" />
+              ) : !reviewDocUrl ? (
+                <p className="text-gray-400 text-sm">This document could not be loaded.</p>
+              ) : imgFailed ? (
                 <div className="text-center space-y-3">
                   <FileText className="w-10 h-10 text-gray-600 mx-auto" />
-                  <a href={docUrl(reviewModal.fileUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-black text-xs uppercase tracking-widest hover:bg-primary/90 transition-colors">
+                  <a href={reviewDocUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-black text-xs uppercase tracking-widest hover:bg-primary/90 transition-colors">
                     <ExternalLink className="w-3.5 h-3.5" /> Open Document
                   </a>
                 </div>
               ) : (
                 <img
-                  src={docUrl(reviewModal.fileUrl)}
+                  src={reviewDocUrl}
                   alt={reviewModal.docType}
                   className="max-w-full max-h-full object-contain"
                   onError={() => setImgFailed(true)}
