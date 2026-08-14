@@ -19,7 +19,28 @@ function with `verify_jwt: true` and no check of its own is a public endpoint.
 | `send-message-via-sent` | true | no | none | Dormant |
 | `sent-dm-webhook` | false | no | Sent.dm (external) | OK |
 
-## CRITICAL — `check-reservation-status`
+## CLOSED 2026-08-14 — `check-reservation-status`
+
+Fixed and verified in production. The secret was seeded into
+`settings.edge_function_invoke_secret`, the pg_cron job was rewritten to look it
+up at call time and send it as a Bearer token, and version 3 of the function was
+deployed with the constant-time gate.
+
+Verified after deploy (03:03:34 UTC):
+
+| Caller | Before | After |
+|---|---|---|
+| anon key | `200`, function executed | `401` |
+| no header | `200` | `401` |
+| wrong secret | — | `401` |
+| pg_cron | `200` | `200`, zero failures |
+
+Deployed with `verify_jwt = false` on purpose — see `supabase/config.toml`.
+Setting it to true would break the cron without adding protection.
+
+The original finding follows, for the record.
+
+## CRITICAL (now fixed) — `check-reservation-status`
 
 Runs with `service_role`, so RLS does not apply. Reads every in-progress hourly
 booking with passenger names and emails, **writes `extra_charge` onto live

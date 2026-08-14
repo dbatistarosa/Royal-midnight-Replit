@@ -1,11 +1,23 @@
 # Supabase project config, committed so Edge Function settings are schema-as-code
 # instead of dashboard state nobody can review (CN-008).
 
-project_id = "royal-midnight"
+project_id = "qpqmefenkleyzwnlleih"
 
 [functions.check-reservation-status]
-# Defence in depth only. verify_jwt rejects callers with no JWT at all, but it
-# ACCEPTS the project's anon key, which is public by design — so it is not an
-# authorization control on its own. The real gate is the FUNCTION_INVOKE_SECRET
-# check at the top of the handler.
-verify_jwt = true
+# Deliberately false. Two reasons, and the second one is why this must not be
+# "hardened" to true by a future reader:
+#
+#  1. It would not add protection. Supabase accepts the project's anon key as a
+#     valid JWT, and that key is public by design — it ships in the browser
+#     bundle. verify_jwt = true is not an authorization control.
+#
+#  2. It would break the caller. A pg_cron job (jobid 1, every minute)
+#     authenticates with the shared secret in settings.edge_function_invoke_secret,
+#     sent as `Authorization: Bearer <secret>`. That is not a JWT, so Supabase's
+#     gateway would reject it with 401 before the function ever runs, and hourly
+#     overage billing would silently stop.
+#
+# The real gate is the constant-time secret comparison at the top of the handler.
+# Verified in production: anon key / no header / wrong secret all get 401, while
+# the cron gets 200.
+verify_jwt = false
