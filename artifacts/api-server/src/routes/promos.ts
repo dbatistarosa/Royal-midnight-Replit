@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, promoCodesTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
+import { promoLimiter } from "../lib/rateLimit.js";
 import {
   ListPromosResponse,
   CreatePromoBody,
@@ -105,7 +106,8 @@ export async function evaluatePromoCode(
   };
 }
 
-router.post("/promos/validate", async (req, res): Promise<void> => {
+// Brute-forcing short promo codes costs the attacker nothing without this.
+router.post("/promos/validate", promoLimiter(), async (req, res): Promise<void> => {
   const parsed = ValidatePromoBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

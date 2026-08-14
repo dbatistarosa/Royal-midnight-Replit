@@ -3,6 +3,7 @@ import { db, settingsTable, pricingRulesTable, geoZonesTable, usersTable, corpor
 import { eq, and } from "drizzle-orm";
 import { GetQuoteBody, GetQuoteResponse } from "@workspace/api-zod";
 import { optionalAuth } from "../middleware/auth.js";
+import { quoteLimiter } from "../lib/rateLimit.js";
 import {
   isAirportTrip,
   resolveAddress,
@@ -534,7 +535,9 @@ export function readQuoteExtensions(rawBody: unknown): {
   };
 }
 
-router.post("/quote", optionalAuth, async (req, res): Promise<void> => {
+// The most expensive public endpoint: geocoding plus a Directions call per
+// request, both billed to our Mapbox account.
+router.post("/quote", quoteLimiter(), optionalAuth, async (req, res): Promise<void> => {
   const parsed = GetQuoteBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json(parsed.error.errors);

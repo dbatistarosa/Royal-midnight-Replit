@@ -9,6 +9,7 @@ import { requireAdmin, SESSION_COOKIE } from "../middleware/auth.js";
 import { hashPassword, verifyPassword, isLegacyHash } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
+import { storeOtp, verifyOtp } from "../lib/otpStore.js";
 import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
 
 const router: IRouter = Router();
@@ -57,25 +58,6 @@ function setSessionCookie(res: import("express").Response, token: string): void 
     path: "/",
   });
 }
-
-// In-memory OTP store (production would use Redis)
-// NOTE: on serverless each instance keeps its own Map, so a verify can land on
-// an instance that never saw the send. Moving this to the existing otp_codes
-// table is tracked as CN-035 and should happen before launch.
-const otpStore = new Map<string, { otp: string; expiresAt: number; attempts: number }>();
-
-/** Maximum wrong guesses accepted for a single issued code. The IP-keyed
- *  rate limiter alone does not stop a distributed guess against one phone
- *  number, so the code itself is burned after a few failures. */
-const MAX_OTP_ATTEMPTS = 5;
-
-// Purge expired OTPs every 5 minutes to prevent memory leak
-setInterval(() => {
-  const now = Date.now();
-  for (const [phone, data] of otpStore.entries()) {
-    if (now > data.expiresAt) otpStore.delete(phone);
-  }
-}, 5 * 60 * 1000);
 
 router.post("/auth/register", credentialLimiter, async (req, res): Promise<void> => {
   const parsed = RegisterBody.safeParse(req.body);
@@ -243,7 +225,9 @@ router.post("/auth/send-otp", otpLimiter, async (req, res): Promise<void> => {
   // codes to their own phone predict the code issued to anyone else — including
   // an admin (CN-011). crypto.randomInt is uniform and unpredictable.
   const otp = String(crypto.randomInt(100000, 1000000));
-  otpStore.set(phone, { otp, expiresAt: Date.now() + 10 * 60 * 1000, attempts: 0 });
+  // Persisted (hashed) in otp_codes rather than a per-instance Map — see
+  // lib/otpStore.ts for why the Map was both a security and a functional bug.
+  await storeOtp(phone, otp);
 
   // Log only the last 4 digits — the full number is PII and this line is not
   // covered by the redaction list (CN-050).
@@ -260,36 +244,20 @@ router.post("/auth/verify-otp", otpLimiter, async (req, res): Promise<void> => {
   }
 
   const { phone, otp } = parsed.data;
-  const stored = otpStore.get(phone);
 
-  if (!stored || Date.now() > stored.expiresAt) {
-    otpStore.delete(phone);
-    res.status(400).json({ error: "Invalid or expired OTP" });
-    return;
-  }
-
-  // Burn the code after too many wrong guesses, so a single issued code cannot
-  // be ground down by requests spread across many IPs.
-  stored.attempts += 1;
-  if (stored.attempts > MAX_OTP_ATTEMPTS) {
-    otpStore.delete(phone);
+  // Burns the code after too many wrong guesses, so a single issued code cannot
+  // be ground down by requests spread across many IPs, and compares in constant
+  // time — a plain !== leaks the shared prefix length through timing.
+  const verdict = await verifyOtp(phone, String(otp));
+  if (verdict === "too_many_attempts") {
     req.log.warn({ phone: `••••${phone.slice(-4)}` }, "otp_attempts_exceeded");
+  }
+  if (verdict !== "ok") {
+    // One message for wrong, expired and burned alike — distinguishing them
+    // tells an attacker whether a code is still live.
     res.status(400).json({ error: "Invalid or expired OTP" });
     return;
   }
-
-  // Constant-time compare: a plain !== leaks the shared prefix length through
-  // timing, which shortens a brute force.
-  const provided = Buffer.from(String(otp));
-  const expected = Buffer.from(stored.otp);
-  const matches =
-    provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
-  if (!matches) {
-    res.status(400).json({ error: "Invalid or expired OTP" });
-    return;
-  }
-
-  otpStore.delete(phone);
 
   let [user] = await db.select().from(usersTable).where(eq(usersTable.phone, phone));
 

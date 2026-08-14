@@ -7,6 +7,7 @@ import path from "path";
 import { existsSync } from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { globalLimiter } from "./lib/rateLimit";
 
 const app: Express = express();
 
@@ -93,6 +94,11 @@ app.use(express.urlencoded({ extended: true }));
 // Reads the HttpOnly session cookie the web app authenticates with (CN-014).
 // The package was already a dependency but had never been mounted.
 app.use(cookieParser());
+
+// Baseline throttle for the whole API. Rate limiting previously covered only
+// /auth/*, leaving the Mapbox-backed endpoints — which cost real money per
+// call — completely open. Mounted before the router so it also covers 404s.
+app.use("/api", globalLimiter());
 
 app.use("/api", router);
 

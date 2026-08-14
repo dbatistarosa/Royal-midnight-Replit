@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { mapsLimiter } from "../lib/rateLimit.js";
 
 const router: IRouter = Router();
 
@@ -29,7 +30,9 @@ const ALL_FLORIDA_AIRPORTS: Array<{ code: string; name: string; address: string;
   { code: "SFB", name: "Orlando Sanford International Airport", address: "1200 Red Cleveland Blvd, Sanford, FL 32773", lat: 28.7776, lng: -81.2375 },
 ];
 
-router.get("/autocomplete", async (req, res): Promise<void> => {
+// Every call geocodes with our Mapbox token, so an unthrottled caller runs up
+// the bill and can exhaust the quota real customers depend on.
+router.get("/autocomplete", mapsLimiter(), async (req, res): Promise<void> => {
   const rawQ = (req.query["q"] as string || "").trim();
   if (rawQ.length > 200) {
     res.status(400).json({ error: "Query parameter too long (max 200 characters)" });
