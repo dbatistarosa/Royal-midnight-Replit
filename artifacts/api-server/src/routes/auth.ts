@@ -10,6 +10,7 @@ import { hashPassword, verifyPassword, isLegacyHash } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
 import { storeOtp, verifyOtp } from "../lib/otpStore.js";
+import { validatePassword, MIN_PASSWORD_LENGTH } from "../lib/passwordPolicy.js";
 import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
 
 const router: IRouter = Router();
@@ -63,6 +64,12 @@ router.post("/auth/register", credentialLimiter, async (req, res): Promise<void>
   const parsed = RegisterBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const pwError = validatePassword(parsed.data.password);
+  if (pwError) {
+    res.status(400).json({ error: pwError });
     return;
   }
 
@@ -298,7 +305,7 @@ const DriverRegisterBody = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   phone: z.string().min(7),
-  password: z.string().min(6),
+  password: z.string().min(MIN_PASSWORD_LENGTH),
   serviceArea: z.string().optional(),
   vehicleYear: z.string().optional(),
   vehicleMake: z.string().optional(),
@@ -324,6 +331,12 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
   const parsed = DriverRegisterBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const pwError = validatePassword(parsed.data.password);
+  if (pwError) {
+    res.status(400).json({ error: pwError });
     return;
   }
 
@@ -387,7 +400,7 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
 const CreateAdminBody = z.object({
   name: z.string().min(1),
   email: z.string().email(),
-  password: z.string().min(8),
+  password: z.string().min(MIN_PASSWORD_LENGTH),
   phone: z.string().nullish(),
 });
 
@@ -395,6 +408,12 @@ router.post("/auth/admin-register", requireAdmin, async (req, res): Promise<void
   const parsed = CreateAdminBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const pwError = validatePassword(parsed.data.password);
+  if (pwError) {
+    res.status(400).json({ error: pwError });
     return;
   }
 
@@ -434,7 +453,7 @@ const CreateCorporateBody = z.object({
   companyName: z.string().min(1),
   contactName: z.string().min(1),
   email: z.string().email(),
-  password: z.string().min(8),
+  password: z.string().min(MIN_PASSWORD_LENGTH),
   phone: z.string().nullish(),
   // Billing terms for the new company account — all optional, sensible defaults.
   billingEmail: z.string().email().nullish(),
@@ -446,6 +465,12 @@ router.post("/auth/corporate-register", requireAdmin, async (req, res): Promise<
   const parsed = CreateCorporateBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const pwError = validatePassword(parsed.data.password);
+  if (pwError) {
+    res.status(400).json({ error: pwError });
     return;
   }
 
@@ -539,8 +564,13 @@ router.post("/auth/reset-password", credentialLimiter, async (req, res): Promise
   const token = (req.body?.token as string | undefined)?.trim();
   const password = (req.body?.password as string | undefined);
 
-  if (!token || !password || password.length < 6) {
-    res.status(400).json({ error: "token and password (min 6 chars) are required" });
+  if (!token || typeof password !== "string") {
+    res.status(400).json({ error: "token and password are required" });
+    return;
+  }
+  const pwError = validatePassword(password);
+  if (pwError) {
+    res.status(400).json({ error: pwError });
     return;
   }
 

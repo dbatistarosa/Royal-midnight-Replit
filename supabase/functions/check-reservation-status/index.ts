@@ -53,6 +53,23 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * passenger_name is set by whoever creates the booking, and POST /bookings
+ * accepts anonymous callers — so a name like `<a href="https://evil.example">
+ * Click here</a>` would render as a live link inside an email sent from the
+ * royalmidnight.com domain, spending its sending reputation on someone else's
+ * phishing. api-server/src/lib/mailer.ts escapes all 81 of its interpolations;
+ * this function was written separately and skipped the pattern.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function sendOverageEmail(to: string, name: string, extraMinutes: number, extraCharge: number) {
   if (!RESEND_API_KEY) {
     console.error("[check-reservation-status] RESEND_API_KEY not configured — skipping email");
@@ -61,7 +78,7 @@ async function sendOverageEmail(to: string, name: string, extraMinutes: number, 
   const html = `
     <div style="font-family:Inter,sans-serif;color:#111;padding:24px">
       <h2 style="color:#f59e0b;font-size:18px;margin:0 0 8px">⏱️ Your trip has run past its scheduled time</h2>
-      <p>Hi ${name.split(" ")[0]}, your hourly service has continued ${extraMinutes} minute${extraMinutes === 1 ? "" : "s"} past the time included in your booking.</p>
+      <p>Hi ${escapeHtml(String(name ?? "").split(" ")[0] ?? "")}, your hourly service has continued ${extraMinutes} minute${extraMinutes === 1 ? "" : "s"} past the time included in your booking.</p>
       <p>Estimated extra charge so far: <strong>$${extraCharge.toFixed(2)}</strong></p>
       <p style="color:#888;font-size:12px;margin-top:16px">This will be added to your final invoice when the trip ends.</p>
     </div>`;

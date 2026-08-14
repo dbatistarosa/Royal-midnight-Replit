@@ -15,6 +15,7 @@ import { sendBookingConfirmationSms } from "../lib/sms.js";
 import { sendNewRideOfferPush } from "../lib/push.js";
 import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
 import { encryptField, safeDecryptField } from "../lib/encrypt.js";
+import { sendStripeError } from "../lib/stripeError.js";
 
 const router: IRouter = Router();
 
@@ -272,7 +273,7 @@ router.post("/payments/create-intent", optionalAuth, async (req, res): Promise<v
     res.json({ clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id });
   } catch (err: any) {
     // Surface the real Stripe error message so the frontend can show it to the user.
-    res.status(500).json({ error: err.message ?? "Stripe error — please try again." });
+    sendStripeError(req, res, err, "Stripe error — please try again.");
   }
 });
 
@@ -317,7 +318,7 @@ router.get("/payments/find-booking", async (req, res): Promise<void> => {
     res.set("Cache-Control", "no-store");
     res.json({ bookingId: bId, trackingToken });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
@@ -340,7 +341,7 @@ router.get("/payments/intent/:piId/client-secret", requireAdmin, async (req, res
     if (isNotFound) {
       res.status(404).json({ error: "PaymentIntent not found in Stripe" });
     } else {
-      res.status(500).json({ error: err.message });
+      sendStripeError(req, res, err);
     }
   }
 });
@@ -429,7 +430,7 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
       res.status(400).json({ error: "Payment not completed", status: intent.status });
     }
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
@@ -490,13 +491,13 @@ router.post("/admin/payments/check/:bookingId", requireAdmin, async (req, res): 
     const invoiceStatuses = invoiceSearch.data.map(inv => inv.status).join(", ") || "none";
     res.json({ confirmed: false, message: `No successful payment found. PaymentIntents: ${intentStatuses}. Invoices: ${invoiceStatuses}.` });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
 // ─── Admin: Stripe webhook management ───────────────────────────────────────
 
-router.get("/admin/stripe/webhook-status", requireAdmin, async (_req, res): Promise<void> => {
+router.get("/admin/stripe/webhook-status", requireAdmin, async (req, res): Promise<void> => {
   const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
   const webhookSecretInEnv = !!process.env.STRIPE_WEBHOOK_SECRET;
   const mailerStatus = getMailerStatus();
@@ -545,11 +546,11 @@ router.get("/admin/stripe/webhook-status", requireAdmin, async (_req, res): Prom
       mailer: mailerStatus,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
-router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): Promise<void> => {
+router.post("/admin/stripe/register-webhook", requireAdmin, async (req, res): Promise<void> => {
   if (!process.env.STRIPE_SECRET_KEY) {
     res.status(503).json({ error: "STRIPE_SECRET_KEY is not configured" });
     return;
@@ -628,12 +629,12 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
       message: "Webhook registered successfully. The signing secret has been saved and is active. Optionally set it as STRIPE_WEBHOOK_SECRET in your environment for extra security.",
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
 // ─── Admin: ensure existing webhook has required events subscribed
-router.post("/admin/stripe/ensure-webhook-events", requireAdmin, async (_req, res): Promise<void> => {
+router.post("/admin/stripe/ensure-webhook-events", requireAdmin, async (req, res): Promise<void> => {
   if (!process.env.STRIPE_SECRET_KEY) {
     res.status(503).json({ error: "STRIPE_SECRET_KEY is not configured" });
     return;
@@ -668,7 +669,7 @@ router.post("/admin/stripe/ensure-webhook-events", requireAdmin, async (_req, re
     const updated = await stripe.webhookEndpoints.update(ours.id, { enabled_events: mergedEvents });
     res.json({ updated: true, webhookId: updated.id, enabledEvents: updated.enabled_events, addedEvents: missingEvents, message: "Webhook events updated to include all required events." });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
@@ -700,7 +701,7 @@ router.post("/admin/payments/cancel-auth/:bookingId", requireAdmin, async (req, 
     console.log(`[payments] Admin cancelled PI authorization for booking #${bId} (PI: ${booking.stripePaymentIntentId})`);
     res.json({ success: true, message: "Authorization cancelled and card hold released." });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
@@ -815,7 +816,7 @@ router.post("/payments/create-invoice/:bookingId", requireAdmin, async (req, res
 
     res.json({ success: true, invoiceId: finalised.id, invoiceUrl });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
@@ -1048,7 +1049,7 @@ router.get("/payments/saved-cards", requireAuth, async (req, res): Promise<void>
       })),
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
@@ -1087,7 +1088,7 @@ router.delete("/payments/saved-cards/:pmId", requireAuth, async (req, res): Prom
     }
     res.json({ success: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 
@@ -1161,7 +1162,7 @@ router.post("/payments/tip/:bookingId", requireAuth, async (req, res): Promise<v
 
     res.json({ success: true, tipAmount, paymentIntentId: intent.id });
   } catch (err: any) {
-    res.status(500).json({ error: err.message ?? "Tip charge failed — please try again." });
+    sendStripeError(req, res, err, "Tip charge failed — please try again.");
   }
 });
 
@@ -1198,7 +1199,7 @@ router.post("/payments/tip-checkout/:bookingId", requireAuth, async (req, res): 
     });
     res.json({ clientSecret: intent.client_secret, publishableKey });
   } catch (err: any) {
-    res.status(500).json({ error: err.message ?? "Could not initiate tip payment." });
+    sendStripeError(req, res, err, "Could not initiate tip payment.");
   }
 });
 
@@ -1266,7 +1267,7 @@ router.post("/payments/tip-confirm/:bookingId", requireAuth, async (req, res): P
         .catch((e: any) => console.warn("[payments] tip-confirm: could not save PM:", e?.message));
     }
   } catch (err: any) {
-    res.status(500).json({ error: err.message ?? "Could not confirm tip payment." });
+    sendStripeError(req, res, err, "Could not confirm tip payment.");
   }
 });
 
@@ -1331,7 +1332,7 @@ router.post("/payments/save-payment-method", requireAuth, async (req, res): Prom
       },
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    sendStripeError(req, res, err);
   }
 });
 

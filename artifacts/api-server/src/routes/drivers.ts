@@ -872,8 +872,13 @@ router.post("/drivers/:id/documents", requireAuth, async (req, res): Promise<voi
     res.status(400).json({ error: `docType must be one of: ${validTypes.join(", ")}` });
     return;
   }
-  if (!fileUrl) {
-    res.status(400).json({ error: "fileUrl is required" });
+  // Must be a path inside our own object storage. Anything else — an absolute
+  // URL to a driver-controlled host, or a javascript: value — ends up loaded by
+  // the admin's browser on the compliance review screen, which is both a
+  // tracking beacon for admin activity and a phishing link inside a trusted UI.
+  // Same rule PATCH /drivers/:id/contact already applies to profilePicture.
+  if (typeof fileUrl !== "string" || !/^\/objects\/[A-Za-z0-9/_.-]+$/.test(fileUrl) || fileUrl.includes("..")) {
+    res.status(400).json({ error: "fileUrl must be an uploaded object path" });
     return;
   }
 

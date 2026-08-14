@@ -4,21 +4,25 @@ import { requireAdmin } from "../middleware/auth.js";
 
 const router: IRouter = Router();
 
-router.get("/admin/github/user", requireAdmin, async (_req, res): Promise<void> => {
+router.get("/admin/github/user", requireAdmin, async (req, res): Promise<void> => {
   try {
     const user = await getAuthenticatedUser();
     res.json(user);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    // GitHub client errors carry API paths and token scope detail.
+    req.log?.error({ err }, "github_request_failed");
+    res.status(500).json({ error: "GitHub request failed." });
   }
 });
 
-router.get("/admin/github/repos", requireAdmin, async (_req, res): Promise<void> => {
+router.get("/admin/github/repos", requireAdmin, async (req, res): Promise<void> => {
   try {
     const repos = await listUserRepos();
     res.json(repos);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    // GitHub client errors carry API paths and token scope detail.
+    req.log?.error({ err }, "github_request_failed");
+    res.status(500).json({ error: "GitHub request failed." });
   }
 });
 
@@ -66,7 +70,9 @@ Built with Royal Midnight Platform.
 
     res.json({ created: true, repo, message: `Repository created at ${repo.htmlUrl}` });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    // GitHub client errors carry API paths and token scope detail.
+    req.log?.error({ err }, "github_request_failed");
+    res.status(500).json({ error: "GitHub request failed." });
   }
 });
 
