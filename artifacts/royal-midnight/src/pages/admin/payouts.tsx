@@ -26,7 +26,9 @@ type DriverPayout = {
   driverNet: number;
   bankName: string | null;
   routingNumber: string | null;
-  accountNumber: string | null;
+  /** Only the last four digits ever leave the server — the full account number
+   *  is encrypted at rest and this screen never needed it. */
+  accountLast4: string | null;
   legalName: string | null;
   payoutEmail: string;
   hasBankDetails: boolean;
@@ -114,7 +116,9 @@ export default function AdminPayouts() {
       legalName: driver.legalName ?? "",
       bankName: driver.bankName ?? "",
       routingNumber: driver.routingNumber ?? "",
-      accountNumber: driver.accountNumber ?? "",
+      // Left blank on purpose. The server no longer returns the account number,
+      // and an empty field is treated as "leave unchanged" rather than "clear".
+      accountNumber: "",
       payoutEmail: driver.payoutEmail ?? driver.driverEmail,
     });
   };
@@ -285,9 +289,9 @@ export default function AdminPayouts() {
                               Routing: {driver.routingNumber}
                             </div>
                           )}
-                          {driver.accountNumber && (
+                          {driver.accountLast4 && (
                             <div className="text-xs text-muted-foreground font-mono">
-                              Acct: ****{driver.accountNumber.slice(-4)}
+                              Acct: ****{driver.accountLast4}
                             </div>
                           )}
                         </div>
@@ -384,7 +388,7 @@ export default function AdminPayouts() {
                   className="bg-white/5 border-white/10 text-white rounded-none font-mono"
                   value={bankForm.accountNumber}
                   onChange={e => setBankForm(f => ({ ...f, accountNumber: e.target.value.replace(/\D/g, "") }))}
-                  placeholder="Account number"
+                  placeholder={editDriver?.accountLast4 ? `On file — ends ${editDriver.accountLast4}. Leave blank to keep.` : "Account number"}
                 />
               </div>
             </div>

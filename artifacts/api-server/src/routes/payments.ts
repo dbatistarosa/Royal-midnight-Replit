@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import crypto from "node:crypto";
 import Stripe from "stripe";
 import { db } from "@workspace/db";
 import { bookingsTable as bookings, driversTable, settingsTable, usersTable } from "@workspace/db/schema";
@@ -12,9 +13,22 @@ import {
 } from "../lib/mailer.js";
 import { sendBookingConfirmationSms } from "../lib/sms.js";
 import { sendNewRideOfferPush } from "../lib/push.js";
-import { requireAdmin, requireAuth } from "../middleware/auth.js";
+import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
+import { encryptField, safeDecryptField } from "../lib/encrypt.js";
 
 const router: IRouter = Router();
+
+/** Constant-time comparison of a caller-supplied tracking token against the one
+ *  stored on the booking. */
+function matchesTrackingToken(stored: string | null | undefined, provided: unknown): boolean {
+  if (typeof stored !== "string" || !stored) return false;
+  if (typeof provided !== "string" || provided.length !== stored.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(provided, "utf8"), Buffer.from(stored, "utf8"));
+  } catch {
+    return false;
+  }
+}
 
 const APP_URL = process.env.APP_URL ?? "https://royalmidnight.com";
 const WEBHOOK_URL = `${APP_URL}/api/webhook/stripe`;
@@ -28,13 +42,15 @@ function getStripe(): Stripe {
 async function getWebhookSecret(): Promise<string | null> {
   // Prefer explicit env var (most secure)
   if (process.env.STRIPE_WEBHOOK_SECRET) return process.env.STRIPE_WEBHOOK_SECRET;
-  // Fall back to DB-persisted secret (set during auto-registration)
+  // Fall back to DB-persisted secret (set during auto-registration). Stored
+  // encrypted since it authenticates Stripe's callbacks; safeDecryptField also
+  // passes through rows written before that change.
   const [row] = await db
     .select({ value: settingsTable.value })
     .from(settingsTable)
     .where(eq(settingsTable.key, "stripe_webhook_secret"))
     .limit(1);
-  return row?.value ?? null;
+  return safeDecryptField(row?.value) ?? null;
 }
 
 async function getCommissionPct(): Promise<number> {
@@ -117,12 +133,12 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
   res.json({ publishableKey });
 });
 
-router.post("/payments/create-intent", async (req, res): Promise<void> => {
+router.post("/payments/create-intent", optionalAuth, async (req, res): Promise<void> => {
   // A PaymentIntent is always tied to a booking, and the amount always comes
   // from that booking's stored price — never from the request body (CN-002).
   // Accepting a body-supplied amount let a caller pay an arbitrary sum and then
   // apply the resulting PI to someone else's reservation.
-  const { bookingId } = req.body as { bookingId?: number };
+  const { bookingId, trackingToken } = req.body as { bookingId?: number; trackingToken?: string };
   const bId = Number(bookingId);
   if (!Number.isFinite(bId) || bId <= 0) {
     res.status(400).json({ error: "bookingId is required" });
@@ -133,6 +149,43 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
     const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
     if (!booking) {
       res.status(404).json({ error: "Booking not found" });
+      return;
+    }
+
+    // Authorisation. Booking without an account is a legitimate flow, so this
+    // cannot simply require a session — but it had no check at all, and booking
+    // ids are serial. Anyone could walk them to learn which exist, mint Stripe
+    // customers and PaymentIntents on this account without limit, and (the part
+    // that actually costs money) repoint an already-authorised booking's
+    // stripePaymentIntentId at a PI of their own. "Release authorisation" in
+    // the admin panel would then cancel the attacker's PI, report success, and
+    // leave the real hold sitting on the customer's card.
+    //
+    // The trackingToken issued at booking time is the same bearer credential
+    // GET /bookings/track/:token already trusts for exactly this situation.
+    const caller = req.currentUser;
+    const isAdmin = caller?.role === "admin";
+    let authorised = isAdmin
+      || (caller != null && booking.userId != null && booking.userId === caller.userId)
+      || matchesTrackingToken(booking.trackingToken, trackingToken);
+
+    // A booking created by an admin is linked to the passenger by email only.
+    if (!authorised && caller != null && booking.passengerEmail) {
+      const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
+      authorised = !!callerUser?.email && callerUser.email.toLowerCase() === booking.passengerEmail.toLowerCase();
+    }
+
+    if (!authorised) {
+      req.log.warn({ ip: req.ip, path: req.path, userId: caller?.userId ?? null, bookingId: bId }, "authorization_failed");
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+
+    // Never repoint the PI of a booking that already moved past payment. Admin
+    // is exempt: the "Charge Card" path deliberately mints a replacement, and
+    // only after confirming with Stripe that the previous PI is dead.
+    if (!isAdmin && booking.status !== "awaiting_payment") {
+      res.status(409).json({ error: "This booking is not awaiting payment." });
       return;
     }
 
@@ -201,10 +254,20 @@ router.post("/payments/create-intent", async (req, res): Promise<void> => {
     // Persist the PI ID on the booking immediately so that:
     //  1. "Sync Payment" can locate it even before confirm is called
     //  2. "Charge Card" reuses the same PI on retry instead of creating duplicates
-    db.update(bookings)
-      .set({ stripePaymentIntentId: paymentIntent.id, updatedAt: new Date() })
-      .where(eq(bookings.id, bId))
-      .catch((err: any) => console.warn("[payments] could not pre-save PI ID:", err?.message));
+    // The status is repeated in the WHERE clause so a booking that got paid
+    // between the read above and this write keeps pointing at the PI that
+    // actually holds the money.
+    try {
+      await db.update(bookings)
+        .set({ stripePaymentIntentId: paymentIntent.id, updatedAt: new Date() })
+        .where(isAdmin
+          ? eq(bookings.id, bId)
+          : and(eq(bookings.id, bId), eq(bookings.status, "awaiting_payment")));
+    } catch (err: any) {
+      // Non-fatal: the PI carries bookingId in its metadata, so the webhook can
+      // still reconcile. Payment must not be blocked on a bookkeeping write.
+      req.log.error({ err, bookingId: bId }, "could not pre-save PaymentIntent id");
+    }
 
     res.json({ clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id });
   } catch (err: any) {
@@ -544,12 +607,17 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (_req, res): P
       description: "Royal Midnight payment confirmation webhook",
     });
 
-    // Persist signing secret to DB so webhook handler works immediately (even before env var is set)
+    // Persist signing secret to DB so webhook handler works immediately (even
+    // before env var is set). Encrypted at rest: the settings table is read
+    // whole by the admin panel, and this value is what authenticates Stripe's
+    // callbacks. GET /admin/settings redacts it; this stops it being readable
+    // from a database dump too.
     if (webhook.secret) {
+      const stored = encryptField(webhook.secret);
       await db
         .insert(settingsTable)
-        .values({ key: "stripe_webhook_secret", value: webhook.secret })
-        .onConflictDoUpdate({ target: settingsTable.key, set: { value: webhook.secret } });
+        .values({ key: "stripe_webhook_secret", value: stored })
+        .onConflictDoUpdate({ target: settingsTable.key, set: { value: stored } });
     }
 
     res.json({

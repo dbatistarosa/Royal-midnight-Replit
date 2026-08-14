@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { sql, desc, eq, and, isNull, or, gt, inArray } from "drizzle-orm";
 import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable, complianceDocumentsTable, corporateAccountsTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
+import { encryptField, safeDecryptField, lastN } from "../lib/encrypt.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
 import {
@@ -354,8 +355,12 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
       tipsTotal,
       driverNet,
       bankName: d.payoutBankName ?? null,
-      routingNumber: d.payoutRoutingNumber ?? null,
-      accountNumber: d.payoutAccountNumber ?? null,
+      // The routing number identifies a bank, not an account, and the payout
+      // emails already carry it in full. The account number does not leave the
+      // server — the UI has only ever shown its last four, and the emails mask
+      // it the same way. Returning it whole was the odd one out.
+      routingNumber: safeDecryptField(d.payoutRoutingNumber),
+      accountLast4: lastN(d.payoutAccountNumber, 4),
       legalName: d.payoutLegalName ?? null,
       payoutEmail: d.payoutEmail ?? d.email,
       hasBankDetails: !!(d.payoutBankName && d.payoutRoutingNumber && d.payoutAccountNumber),
@@ -458,26 +463,54 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
   res.json({ ok: true, emailsSent, driverCount: drivers.length, weekLabel });
 });
 
-// PATCH /admin/drivers/:id/bank — update driver bank details
+/**
+ * PATCH /admin/drivers/:id/bank — update driver bank details.
+ *
+ * Two things were wrong here. It wrote routing and account numbers straight to
+ * the column while the driver self-service path (PATCH /drivers/:id/payout)
+ * runs the same fields through encryptField(), so payout_account_number held a
+ * mix of AES-GCM values and cleartext depending on who typed them. And it set
+ * every field it was not given to null, so editing only the bank name silently
+ * erased the account number.
+ */
 router.patch("/admin/drivers/:id/bank", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid driver ID" }); return; }
   const { bankName, routingNumber, accountNumber, legalName, payoutEmail } = req.body as {
     bankName?: string; routingNumber?: string; accountNumber?: string; legalName?: string; payoutEmail?: string;
   };
+
+  const updates: Partial<typeof driversTable.$inferInsert> = {};
+  if (bankName !== undefined)    updates.payoutBankName  = bankName.trim() || null;
+  if (legalName !== undefined)   updates.payoutLegalName = legalName.trim() || null;
+  if (payoutEmail !== undefined) updates.payoutEmail     = payoutEmail.trim() || null;
+
+  // The secrets are never blanked by omission or by an empty string: the edit
+  // form no longer pre-fills them, so "unchanged" and "cleared" would otherwise
+  // look identical. Clearing them is not something this screen needs to do.
+  if (routingNumber) {
+    const digits = routingNumber.replace(/\D/g, "");
+    if (digits.length !== 9) { res.status(400).json({ error: "Routing number must be 9 digits" }); return; }
+    updates.payoutRoutingNumber = encryptField(digits);
+  }
+  if (accountNumber) {
+    const digits = accountNumber.replace(/\D/g, "");
+    if (digits.length < 4) { res.status(400).json({ error: "Account number is too short" }); return; }
+    updates.payoutAccountNumber = encryptField(digits);
+  }
+
+  if (Object.keys(updates).length === 0) {
+    res.status(400).json({ error: "No valid fields to update" });
+    return;
+  }
+
   const [updated] = await db
     .update(driversTable)
-    .set({
-      payoutBankName: bankName ?? null,
-      payoutRoutingNumber: routingNumber ?? null,
-      payoutAccountNumber: accountNumber ?? null,
-      payoutLegalName: legalName ?? null,
-      payoutEmail: payoutEmail ?? null,
-    })
+    .set(updates)
     .where(eq(driversTable.id, id))
-    .returning({ id: driversTable.id });
+    .returning({ id: driversTable.id, payoutAccountNumber: driversTable.payoutAccountNumber });
   if (!updated) { res.status(404).json({ error: "Driver not found" }); return; }
-  res.json({ ok: true, driverId: id });
+  res.json({ ok: true, driverId: id, accountLast4: lastN(updated.payoutAccountNumber, 4) });
 });
 
 // ─── Vehicle Catalog ────────────────────────────────────────────────────────

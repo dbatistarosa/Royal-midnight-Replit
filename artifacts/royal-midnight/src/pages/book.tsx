@@ -791,7 +791,12 @@ export default function Book() {
           "Content-Type": "application/json",
           ...(token ? { "Authorization": `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ amount: effectiveTotal, bookingId }),
+        // trackingToken proves this booking is ours. Booking without an account
+        // is supported, so a session alone cannot be the gate — and with no
+        // gate at all, serial booking ids let anyone repoint someone else's
+        // PaymentIntent. The amount is ignored server-side; it is sent only so
+        // the request body still matches what older clients send.
+        body: JSON.stringify({ amount: effectiveTotal, bookingId, trackingToken: bookingToken || undefined }),
       });
       if (!intentRes.ok) {
         const errData = await intentRes.json().catch(() => ({})) as { error?: string };

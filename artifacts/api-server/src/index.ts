@@ -4,7 +4,7 @@ import Stripe from "stripe";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { hashPassword, isValidHash } from "./lib/hash.js";
-import { safeDecryptField } from "./lib/encrypt.js";
+import { safeDecryptField, encryptField } from "./lib/encrypt.js";
 import { readFileSync, readdirSync, readlinkSync } from "fs";
 
 const rawPort = process.env["PORT"];
@@ -445,10 +445,12 @@ async function ensureStripeWebhook(): Promise<void> {
 
     // Persist signing secret to DB so webhook handler can use it without env var
     if (webhook.secret) {
+      // Encrypted at rest — see the matching write in routes/payments.ts.
+      const stored = encryptField(webhook.secret);
       await db
         .insert(settingsTable)
-        .values({ key: "stripe_webhook_secret", value: webhook.secret })
-        .onConflictDoUpdate({ target: settingsTable.key, set: { value: webhook.secret } });
+        .values({ key: "stripe_webhook_secret", value: stored })
+        .onConflictDoUpdate({ target: settingsTable.key, set: { value: stored } });
       logger.info({ webhookId: webhook.id, url: expectedUrl }, "Stripe webhook auto-registered — signing secret saved to DB. Set STRIPE_WEBHOOK_SECRET in env for best security.");
     }
   } catch (err) {
