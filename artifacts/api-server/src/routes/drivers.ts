@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
-import { eq, sql, desc, and, inArray } from "drizzle-orm";
+import { eq, sql, desc, and, or, inArray, type SQL } from "drizzle-orm";
 import crypto from "crypto";
 import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable, driverLocationsTable, passwordResetTokensTable, driverVehiclesTable, vehiclesTable, vehicleCatalogTable } from "@workspace/db";
-import { requireAdmin, requireAuth } from "../middleware/auth.js";
+import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
+import { signedObjectDownloadPath } from "../lib/signedUrl.js";
 import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
 import { hashPassword } from "../lib/hash.js";
@@ -138,27 +139,91 @@ router.get("/drivers/:id", requireAuth, async (req, res): Promise<void> => {
   res.json(GetDriverResponse.parse(parseDriver(driver)));
 });
 
-// Public endpoint — returns only passenger-safe driver info for confirmed bookings
-router.get("/drivers/:id/public", async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+/**
+ * GET /drivers/:id/public — the driver card a passenger sees for their own trip.
+ *
+ * The comment here used to say "for confirmed bookings" while the handler
+ * checked no booking at all, and driver ids are serial: a loop over id=1..N
+ * from an unauthenticated client returned the whole roster with every driver's
+ * personal mobile number. That also contradicted the 48-hour privacy window
+ * that GET /bookings/:id/driver-info already applies to the same fields.
+ *
+ * Access now requires proof of a trip with THIS driver — either a session whose
+ * booking is assigned to them, or the booking's trackingToken (the same trust
+ * model as GET /bookings/track/:token, which is how an anonymous booker reaches
+ * their own trip). Phone follows the same 48-hour rule as driver-info.
+ */
+router.get("/drivers/:id/public", optionalAuth, async (req, res): Promise<void> => {
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
+
+  const trackingToken = String(req.query["trackingToken"] ?? "");
+  const caller = req.currentUser;
+
+  // Find a booking that ties the caller to this driver. Admin skips the check.
+  let linkedBooking: { pickupAt: Date; status: string } | undefined;
+  if (caller?.role !== "admin") {
+    const ownership: SQL[] = [];
+    if (trackingToken) ownership.push(eq(bookingsTable.trackingToken, trackingToken));
+    if (caller) {
+      ownership.push(eq(bookingsTable.userId, caller.userId));
+      const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
+      if (callerUser?.email) ownership.push(eq(bookingsTable.passengerEmail, callerUser.email));
+    }
+    if (ownership.length === 0) {
+      res.status(404).json({ error: "Driver not found" });
+      return;
+    }
+
+    const [found] = await db
+      .select({ pickupAt: bookingsTable.pickupAt, status: bookingsTable.status })
+      .from(bookingsTable)
+      .where(and(eq(bookingsTable.driverId, id), or(...ownership)!))
+      .orderBy(desc(bookingsTable.pickupAt))
+      .limit(1);
+
+    if (!found) {
+      // 404, not 403 — a 403 would confirm the driver id exists.
+      req.log.warn({ ip: req.ip, path: req.path, userId: caller?.userId ?? null, driverId: id }, "authorization_failed");
+      res.status(404).json({ error: "Driver not found" });
+      return;
+    }
+    linkedBooking = found;
+  }
+
   const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
   if (!driver) {
     res.status(404).json({ error: "Driver not found" });
     return;
   }
+
+  // Same window as GET /bookings/:id/driver-info: the personal number appears
+  // once the trip is imminent or under way, not weeks ahead.
+  const ACTIVE_STATUSES = ["on_way", "on_location", "in_progress", "completed"];
+  const withinPhoneWindow = caller?.role === "admin" || (
+    !!linkedBooking && (
+      (new Date(linkedBooking.pickupAt).getTime() - Date.now()) / 3_600_000 <= 48 ||
+      ACTIVE_STATUSES.includes(linkedBooking.status)
+    )
+  );
+
+  res.set("Cache-Control", "no-store");
   res.json({
     id: driver.id,
     name: driver.name,
-    phone: driver.phone,
+    phone: withinPhoneWindow ? driver.phone : null,
     vehicleYear: driver.vehicleYear,
     vehicleMake: driver.vehicleMake,
     vehicleModel: driver.vehicleModel,
     vehicleColor: driver.vehicleColor,
-    profilePicture: driver.profilePicture ?? null,
+    // Photos live in the private bucket. The passenger does not own that object
+    // and must not be able to mint its URL through POST /storage/sign — that
+    // route would then hand out any driver's licence too. The server signs it
+    // here instead, having just verified the caller is on this driver's trip.
+    profilePicture: signedObjectDownloadPath(driver.profilePicture),
     rating: driver.rating != null ? parseFloat(driver.rating) : null,
   });
 });

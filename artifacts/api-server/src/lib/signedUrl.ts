@@ -52,6 +52,31 @@ export function signObjectPath(objectPath: string, ttlSeconds: number = DEFAULT_
   return { exp, sig: computeSignature(objectPath, exp) };
 }
 
+/**
+ * Mint a ready-to-use download path for an object the caller has already been
+ * authorised to see.
+ *
+ * Used where the *server* is the one that knows the caller may look — a
+ * passenger seeing their assigned driver's photo, for instance. That passenger
+ * does not own the object, so they cannot mint the URL themselves through
+ * POST /storage/sign, and they must not be able to: the same route would then
+ * hand out any driver's licence. Returns a path relative to the API base.
+ */
+export function signedObjectDownloadPath(
+  rawObjectPath: string | null | undefined,
+  ttlSeconds: number = DEFAULT_TTL_SECONDS,
+): string | null {
+  if (typeof rawObjectPath !== "string" || !rawObjectPath.trim()) return null;
+  // Driver-supplied values reach these columns, so only keys inside our own
+  // private bucket are ever signed — never an absolute URL to another host.
+  if (/^https?:/i.test(rawObjectPath)) return null;
+  const key = rawObjectPath.replace(/^\/?objects\//, "").replace(/^\/+/, "");
+  if (!key || key.includes("..")) return null;
+
+  const { exp, sig } = signObjectPath(`/objects/${key}`, ttlSeconds);
+  return `/storage/objects/${key}?exp=${exp}&sig=${sig}`;
+}
+
 /** Constant-time check of a signature against an object path. */
 export function verifyObjectSignature(objectPath: string, rawExp: unknown, rawSig: unknown): boolean {
   if (typeof rawSig !== "string" || !rawSig) return false;

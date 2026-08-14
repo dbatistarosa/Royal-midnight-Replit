@@ -4,6 +4,8 @@ import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql, inArray } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable, extraServicesTable, bookingExtrasTable, driverVehiclesTable, managedTravelersTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
+import { signedObjectDownloadPath } from "../lib/signedUrl.js";
+import { hasPgErrorCode, UNDEFINED_COLUMN } from "../lib/pgError.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import { HOURLY_RATES, DEFAULT_RATE_PER_MILE, computeQuote, readQuoteExtensions } from "./quote.js";
 import { evaluatePromoCode } from "./promos.js";
@@ -101,12 +103,7 @@ function hasConflict(pickupAt: Date, windows: BusyWindow[]): boolean {
  * level silently misses every one of them.
  */
 function isUndefinedColumn(err: unknown): boolean {
-  let cur: unknown = err;
-  for (let depth = 0; cur && depth < 5; depth++) {
-    if ((cur as { code?: string }).code === "42703") return true;
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return false;
+  return hasPgErrorCode(err, UNDEFINED_COLUMN);
 }
 
 function parseBooking(b: typeof bookingsTable.$inferSelect) {
@@ -213,6 +210,18 @@ function getStripe(): Stripe {
   return new Stripe(key, { apiVersion: "2024-06-20" as const });
 }
 
+/** "Maria Gonzalez" -> "Maria G." — enough for a driver to tell one card from
+ *  another in the open-pool list without publishing every passenger's full name
+ *  to the whole fleet. */
+function maskPassengerName(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const parts = raw.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  const first = parts[0]!;
+  if (parts.length === 1) return first;
+  return `${first} ${parts[parts.length - 1]!.charAt(0).toUpperCase()}.`;
+}
+
 function toDriverView<T extends { priceQuoted: number; fareSubtotal: number }>(
   booking: T,
   commissionPct: number
@@ -306,17 +315,23 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       // No explicit driverId — look up the driver by caller identity.
       // Order by total_rides DESC so we always get the most active record when
       // a driver has two entries (admin-created with history + onboarding record).
-      const byUserId = await db.select({ id: driversTable.id, totalRides: driversTable.totalRides })
+      const driverPoolColumns = {
+        id: driversTable.id,
+        totalRides: driversTable.totalRides,
+        approvalStatus: driversTable.approvalStatus,
+        complianceHold: driversTable.complianceHold,
+      };
+      const byUserId = await db.select(driverPoolColumns)
         .from(driversTable)
         .where(eq(driversTable.userId, caller.userId))
         .orderBy(desc(driversTable.totalRides));
-      let driverRow: { id: number } | undefined = byUserId[0];
+      let driverRow: { id: number; approvalStatus: string; complianceHold: boolean } | undefined = byUserId[0];
 
       // Fallback: match by email if userId link was never set
       if (!driverRow) {
         const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
         if (callerUser?.email) {
-          const found = await db.select({ id: driversTable.id, totalRides: driversTable.totalRides })
+          const found = await db.select(driverPoolColumns)
             .from(driversTable)
             .where(eq(driversTable.email, callerUser.email))
             .orderBy(desc(driversTable.totalRides));
@@ -334,6 +349,23 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       }
 
       if (requestedStatus === "pending" || requestedStatus === "authorized") {
+        // The open pool is the passenger list: who is being picked up, at which
+        // address, at what time. POST /auth/driver-register is public and leaves
+        // the account at approvalStatus="pending", so without this check anyone
+        // could sign up as a driver and read it.
+        //
+        // POST /bookings/:id/accept already refuses a non-approved driver — the
+        // check existed on the write and was missing on the read. Same criteria
+        // here, deliberately including complianceHold: a driver with an expired
+        // licence may not work, so they have no reason to see the queue either.
+        if (driverRow.approvalStatus !== "approved" || driverRow.complianceHold) {
+          req.log.warn(
+            { ip: req.ip, path: req.path, userId: caller.userId, driverId: driverRow.id, approvalStatus: driverRow.approvalStatus },
+            "authorization_failed",
+          );
+          res.json([]);
+          return;
+        }
         // Requesting the open/unassigned pool — includes pending and authorized
         // bookings, plus corporate bookings (those are created directly as
         // "confirmed" with no payment step and still need a driver to accept).
@@ -398,6 +430,27 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     // For the open pool, hide trips that conflict with the driver's existing schedule.
     if (isDriverOpenPoolQuery && driverBusyWindows.length > 0) {
       driverBookings = parsed2.filter(b => !hasConflict(new Date(b.pickupAt), driverBusyWindows));
+    }
+
+    // The open pool is a broadcast: every approved driver in the fleet sees it,
+    // and all but one of them will never take the trip. What they need to
+    // decide is where, when, and what it pays. Contact details, free-text
+    // requests and VIP notes are withheld until the trip is actually assigned —
+    // the driver who accepts gets them from GET /bookings (assigned branch) and
+    // GET /bookings/:id. vipNotes in particular is admin-only elsewhere:
+    // PATCH /users/:id refuses to let anyone but an admin write it.
+    if (isDriverOpenPoolQuery) {
+      res.json(
+        driverBookings.map(b => ({
+          ...toDriverView(b, commissionPct),
+          passengerName: maskPassengerName((b as { passengerName?: unknown }).passengerName),
+          passengerEmail: null,
+          passengerPhone: null,
+          specialRequests: null,
+          passengerPreferences: null,
+        })),
+      );
+      return;
     }
 
     // Attach passenger preferences so the driver can stage the vehicle correctly.
@@ -815,11 +868,33 @@ router.get("/bookings/:id/driver-info", requireAuth, async (req, res): Promise<v
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, params.data.id));
   if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
 
+  // The old condition short-circuited on `caller.role !== "driver"`, so ANY
+  // driver account — not just the assigned one — got driverName, driverPhone
+  // and regPlate for an arbitrary booking id. Chained with the open driver
+  // registration that was trivial to reach.
+  //
+  // The `passengerEmail !== (caller as any).email` term was also dead: AuthUser
+  // is {userId, role} and never carries an email, so it was always true. Its
+  // real-world effect was a passenger whose booking is linked only by email
+  // (created by an admin) getting a 403 they should not have. Both fixed here,
+  // matching the pattern GET /bookings/:id already uses.
   const caller = req.currentUser!;
-  if (caller.role !== "admin" && caller.role !== "driver" &&
-      booking.userId !== caller.userId && booking.passengerEmail !== (caller as any).email) {
-    res.status(403).json({ error: "Access denied" });
-    return;
+  if (caller.role === "driver") {
+    const [driverRow] = await db.select({ id: driversTable.id })
+      .from(driversTable).where(eq(driversTable.userId, caller.userId));
+    if (!driverRow || booking.driverId !== driverRow.id) {
+      req.log.warn({ ip: req.ip, path: req.path, userId: caller.userId, role: caller.role }, "authorization_failed");
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+  } else if (caller.role !== "admin" && booking.userId !== caller.userId) {
+    const [callerUser] = await db.select({ email: usersTable.email })
+      .from(usersTable).where(eq(usersTable.id, caller.userId));
+    if (!callerUser?.email || booking.passengerEmail !== callerUser.email) {
+      req.log.warn({ ip: req.ip, path: req.path, userId: caller.userId, role: caller.role }, "authorization_failed");
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
   }
 
   if (!booking.driverId) {
@@ -881,7 +956,10 @@ router.get("/bookings/:id/driver-info", requireAuth, async (req, res): Promise<v
     driverPhone: driver.phone,
     vehicleDescription,
     regPlate,
-    profilePicture: driver.profilePicture ?? null,
+    // Signed here rather than by the client: the passenger does not own this
+    // object, and letting them sign an arbitrary path would reopen access to
+    // every driver's licence and insurance scan.
+    profilePicture: signedObjectDownloadPath(driver.profilePicture),
   });
 });
 

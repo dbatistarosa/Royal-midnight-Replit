@@ -7,7 +7,6 @@ import { LayoutDashboard, Car, MapPin, User, MessageSquare, ChevronDown, Chevron
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
-import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { passengerNavItems } from "@/config/portalNav";
 
 
@@ -51,17 +50,22 @@ function DriverInfoCard({ driverId }: { driverId: number }) {
   const [driver, setDriver] = useState<PublicDriver | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/drivers/${driverId}/public`)
+    // credentials: "include" — the endpoint now requires proof that this trip
+    // is yours. It used to be open, which let anyone walk driver ids 1..N and
+    // scrape the roster with every driver's personal phone number.
+    fetch(`${API_BASE}/drivers/${driverId}/public`, { credentials: "include" })
       .then(r => r.ok ? r.json() as Promise<PublicDriver> : Promise.reject())
       .then(d => setDriver(d))
       .catch(() => null);
   }, [driverId]);
 
-  // Driver photos live in the private bucket, so the URL has to be signed
-  // (CN-003). Hook must run before the early return.
-  const { url: picUrl } = useSignedDocUrl(driver?.profilePicture ?? null);
-
   if (!driver) return null;
+
+  // The photo lives in the private bucket and arrives already signed by the
+  // server, which is the only party that can confirm this passenger is on this
+  // driver's trip. Signing it client-side would mean /storage/sign accepting
+  // objects the caller does not own — i.e. every driver's licence too.
+  const picUrl = driver.profilePicture ? `${API_BASE}${driver.profilePicture}` : null;
 
   const vehicleDesc = [driver.vehicleColor, driver.vehicleYear, driver.vehicleMake, driver.vehicleModel].filter(Boolean).join(" ") || null;
   const initials = driver.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
