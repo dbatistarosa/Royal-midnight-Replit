@@ -32,7 +32,21 @@ function matchesTrackingToken(stored: string | null | undefined, provided: unkno
 }
 
 const APP_URL = process.env.APP_URL ?? "https://royalmidnight.com";
-const WEBHOOK_URL = `${APP_URL}/api/webhook/stripe`;
+
+/**
+ * Where Stripe delivers events.
+ *
+ * Deliberately NOT derived from APP_URL. Stripe does not follow redirects on
+ * webhook deliveries: a 3xx is recorded as a failed delivery, and enough
+ * consecutive failures disable the endpoint. royalmidnight.com answers
+ * `308 Permanent Redirect` to www.royalmidnight.com, so a webhook registered on
+ * the bare domain never actually arrives — while every manual check of that URL
+ * in a browser looks perfectly fine, because browsers do follow redirects.
+ *
+ * APP_URL is shared with the links in outgoing email, where a redirect costs
+ * nothing, so it stays as it is; only this one needs the canonical host.
+ */
+const WEBHOOK_URL = process.env.STRIPE_WEBHOOK_URL ?? "https://www.royalmidnight.com/api/webhook/stripe";
 
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
