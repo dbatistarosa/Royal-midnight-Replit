@@ -517,11 +517,11 @@ export type ReminderEmailData = {
   driverEarnings?: number;
 };
 
-export async function sendTripReminderPassenger(b: ReminderEmailData, leadLabel = "1 Hour") {
+export async function sendTripReminderPassenger(b: ReminderEmailData) {
   const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
   const html = wrap(`
-<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Reminder: Your Ride is in ${escapeHtml(leadLabel)}</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(b.passengerName.split(" ")[0])}, this is a reminder that your Royal Midnight ride is scheduled in approximately ${escapeHtml(leadLabel.toLowerCase())}. Please be ready at your pickup location.</p>
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Reminder: Your Ride is in 1 Hour</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">Hi ${escapeHtml(b.passengerName.split(" ")[0])}, this is a reminder that your Royal Midnight ride is scheduled in approximately one hour. Please be ready at your pickup location.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", bookingRef)}
   ${row("Pickup", escapeHtml(b.pickupAddress))}
@@ -537,15 +537,15 @@ export async function sendTripReminderPassenger(b: ReminderEmailData, leadLabel 
   Please ensure you are at the pickup location on time. If you need to reach your driver, use the contact details above.<br>
   <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
 </p>`);
-  await send(b.passengerEmail, `Reminder: Your Royal Midnight Ride in ${leadLabel} — ${bookingRef}`, html, "trip_reminder_passenger");
+  await send(b.passengerEmail, `Reminder: Your Royal Midnight Ride in 1 Hour — ${bookingRef}`, html, "trip_reminder_passenger");
 }
 
-export async function sendTripReminderDriver(b: ReminderEmailData, driverEmail: string, leadLabel = "1 Hour") {
+export async function sendTripReminderDriver(b: ReminderEmailData, driverEmail: string) {
   const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
   const earnings = b.driverEarnings != null ? `$${b.driverEarnings.toFixed(2)}` : "—";
   const html = wrap(`
-<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Reminder: Upcoming Pickup in ${escapeHtml(leadLabel)}</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">This is a reminder that you have a scheduled pickup in approximately ${escapeHtml(leadLabel.toLowerCase())}. Please review the trip details and be on time.</p>
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Reminder: Upcoming Pickup in 1 Hour</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">This is a reminder that you have a scheduled pickup in approximately one hour. Please review the trip details and be on time.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", bookingRef)}
   ${row("Passenger", escapeHtml(b.passengerName))}
@@ -560,7 +560,7 @@ export async function sendTripReminderDriver(b: ReminderEmailData, driverEmail: 
   Please be at the pickup location promptly at the scheduled time.<br>
   <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
 </p>`);
-  await send(driverEmail, `Reminder: Pickup in ${leadLabel} — ${bookingRef} (${b.passengerName})`, html, "trip_reminder_driver");
+  await send(driverEmail, `Reminder: Pickup in 1 Hour — ${bookingRef} (${b.passengerName})`, html, "trip_reminder_driver");
 }
 
 export async function sendWeeklyDriverPayout(params: {
@@ -864,98 +864,4 @@ export async function sendReviewRequestEmail(b: BookingEmailData) {
   <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
 </p>`);
   await send(b.passengerEmail, `How was your ride? — Royal Midnight ${bookingRef}`, html, "review_request");
-}
-
-/**
- * Operations copies of the trip reminders.
- *
- * The 24h and 2h reminders go to the passenger and the driver — and to the
- * admin, who previously received nothing at all between booking creation and
- * the trip itself. When booking #6 went out with no driver ever confirming,
- * there was no point at which anyone in the office was told.
- */
-export async function sendTripReminderAdmin(b: ReminderEmailData, leadLabel: string) {
-  const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
-  const html = wrap(`
-<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Upcoming Trip in ${escapeHtml(leadLabel)}</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">Operations reminder — no action needed unless the driver has not confirmed.</p>
-<table style="width:100%;border-collapse:collapse">
-  ${row("Booking #", bookingRef)}
-  ${row("Passenger", escapeHtml(b.passengerName))}
-  ${row("Pickup", escapeHtml(b.pickupAddress))}
-  ${row("Dropoff", escapeHtml(b.dropoffAddress))}
-  ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
-  ${row("Driver", b.driverName ? escapeHtml(b.driverName) : '<span style="color:#e11d48">UNASSIGNED</span>')}
-  ${b.driverPhone ? row("Driver Phone", escapeHtml(b.driverPhone)) : ""}
-  ${row("Total Fare", `$${b.priceQuoted.toFixed(2)}`)}
-</table>`);
-  await send(ADMIN_EMAIL, `Trip in ${leadLabel} — ${bookingRef} (${b.passengerName})`, html, "trip_reminder_admin");
-}
-
-/**
- * The assigned driver did not confirm in time and lost the trip.
- *
- * This is the alert that did not exist: a driver going quiet was invisible
- * until the passenger was left waiting.
- */
-export async function sendDriverReleasedAdmin(params: {
-  bookingId: number;
-  passengerName: string;
-  pickupAddress: string;
-  pickupAt: string;
-  driverName: string;
-  driverPhone: string;
-  warningCount: number;
-  suspended: boolean;
-}) {
-  const bookingRef = `RM-${String(params.bookingId).padStart(4, "0")}`;
-  const html = wrap(`
-<h2 style="color:#e11d48;font-size:20px;margin:0 0 8px">Driver removed — no confirmation</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">
-  ${escapeHtml(params.driverName)} did not confirm they were on the way within one hour of pickup,
-  so the trip has been returned to the open pool for every other driver. It will not be shown to them again.
-</p>
-<table style="width:100%;border-collapse:collapse">
-  ${row("Booking #", bookingRef)}
-  ${row("Passenger", escapeHtml(params.passengerName))}
-  ${row("Pickup", escapeHtml(params.pickupAddress))}
-  ${row("Pickup Time", new Date(params.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
-  ${row("Driver Removed", `${escapeHtml(params.driverName)} (${escapeHtml(params.driverPhone)})`)}
-  ${row("Warnings", `<span style="color:#e11d48;font-weight:bold">${params.warningCount}</span>`)}
-  ${params.suspended ? row("Account", '<span style="color:#e11d48;font-weight:bold">SUSPENDED — reached 3 warnings</span>') : ""}
-</table>
-<p style="margin-top:20px;color:#888;font-size:12px">
-  If no other driver accepts, cancel the booking from the admin panel — that refunds the passenger in full.
-</p>`);
-  await send(ADMIN_EMAIL, `ACTION NEEDED: driver removed from ${bookingRef}`, html, "driver_released_admin");
-}
-
-/** Tells the driver why they lost the trip, and where that leaves their account. */
-export async function sendDriverNoConfirmationWarning(params: {
-  driverEmail: string;
-  driverName: string;
-  bookingId: number;
-  pickupAt: string;
-  warningCount: number;
-  suspended: boolean;
-}) {
-  const bookingRef = `RM-${String(params.bookingId).padStart(4, "0")}`;
-  const html = wrap(`
-<h2 style="color:#e11d48;font-size:20px;margin:0 0 8px">Trip ${bookingRef} was removed from your schedule</h2>
-<p style="color:#888;font-size:13px;margin:0 0 20px">
-  Hi ${escapeHtml(params.driverName.split(" ")[0] ?? "")}, you did not mark yourself as on the way within one hour of the
-  scheduled pickup, so this trip has been reassigned and a warning has been added to your account.
-</p>
-<table style="width:100%;border-collapse:collapse">
-  ${row("Booking #", bookingRef)}
-  ${row("Scheduled Pickup", new Date(params.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
-  ${row("Warnings on your account", `<span style="color:#e11d48;font-weight:bold">${params.warningCount} of 3</span>`)}
-</table>
-<p style="margin-top:20px;color:#888;font-size:12px">
-  ${params.suspended
-    ? '<strong style="color:#e11d48">Your account has been suspended after three warnings. Contact the office to be reinstated.</strong>'
-    : "To avoid this, open the app and confirm you are on the way as soon as you set off. Three warnings suspends your account."}<br>
-  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
-</p>`);
-  await send(params.driverEmail, `Warning: trip ${bookingRef} removed — no confirmation`, html, "driver_warning");
 }

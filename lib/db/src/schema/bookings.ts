@@ -33,20 +33,7 @@ export const bookingsTable = pgTable("bookings", {
   tipPaymentIntentId: text("tip_payment_intent_id"),
   estimatedDurationMinutes: integer("estimated_duration_minutes"),
   estimatedDistanceMiles: numeric("estimated_distance_miles", { precision: 6, scale: 2 }),
-  /** Legacy single reminder. Superseded by the 24h/2h markers below, which are
-   *  due-based instead of window-based — see migration 0008 for why the window
-   *  approach silently sent nothing. Left in place for historical rows. */
   reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
-  reminder24hSentAt: timestamp("reminder_24h_sent_at", { withTimezone: true }),
-  reminder2hSentAt: timestamp("reminder_2h_sent_at", { withTimezone: true }),
-  /** Set when the assigned driver missed the confirmation deadline and the trip
-   *  was returned to the open pool. */
-  driverReleasedAt: timestamp("driver_released_at", { withTimezone: true }),
-  cancellationReason: text("cancellation_reason"),
-  cancellationNotes: text("cancellation_notes"),
-  cancelledBy: text("cancelled_by"),
-  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-  refundAmount: numeric("refund_amount", { precision: 10, scale: 2 }),
   reviewRequestSentAt: timestamp("review_request_sent_at", { withTimezone: true }),
   authorizedAt: timestamp("authorized_at", { withTimezone: true }),
   checklistCompletedAt: timestamp("checklist_completed_at", { withTimezone: true }),

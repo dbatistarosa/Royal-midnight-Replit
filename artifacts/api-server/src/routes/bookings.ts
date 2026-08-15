@@ -2,11 +2,10 @@ import { Router, type IRouter } from "express";
 import crypto from "node:crypto";
 import Stripe from "stripe";
 import { eq, desc, and, or, isNull, ne, sql, inArray } from "drizzle-orm";
-import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable, extraServicesTable, bookingExtrasTable, driverVehiclesTable, managedTravelersTable, bookingDriverBlocksTable } from "@workspace/db";
+import { db, bookingsTable, driversTable, settingsTable, usersTable, promoCodesTable, reviewsTable, extraServicesTable, bookingExtrasTable, driverVehiclesTable, managedTravelersTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { signedObjectDownloadPath } from "../lib/signedUrl.js";
 import { hasPgErrorCode, UNDEFINED_COLUMN } from "../lib/pgError.js";
-import { hasDriverBlockTable } from "../lib/schemaGuards.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import { HOURLY_RATES, DEFAULT_RATE_PER_MILE, computeQuote, readQuoteExtensions } from "./quote.js";
 import { evaluatePromoCode } from "./promos.js";
@@ -366,18 +365,6 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
           );
           res.json([]);
           return;
-        }
-        // A trip taken off this driver for missing the confirmation deadline
-        // goes back to the pool for everyone else — but must never be offered
-        // to them again, or it would reappear moments after being removed.
-        // Skipped entirely until migration 0008 has run: with no table there
-        // can be no blocks, and referencing it would take the pool down.
-        if (await hasDriverBlockTable()) {
-        conditions.push(sql`NOT EXISTS (
-          SELECT 1 FROM booking_driver_blocks bdb
-           WHERE bdb.booking_id = ${bookingsTable.id}
-             AND bdb.driver_id  = ${driverRow.id}
-        )`);
         }
         // Requesting the open/unassigned pool — includes pending and authorized
         // bookings, plus corporate bookings (those are created directly as
@@ -1284,20 +1271,6 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
 
   if (driverRow.complianceHold) {
     res.status(403).json({ error: "compliance_hold", message: "Your account is on a compliance hold due to an expired document. Please upload a renewed document to resume accepting rides." });
-    return;
-  }
-
-  // Hiding the trip from their pool is presentation; this is the control. A
-  // driver who lost this booking for not confirming can still POST the id.
-  const [blocked] = (await hasDriverBlockTable())
-    ? await db
-        .select({ id: bookingDriverBlocksTable.id })
-        .from(bookingDriverBlocksTable)
-        .where(and(eq(bookingDriverBlocksTable.bookingId, id), eq(bookingDriverBlocksTable.driverId, driverRow.id)))
-    : [];
-  if (blocked) {
-    req.log.warn({ ip: req.ip, path: req.path, userId: caller.userId, driverId: driverRow.id, bookingId: id }, "authorization_failed");
-    res.status(403).json({ error: "This trip is no longer available to you." });
     return;
   }
 

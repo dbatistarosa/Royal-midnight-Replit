@@ -3,10 +3,92 @@ import { sql } from "drizzle-orm";
 import { db, pool } from "@workspace/db";
 import { logger } from "./logger";
 import { safeDecryptField } from "./encrypt.js";
-// Reminders and driver-confirmation enforcement live in their own module now:
-// the window-based version that used to sit here matched nothing on a
-// scheduler that runs late. Re-exported so routes/cron.ts keeps its import.
-export { sendTripReminders } from "./tripReminders.js";
+
+export async function sendTripReminders(): Promise<void> {
+  try {
+    const now = new Date();
+    const windowStart = new Date(now.getTime() + 55 * 60 * 1000);
+    const windowEnd = new Date(now.getTime() + 65 * 60 * 1000);
+
+    const { driversTable, bookingsTable } = await import("@workspace/db");
+    const { sendTripReminderPassenger, sendTripReminderDriver } = await import("./mailer.js");
+    const { sendChauffeurIntroSms } = await import("./sms.js");
+    const { fetchCommissionPct } = await import("./commission.js");
+    const commissionPct = await fetchCommissionPct();
+
+    const candidates = await db
+      .select({ id: bookingsTable.id })
+      .from(bookingsTable)
+      .where(and(eq(bookingsTable.status, "confirmed"), isNull(bookingsTable.reminderSentAt)));
+
+    for (const { id } of candidates) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { rows } = await client.query(
+          `SELECT id, passenger_name, passenger_email, passenger_phone, pickup_address, dropoff_address,
+                  pickup_at, vehicle_class, passengers, price_quoted, fare_subtotal, driver_id
+           FROM bookings
+           WHERE id = $1
+             AND status = 'confirmed'
+             AND driver_id IS NOT NULL
+             AND pickup_at >= $2
+             AND pickup_at <= $3
+             AND reminder_sent_at IS NULL
+           FOR UPDATE SKIP LOCKED`,
+          [id, windowStart.toISOString(), windowEnd.toISOString()],
+        );
+
+        if (rows.length === 0) { await client.query("ROLLBACK"); continue; }
+
+        const row = rows[0] as Record<string, unknown>;
+        const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, row.driver_id as number));
+        if (!driver) { await client.query("ROLLBACK"); continue; }
+
+        const priceQuoted = parseFloat(String(row.price_quoted ?? "0"));
+        const fareSubtotal = row.fare_subtotal != null ? parseFloat(String(row.fare_subtotal)) : priceQuoted;
+        const driverEarnings = Math.round(fareSubtotal * commissionPct * 100) / 100;
+
+        const reminderData = {
+          id: row.id as number,
+          passengerName: row.passenger_name as string,
+          passengerEmail: row.passenger_email as string,
+          pickupAddress: row.pickup_address as string,
+          dropoffAddress: row.dropoff_address as string,
+          pickupAt: new Date(row.pickup_at as string).toISOString(),
+          vehicleClass: row.vehicle_class as string,
+          passengers: row.passengers as number,
+          priceQuoted,
+          driverName: driver.name,
+          driverPhone: driver.phone,
+          driverEarnings,
+        };
+
+        await sendTripReminderPassenger(reminderData);
+        await sendTripReminderDriver(reminderData, driver.email);
+
+        const bookingRef = `RM-${String(row.id).padStart(4, "0")}`;
+        sendChauffeurIntroSms(
+          (row.passenger_phone as string | null) ?? null,
+          driver.name,
+          bookingRef,
+          new Date(row.pickup_at as string).toISOString(),
+        ).catch((smsErr: unknown) => logger.warn({ smsErr, bookingId: row.id }, "Chauffeur intro SMS failed (non-fatal)"));
+
+        await client.query(`UPDATE bookings SET reminder_sent_at = $1 WHERE id = $2`, [now.toISOString(), row.id]);
+        await client.query("COMMIT");
+        logger.info({ bookingId: row.id, passengerEmail: row.passenger_email }, "Trip reminder sent");
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        logger.error({ err, bookingId: id }, "Failed to send trip reminder (non-fatal)");
+      } finally {
+        client.release();
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "Trip reminder scheduler error (non-fatal)");
+  }
+}
 
 export async function sendReviewRequests(): Promise<void> {
   try {

@@ -54,8 +54,3 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
-
-# Agent skills installed with `npx skills add` — tooling for whoever is working
-# on the repo, not part of the product.
-.agents/
-skills-lock.json
