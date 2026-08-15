@@ -131,6 +131,28 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
     res.status(503).json({ error: "Stripe publishable key is malformed. Check STRIPE_PUBLISHABLE_KEY." });
     return;
   }
+
+  // The two keys must be the same mode, and in practice the same account.
+  // When they are not, everything looks healthy right up to the payment step:
+  // the server creates a PaymentIntent perfectly well in ITS account, and then
+  // Stripe.js in the browser reports "The client_secret provided does not match
+  // any associated PaymentIntent on this account" — a message that points at
+  // the code rather than at the configuration that actually caused it. Failing
+  // here instead names the real problem before the customer ever sees a form.
+  const secretKey = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+  const publishableMode = publishableKey.startsWith("pk_live_") ? "live" : "test";
+  const secretMode = secretKey.startsWith("sk_live_") || secretKey.startsWith("rk_live_") ? "live" : "test";
+  if (secretKey && publishableMode !== secretMode) {
+    console.error(
+      `[payments] Stripe key mode mismatch: publishable is ${publishableMode}, secret is ${secretMode}. ` +
+      `Payments cannot complete until both come from the same Stripe account and mode.`,
+    );
+    res.status(503).json({
+      error: `Stripe is misconfigured: the publishable key is ${publishableMode} mode but the secret key is ${secretMode} mode. Both must come from the same Stripe account.`,
+    });
+    return;
+  }
+
   res.json({ publishableKey });
 });
 
