@@ -65,7 +65,18 @@ async function buildAll() {
       "@swc/*",
       "@aws-sdk/*",
       "@azure/*",
-      "@opentelemetry/*",
+      // @opentelemetry/* is deliberately NOT external.
+      //
+      // @sentry/node v10 imports it at module load. Externalising it means
+      // dist/app.mjs keeps a bare `@opentelemetry/...` import, which Node then
+      // has to resolve from artifacts/api-server/node_modules at runtime — and
+      // under pnpm's strict layout only DIRECT dependencies get a symlink
+      // there. nodemailer stays external below and works precisely because
+      // api-server depends on it directly; the OpenTelemetry packages are
+      // transitive, so the import threw MODULE_NOT_FOUND before the function
+      // could serve a single request. That took the whole API down once
+      // already (fixed in 18e4a99 by removing the Sentry import entirely).
+      // Bundling them removes the runtime resolution step altogether.
       "@google-cloud/*",
       "@google/*",
       "googleapis",

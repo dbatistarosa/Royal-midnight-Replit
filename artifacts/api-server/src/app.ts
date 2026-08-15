@@ -9,6 +9,36 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { globalLimiter } from "./lib/rateLimit";
 
+/**
+ * Error monitoring.
+ *
+ * Every authentication_failed, authorization_failed and cron_auth_failed this
+ * codebase carefully logs went to stdout and nowhere else — no alert, no
+ * aggregation, nobody watching. If someone probed the app there would be no
+ * signal at all.
+ *
+ * Loaded through a guarded dynamic import rather than a static one, and that is
+ * not superstition: importing @sentry/node at the top of this file took the
+ * entire API down once (FUNCTION_INVOCATION_FAILED on every endpoint, fixed in
+ * 18e4a99 by ripping the import back out). The root cause is fixed properly in
+ * build.mjs — @opentelemetry/* is now bundled instead of externalised — but the
+ * blast radius of being wrong here is the whole site, so a failure to load
+ * monitoring must never be able to stop the app from booting. Worst case,
+ * Sentry is off and the reason is in the logs.
+ *
+ * Trade-off accepted: static imports are hoisted above top-level await, so
+ * Sentry initialises after express is loaded and its auto-instrumentation of
+ * http is incomplete. Error capture, which is the point here, is unaffected.
+ */
+let sentry: typeof import("./lib/sentry.js") | null = null;
+try {
+  sentry = await import("./lib/sentry.js");
+  sentry.initSentry();
+} catch (err) {
+  sentry = null;
+  console.error("[sentry] monitoring unavailable, continuing without it:", (err as Error)?.message);
+}
+
 const app: Express = express();
 
 // Vercel (and any reverse proxy) sets X-Forwarded-For — trust one hop so
@@ -112,6 +142,16 @@ if (process.env.NODE_ENV === "production") {
     });
   } else {
     logger.warn({ frontendDist }, "Frontend dist not found — static serving skipped");
+  }
+}
+
+// Reports unhandled route errors to Sentry before the generic handler below
+// turns them into a flat 500. Must come after the routes.
+if (sentry) {
+  try {
+    sentry.Sentry.setupExpressErrorHandler(app);
+  } catch (err) {
+    console.error("[sentry] express error handler not installed:", (err as Error)?.message);
   }
 }
 
