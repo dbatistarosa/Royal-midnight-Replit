@@ -381,12 +381,14 @@ async function seedDatabase(): Promise<void> {
     const allUsers = await db.select().from(usersTable);
     for (const user of allUsers) {
       if (user.passwordHash && !isValidHash(user.passwordHash)) {
-        const fixedHash = await hashPassword(user.passwordHash);
-        await db
-          .update(usersTable)
-          .set({ passwordHash: fixedHash })
-          .where(eq(usersTable.id, user.id));
-        logger.info({ email: user.email }, "Fixed corrupted password hash");
+        // Re-hashing means the stored value is treated as the plaintext, which
+        // locks the account out permanently if the check was wrong. Log it and
+        // leave the row alone rather than destroying a recoverable account —
+        // an admin can trigger a password reset, which cannot.
+        logger.error(
+          { email: user.email, userId: user.id },
+          "password hash is not in a recognised format — left untouched, send this user a password reset",
+        );
       }
     }
   } catch (err) {

@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceDocumentsTable, driverLocationsTable, passwordResetTokensTable, driverVehiclesTable, vehiclesTable, vehicleCatalogTable } from "@workspace/db";
 import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
 import { signedObjectDownloadPath } from "../lib/signedUrl.js";
+import { revokeAllSessionsForUser } from "../lib/session.js";
 import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
 import { hashPassword } from "../lib/hash.js";
@@ -657,6 +658,14 @@ router.patch("/drivers/:id/reject", requireAdmin, async (req, res): Promise<void
   if (!driver) {
     res.status(404).json({ error: "Driver not found" });
     return;
+  }
+
+  // Rejection has to take effect now, not in 30 days. Route guards read the
+  // driver row so the API side is already closed, but the driver app decides
+  // what to show from its stored session — leaving it valid means a rejected
+  // chauffeur keeps a working app until the token expires on its own.
+  if (driver.userId != null) {
+    await revokeAllSessionsForUser(driver.userId);
   }
 
   res.json({ success: true, driver: parseDriver(driver) });

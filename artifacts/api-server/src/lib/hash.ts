@@ -32,6 +32,19 @@ export function verifyPassword(password: string, hash: string): boolean {
   return bcrypt.compareSync(password, hash);
 }
 
+/**
+ * Is this stored value actually a password hash?
+ *
+ * Used by the startup repair loop, which re-hashes anything that fails this
+ * check — so a false negative permanently locks the account out: the stored
+ * hash gets hashed as though it were the password, and nothing the user types
+ * will ever match. `value.length > 20` was far too loose in the wrong
+ * direction. Recognise the two schemes this codebase actually produces, and
+ * nothing else.
+ */
 export function isValidHash(value: string): boolean {
-  return value.length > 20;
+  // bcrypt: $2a$ / $2b$ / $2y$ followed by cost and a 53-char salt+digest.
+  if (/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value)) return true;
+  // The deprecated SHA-256 scheme, still accepted at login and upgraded there.
+  return isLegacyHash(value);
 }

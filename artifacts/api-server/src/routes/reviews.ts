@@ -4,7 +4,6 @@ import { db, reviewsTable, bookingsTable, driversTable } from "@workspace/db";
 import { requireAuth } from "../middleware/auth.js";
 import {
   ListReviewsQueryParams,
-  ListReviewsResponse,
   CreateReviewBody,
 } from "@workspace/api-zod";
 
@@ -21,16 +20,22 @@ router.get("/reviews", async (req, res): Promise<void> => {
   if (parsed.data.driverId != null) conditions.push(eq(reviewsTable.driverId, parsed.data.driverId));
   if (parsed.data.bookingId != null) conditions.push(eq(reviewsTable.bookingId, parsed.data.bookingId));
 
+  // This endpoint is public. Returning whole rows meant userId and bookingId
+  // came with every review, which is enough to correlate which passenger rode
+  // with which chauffeur and when. Only the fields a rating list actually
+  // renders leave the server.
   const reviews = await db
-    .select()
+    .select({
+      id: reviewsTable.id,
+      driverId: reviewsTable.driverId,
+      rating: reviewsTable.rating,
+      comment: reviewsTable.comment,
+      createdAt: reviewsTable.createdAt,
+    })
     .from(reviewsTable)
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-  res.json(
-    ListReviewsResponse.parse(
-      reviews.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }))
-    )
-  );
+  res.json(reviews.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })));
 });
 
 router.post("/reviews", requireAuth, async (req, res): Promise<void> => {

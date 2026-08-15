@@ -1,6 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { eq } from "drizzle-orm";
-import { db, sessionsTable, usersTable } from "@workspace/db";
+import { resolveSession } from "../lib/session.js";
 
 export interface AuthUser {
   userId: number;
@@ -37,14 +36,6 @@ function readSessionToken(req: Request): string | null {
     if (token) return token;
   }
   return null;
-}
-
-/** Look up a live, unexpired session for a token. */
-async function resolveSession(token: string) {
-  const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.token, token));
-  if (!session) return null;
-  if (session.expiresAt && session.expiresAt < new Date()) return null;
-  return session;
 }
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {

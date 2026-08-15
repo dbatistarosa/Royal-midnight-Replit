@@ -15,23 +15,29 @@ jobs:
   typecheck-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to commit SHAs, not tags. A tag is a mutable ref: whoever
+      # controls the action's repository can repoint v4 at different code,
+      # which would then run with this repository checked out. The trailing
+      # comment is what Dependabot reads to keep the pins current.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
 
-      # Matches vercel.json's installCommand — this lockfile has a known
-      # config mismatch between package.json `overrides` and
-      # pnpm-workspace.yaml that --frozen-lockfile rejects.
-      - run: pnpm install --no-frozen-lockfile
+      # Matches vercel.json's installCommand. Frozen, so what is tested here is
+      # what gets deployed: with --no-frozen-lockfile every install re-resolved
+      # the floating ^/~ ranges against the live registry, which meant a new
+      # (or compromised) version could reach production without pnpm-lock.yaml
+      # changing or anyone reviewing it.
+      - run: pnpm install --frozen-lockfile
 
-      # Informational only, not gating: the repo has ~80 pre-existing type
+      # Informational only, not gating: the repo has ~70 pre-existing type
       # errors (mostly Express's req.params typed as string | string[]) that
       # predate this workflow and aren't part of this change. Surfacing the
       # trend here without blocking merges until that backlog is triaged.
@@ -39,3 +45,9 @@ jobs:
         continue-on-error: true
 
       - run: pnpm run test
+
+      # Fails the build on a known-vulnerable production dependency. There was
+      # no dependency gate at all before this, so an advisory could sit in the
+      # tree indefinitely without anyone noticing. --prod keeps build/dev-only
+      # toolchain noise (Expo, vitest, orval) from blocking merges.
+      - run: pnpm audit --audit-level high --prod

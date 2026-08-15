@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import rateLimit from "express-rate-limit";
 import { eq } from "drizzle-orm";
-import { db, usersTable, driversTable, sessionsTable, passwordResetTokensTable, corporateAccountsTable } from "@workspace/db";
+import { db, usersTable, driversTable, passwordResetTokensTable, corporateAccountsTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
@@ -10,12 +10,11 @@ import { hashPassword, verifyPassword, isLegacyHash } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
 import { storeOtp, verifyOtp } from "../lib/otpStore.js";
+import { createSession, revokeSession, revokeAllSessionsForUser, SESSION_TTL_MS } from "../lib/session.js";
 import { validatePassword, MIN_PASSWORD_LENGTH } from "../lib/passwordPolicy.js";
 import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
 
 const router: IRouter = Router();
-
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // Throttle credential-guessing / account-creation abuse. Keyed by IP (express-rate-limit default).
 const credentialLimiter = rateLimit({
@@ -35,10 +34,6 @@ const otpLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many OTP requests. Please try again later." },
 });
-
-function generateToken(_userId: number): string {
-  return crypto.randomBytes(32).toString("hex");
-}
 
 /** Issue the session as an HttpOnly cookie.
  *
@@ -113,8 +108,7 @@ router.post("/auth/register", credentialLimiter, async (req, res): Promise<void>
     })
     .returning();
 
-  const token = generateToken(user.id);
-  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+  const token = await createSession(user.id, user.role);
   setSessionCookie(res, token);
 
   if (referredByUserId) {
@@ -174,8 +168,7 @@ router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> =>
       .catch(err => req.log.error({ err, userId: user.id }, "legacy password upgrade failed"));
   }
 
-  const token = generateToken(user.id);
-  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+  const token = await createSession(user.id, user.role);
   setSessionCookie(res, token);
 
   let driverId: number | null = null;
@@ -211,7 +204,7 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
     (authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : "");
 
   if (token) {
-    await db.delete(sessionsTable).where(eq(sessionsTable.token, token));
+    await revokeSession(token);
   }
 
   res.clearCookie(SESSION_COOKIE, { path: "/" });
@@ -284,8 +277,7 @@ router.post("/auth/verify-otp", otpLimiter, async (req, res): Promise<void> => {
     user = newUser;
   }
 
-  const token = generateToken(user.id);
-  await db.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+  const token = await createSession(user.id, user.role);
   setSessionCookie(res, token);
 
   res.json({
@@ -375,8 +367,7 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
       })
       .returning();
 
-    const token = generateToken(user.id);
-    await tx.insert(sessionsTable).values({ userId: user.id, token, role: user.role, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+    const token = await createSession(user.id, user.role, tx);
     setSessionCookie(res, token);
 
     return { user, driver, token };
@@ -604,6 +595,11 @@ router.post("/auth/reset-password", credentialLimiter, async (req, res): Promise
       .set({ usedAt: new Date() })
       .where(eq(passwordResetTokensTable.id, resetToken.id));
   });
+
+  // Recovering an account has to mean the attacker loses it. Without this, a
+  // session they opened before the reset stays valid for the rest of its
+  // 30-day TTL and the victim has no way to end it.
+  await revokeAllSessionsForUser(resetToken.userId);
 
   res.json({ message: "Password updated successfully. You can now sign in." });
 });

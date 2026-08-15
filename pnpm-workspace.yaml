@@ -1,3 +1,15 @@
+auditConfig:
+  # One accepted exception, so `pnpm audit --audit-level high --prod` can gate
+  # CI honestly instead of being permanently red. image-size sits under Metro,
+  # inside the Expo driver-app: it reads image dimensions on the machine running
+  # the build and is not part of the APK, so exploiting it means feeding a
+  # malicious image into our own build. The fix is a 1.x -> 2.x major inside
+  # Metro's dependency tree, which we are not forcing under an unrelated app.
+  # Revisit at the next APK rebuild with `npx expo install --check`.
+  ignoreGhsas:
+    - GHSA-w3rx-r6r6-pgpr
+    - GHSA-5p2g-fcmc-qvqq
+
 packages:
   - artifacts/*
   - lib/*
@@ -55,6 +67,25 @@ overrides:
   # <=7.3.4. A range, not an exact pin, so this does not block future patches
   # the way the exact esbuild pin does.
   vite: '>=7.3.5'
+  # Reachable-in-production advisories that no direct bump clears on its own.
+  # dompurify arrives in the browser bundle via jspdf; nanoid via @uppy/aws-s3
+  # in lib/object-storage-web; ip-address under express-rate-limit, which parses
+  # a partly client-influenced X-Forwarded-For because app.ts trusts one proxy
+  # hop; qs and body-parser under express.
+  dompurify: '>=3.4.13'
+  nanoid: '>=5.1.16'
+  qs: '>=6.15.2'
+  ip-address: '>=10.3.1'
+  body-parser: '>=2.3.0'
+  fast-xml-parser: '>=5.7.0'
+  # Expo/Metro build toolchain. These never reach the APK — they run on the
+  # machine doing the build — but they are `dependencies` of driver-app, so
+  # `pnpm audit --prod` counts them and the CI gate would never go green.
+  # All four are same-major patches.
+  brace-expansion: '>=5.0.9'
+  js-yaml: '>=4.3.1'
+  postcss: '>=8.5.18'
+  shell-quote: '>=1.8.5'
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
@@ -76,7 +107,7 @@ overrides:
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-x64-musl': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-arm64-msvc': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-x64-msvc': '-'
-  esbuild: 0.27.3
+  esbuild: '>=0.28.1'
   esbuild>@esbuild/aix-ppc64: '-'
   esbuild>@esbuild/android-arm: '-'
   esbuild>@esbuild/android-arm64: '-'

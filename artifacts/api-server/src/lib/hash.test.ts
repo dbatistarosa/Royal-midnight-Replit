@@ -46,3 +46,23 @@ describe("isValidHash", () => {
     expect(isValidHash("short")).toBe(false);
   });
 });
+
+describe("isValidHash", () => {
+  it("recognises a bcrypt hash this codebase produced", () => {
+    expect(isValidHash(hashPassword("correct horse battery staple"))).toBe(true);
+  });
+
+  it("recognises the deprecated SHA-256 scheme still accepted at login", () => {
+    expect(isValidHash("a".repeat(64))).toBe(true);
+  });
+
+  it("rejects values that are merely long", () => {
+    // The old check was `value.length > 20`, which passed all of these — and the
+    // startup repair loop then hashed them AS the password, locking the account
+    // out permanently.
+    expect(isValidHash("this is not a hash at all")).toBe(false);
+    expect(isValidHash("$2b$12$tooshort")).toBe(false);
+    expect(isValidHash("a".repeat(63))).toBe(false);
+    expect(isValidHash("a".repeat(65))).toBe(false);
+  });
+});

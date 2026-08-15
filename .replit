@@ -33,4 +33,6 @@ channel = "stable-25_05"
 
 [userenv.shared]
 SMTP_FROM = "Support@royalmidnight.com"
-ADMIN_EMAIL = "Dbatistarosa89@gmail.com"
+# ADMIN_EMAIL is the owner's personal address and this repository is public —
+# publishing it hands anyone a target for phishing aimed at the admin account.
+# It is set as an environment variable in Vercel instead.

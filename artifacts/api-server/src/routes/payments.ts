@@ -844,7 +844,10 @@ async function confirmBookingFromPaymentIntent(bookingId: number, intentId: stri
         .set({ status: "pending", stripePaymentIntentId: intentId, updatedAt: new Date() })
         .where(eq(bookings.id, bookingId));
       console.log(`[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intentId})`);
-      firePostPaymentEmails(bookingId).catch(err => console.error("[payments] post-payment email error:", err));
+      // Awaited: this runs from the Stripe webhook, and Vercel can freeze the
+      // function the moment the response is sent. Fire-and-forget meant the
+      // confirmation and driver-offer emails were simply lost.
+      await firePostPaymentEmails(bookingId).catch(err => console.error("[payments] post-payment email error:", err));
     } else if (current.status === "cancelled") {
       // Booking was cancelled but payment went through anyway (race condition) — issue full refund
       console.warn(`[payments] PI succeeded for already-cancelled booking #${bookingId} — issuing full refund (PI: ${intentId})`);
@@ -915,9 +918,14 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
     return;
   }
 
-  // Acknowledge Stripe immediately — processing happens below
-  res.json({ received: true });
-
+  // Process first, THEN acknowledge.
+  //
+  // Vercel may freeze the function the moment a response is sent, so replying
+  // up front meant payment_intent.succeeded could fail to promote the booking
+  // out of awaiting_payment and never fire the confirmation emails — while
+  // Stripe recorded a 200 and never retried. routes/cron.ts documents this
+  // exact hazard and awaits its job before responding; the lesson had not been
+  // carried across. Stripe allows 10 seconds, far more than these queries take.
   try {
     if (event.type === "payment_intent.created") {
       const intent = event.data.object as Stripe.PaymentIntent;
@@ -947,7 +955,7 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
             .set({ status: "pending", stripePaymentIntentId: piId ?? undefined, updatedAt: new Date() })
             .where(eq(bookings.id, bookingId));
           console.log(`[payments] Invoice paid → Booking #${bookingId} → pending (PI: ${piId ?? "N/A"})`);
-          firePostPaymentEmails(bookingId).catch(err => console.error("[payments] invoice.paid email error:", err));
+          await firePostPaymentEmails(bookingId).catch(err => console.error("[payments] invoice.paid email error:", err));
         }
       }
     }
@@ -1016,8 +1024,13 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       const dispute = event.data.object as Stripe.Dispute;
       console.warn("[payments] Chargeback dispute opened:", dispute.id, "amount:", dispute.amount, "reason:", dispute.reason);
     }
+
+    res.json({ received: true });
   } catch (err: any) {
-    console.error("[payments] webhook processing error:", err.message);
+    req.log?.error({ err, eventType: event.type }, "webhook_processing_failed");
+    // 500 makes Stripe retry with backoff, which is exactly what we want for a
+    // transient database or mail failure. Swallowing it lost the event.
+    res.status(500).json({ error: "Processing failed" });
   }
 });
 
