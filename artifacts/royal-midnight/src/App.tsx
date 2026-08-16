@@ -52,6 +52,7 @@ import DriverEarnings from "@/pages/driver/earnings";
 import DriverStats from "@/pages/driver/stats";
 import DriverProfile from "@/pages/driver/profile";
 import DriverPayout from "@/pages/driver/payout";
+import DriverAgreement from "@/pages/driver-agreement";
 import DriverDocuments from "@/pages/driver/documents";
 import DriverVehicles from "@/pages/driver/vehicles";
 
@@ -384,6 +385,11 @@ function Router() {
       </Route>
       <Route path="/terms">
         <Layout><Terms /></Layout>
+      </Route>
+      {/* Public: a chauffeur must be able to read it before signing up, and to
+          re-read it afterwards from the footer. */}
+      <Route path="/driver-agreement">
+        <Layout><DriverAgreement /></Layout>
       </Route>
       <Route path="/privacy">
         <Layout><Privacy /></Layout>

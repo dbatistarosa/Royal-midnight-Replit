@@ -140,6 +140,12 @@ const step3Schema = z.object({
 });
 
 const step4Schema = z.object({
+  // The chauffeur agreement is accepted on the final step, alongside the
+  // documents, so it is agreed to once the applicant has seen what they are
+  // actually signing up to rather than as a formality on the first screen.
+  agreementAccepted: z.literal(true, {
+    errorMap: () => ({ message: "You must accept the Chauffeur Agreement to apply" }),
+  }),
   licenseNumber: z.string().min(1, "License number is required"),
   licenseExpiry: z.string().min(1, "License expiry is required"),
   regVin: z.string().optional(),
@@ -186,7 +192,7 @@ export default function DriverOnboarding() {
   const form1 = useForm<Step1Values>({ resolver: zodResolver(step1Schema), defaultValues: { name: "", email: "", phone: "", password: "", confirmPassword: "" } });
   const form2 = useForm<Step2Values>({ resolver: zodResolver(step2Schema), defaultValues: { serviceArea: "" } });
   const form3 = useForm<Step3Values>({ resolver: zodResolver(step3Schema), defaultValues: { vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleClass: "", vehicleColor: "", passengerCapacity: 4, luggageCapacity: 3, hasCarSeat: false } });
-  const form4 = useForm<Step4Values>({ resolver: zodResolver(step4Schema), defaultValues: { licenseNumber: "", licenseExpiry: "", regVin: "", regPlate: "", regExpiry: "", insuranceExpiry: "" } });
+  const form4 = useForm<Step4Values>({ resolver: zodResolver(step4Schema), defaultValues: { licenseNumber: "", licenseExpiry: "", regVin: "", regPlate: "", regExpiry: "", insuranceExpiry: "", agreementAccepted: false as unknown as true } });
 
   const watchedMake = form3.watch("vehicleMake");
   const watchedModel = form3.watch("vehicleModel");
@@ -277,6 +283,10 @@ export default function DriverOnboarding() {
         insuranceExpiry: step4Data.insuranceExpiry || "",
         insuranceDoc: insuranceDocPath,
         profilePicture: profilePicPath ?? undefined,
+        // Recorded server-side with the timestamp, IP and agreement version.
+        // Sent as part of the same request that creates the account so an
+        // approved chauffeur can never exist without a matching acceptance.
+        agreementAccepted: true,
       };
 
       const res = await fetch(`${API_BASE}/auth/driver-register`, {
@@ -799,6 +809,38 @@ export default function DriverOnboarding() {
                 <div className="bg-primary/5 border border-primary/15 p-4 text-xs text-gray-500">
                   All three documents are required. By submitting, you confirm all provided information is accurate and that you meet Royal Midnight's professional chauffeur standards.
                 </div>
+
+                {/* Acceptance is recorded server-side with the timestamp, IP and
+                    agreement version, so an approved chauffeur can never exist
+                    without one. */}
+                <FormField control={form4.control} name="agreementAccepted" render={({ field }) => (
+                  <FormItem>
+                    <label className="flex items-start gap-3 border border-white/15 hover:border-primary/40 transition-colors p-4 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!field.value}
+                        onChange={e => field.onChange(e.target.checked)}
+                        className="accent-primary mt-0.5 w-4 h-4 flex-shrink-0"
+                      />
+                      <span className="text-sm text-gray-300 leading-relaxed">
+                        I have read and accept the{" "}
+                        <a href="/driver-agreement" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">
+                          Chauffeur Agreement
+                        </a>
+                        , the{" "}
+                        <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">
+                          Terms of Service
+                        </a>{" "}
+                        and the{" "}
+                        <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">
+                          Privacy Policy
+                        </a>
+                        . I understand I am engaged as an independent contractor.
+                      </span>
+                    </label>
+                    <FormMessage />
+                  </FormItem>
+                )} />
 
                 <div className="flex justify-between pt-2">
                   <Button type="button" variant="outline" onClick={() => setStep(3)} className="border-white/15 text-white/60 hover:text-white rounded-none uppercase tracking-widest text-xs px-6 h-11">

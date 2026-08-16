@@ -12,6 +12,7 @@ import { sendOtpSms } from "../lib/sms.js";
 import { storeOtp, verifyOtp } from "../lib/otpStore.js";
 import { createSession, revokeSession, revokeAllSessionsForUser, SESSION_TTL_MS } from "../lib/session.js";
 import { validatePassword, MIN_PASSWORD_LENGTH } from "../lib/passwordPolicy.js";
+import { recordAcceptances } from "../lib/legalAcceptance.js";
 import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
 
 const router: IRouter = Router();
@@ -356,6 +357,11 @@ const DriverRegisterBody = z.object({
   insuranceExpiry: z.string().optional(),
   insuranceDoc: z.string().optional(),
   profilePicture: z.string().optional(),
+  /** Ticked on the final onboarding step. Required: a chauffeur who never
+   *  accepted the agreement must not be able to reach the approval queue. */
+  agreementAccepted: z.literal(true, {
+    message: "The Chauffeur Agreement must be accepted to register.",
+  }),
 });
 
 router.post("/auth/driver-register", credentialLimiter, async (req, res): Promise<void> => {
@@ -371,7 +377,7 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
     return;
   }
 
-  const { name, email, phone, password, ...driverFields } = parsed.data;
+  const { name, email, phone, password, agreementAccepted: _accepted, ...driverFields } = parsed.data;
 
   const [existingUser] = await db.select({ id: usersTable.id, role: usersTable.role }).from(usersTable).where(eq(usersTable.email, email));
   if (existingUser) {
@@ -410,6 +416,16 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
     setSessionCookie(res, token);
 
     return { user, driver, token };
+  });
+
+  // Recorded after the account exists so the row can reference it. Outside the
+  // transaction and non-blocking on purpose: the applicant has already agreed
+  // and their account is created, and failing the registration because an audit
+  // insert failed would be the wrong trade. See lib/legalAcceptance.ts.
+  void recordAcceptances(req, ["driver_agreement", "terms", "privacy"], {
+    userId: result.user.id,
+    driverId: result.driver.id,
+    email,
   });
 
   res.status(201).json({

@@ -187,6 +187,10 @@ export default function Book() {
   // exactly like the id it travels with.
   const pendingBookingTokenRef = useRef<string | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
+  /** The passenger must accept the Terms, Privacy Policy and cancellation
+   *  policy before paying. Recorded server-side against this booking, with the
+   *  timestamp and IP, when the reservation is created. */
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [minBookingHours, setMinBookingHours] = useState(2);
   const [pickupAirline, setPickupAirline] = useState("");
@@ -1731,15 +1735,34 @@ export default function Book() {
                           </div>
                         )}
 
+                        <label className={`flex items-start gap-3 border p-4 cursor-pointer transition-colors ${termsAccepted ? "border-primary/40 bg-primary/5" : "border-white/12 hover:border-white/25"}`}>
+                          <input
+                            type="checkbox"
+                            checked={termsAccepted}
+                            onChange={e => setTermsAccepted(e.target.checked)}
+                            className="accent-primary mt-0.5 w-4 h-4 flex-shrink-0"
+                          />
+                          <span className="text-xs text-gray-400 leading-relaxed">
+                            I accept the{" "}
+                            <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">Terms of Service</a>
+                            {" "}and{" "}
+                            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">Privacy Policy</a>,
+                            including the cancellation policy: free more than 12 hours before pickup, 25% between 2 and 12 hours,
+                            and the full fare within 2 hours or for a no-show.
+                          </span>
+                        </label>
+
                         <Button
                           type="button"
                           onClick={handleConfirmAndPay}
-                          disabled={isConfirming}
-                          className="w-full bg-primary text-black hover:bg-primary/90 font-semibold uppercase tracking-[0.2em] text-xs h-[52px] rounded-none shadow-[0_0_30px_rgba(201,168,76,0.2)]"
+                          disabled={isConfirming || !termsAccepted}
+                          className="w-full bg-primary text-black hover:bg-primary/90 font-semibold uppercase tracking-[0.2em] text-xs h-[52px] rounded-none shadow-[0_0_30px_rgba(201,168,76,0.2)] disabled:opacity-40"
                         >
                           {isConfirming
                             ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Preparing...</>
-                            : `Pay $${effectiveTotal.toFixed(2)}`}
+                            : !termsAccepted
+                              ? "Accept the terms to continue"
+                              : `Pay $${effectiveTotal.toFixed(2)}`}
                         </Button>
 
                         <Button

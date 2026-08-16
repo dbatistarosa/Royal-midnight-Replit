@@ -46,6 +46,7 @@ export function Footer() {
           <div className="flex space-x-6 mt-4 md:mt-0">
             <Link href="/privacy" className="text-gray-500 text-xs hover:text-white transition-colors">Privacy Policy</Link>
             <Link href="/terms" className="text-gray-500 text-xs hover:text-white transition-colors">Terms of Service</Link>
+            <Link href="/driver-agreement" className="text-gray-500 text-xs hover:text-white transition-colors">Chauffeur Agreement</Link>
           </div>
         </div>
       </div>

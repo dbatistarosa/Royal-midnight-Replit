@@ -9,6 +9,7 @@ import { hasPgErrorCode, UNDEFINED_COLUMN } from "../lib/pgError.js";
 import { hasDriverBlockTable } from "../lib/schemaGuards.js";
 import { loadZoneCoverage, isTripVisibleToDriver, loadPickupPoints, loadPickupPoint, savePickupPoint } from "../lib/serviceZones.js";
 import { serializeBooking } from "../lib/serializeBooking.js";
+import { recordAcceptance, recordAcceptances } from "../lib/legalAcceptance.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import { HOURLY_RATES, DEFAULT_RATE_PER_MILE, computeQuote, readQuoteExtensions } from "./quote.js";
 import { evaluatePromoCode } from "./promos.js";
@@ -684,6 +685,16 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     const { trackingToken: _omitted, ...withoutToken } = bookingValues;
     [booking] = await db.insert(bookingsTable).values(withoutToken).returning() as [typeof bookingsTable.$inferSelect];
   }
+
+  // The passenger ticked the terms box on the final booking step. Recorded
+  // against this specific reservation, because that is the act being agreed to
+  // — the cancellation policy in particular is per-booking. Non-blocking: the
+  // booking exists and was paid for, and losing the audit row must not undo it.
+  void recordAcceptances(req, ["terms", "privacy"], {
+    bookingId: booking.id,
+    userId: bookingUserId ?? null,
+    email: parsed.data.passengerEmail,
+  });
 
   // Cache the geocoded pickup so the driver service-area filter never has to
   // geocode a pending booking on a pool refresh. Fire-and-forget, and written
@@ -1383,6 +1394,17 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
     res.status(409).json({ error: "Booking was just taken by another driver" });
     return;
   }
+
+  // Accepting a trip is the act the per-trip terms attach to: the confirmation
+  // deadline, the arrival obligation and the late-cancellation rule all become
+  // binding at this moment, which is why it is recorded per booking rather than
+  // once at onboarding.
+  void recordAcceptance(req, {
+    documentType: "trip_terms",
+    bookingId: id,
+    driverId: driverRow.id,
+    userId: caller.userId,
+  });
 
   // Step 2: For authorized bookings, attempt Stripe capture now that the assignment is recorded.
   // On capture failure: revert booking to awaiting_payment + unassign driver + alert admin.

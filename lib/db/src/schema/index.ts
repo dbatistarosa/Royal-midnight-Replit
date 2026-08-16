@@ -27,3 +27,4 @@ export * from "./fixed-routes";
 export * from "./extra-services";
 export * from "./object-owners";
 export * from "./driver-accountability";
+export * from "./legal-acceptances";
