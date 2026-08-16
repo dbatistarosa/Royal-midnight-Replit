@@ -5,7 +5,7 @@ import { db, driversTable, bookingsTable, settingsTable, usersTable, complianceD
 import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
 import { signedObjectDownloadPath } from "../lib/signedUrl.js";
 import { revokeAllSessionsForUser } from "../lib/session.js";
-import { encryptField, lastN, safeDecryptField } from "../lib/encrypt.js";
+import { encryptField, lastN, safeDecryptField, isFieldEncryptionConfigError } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
 import { hashPassword } from "../lib/hash.js";
 import { sendDriverAccountSetupEmail } from "../lib/mailer.js";
@@ -26,6 +26,39 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+/** Minimal shape of the pino child logger express attaches to each request. */
+type RequestLogger = { error: (obj: object, msg: string) => void };
+
+/**
+ * The masked payout view returned by both GET and PATCH /drivers/:id/payout.
+ *
+ * lastN() decrypts to compute the mask, so a broken or rotated
+ * FIELD_ENCRYPTION_KEY would otherwise turn the driver's own payout screen into
+ * a 500. Losing the four-digit hint is survivable; losing the page is not, and
+ * the has* flags stay truthful either way so the UI still knows a value exists.
+ */
+function payoutView(d: typeof driversTable.$inferSelect, log?: RequestLogger) {
+  const mask = (stored: string | null): string | null => {
+    try {
+      return lastN(stored, 4);
+    } catch (err) {
+      log?.error({ err: (err as Error).message, driverId: d.id }, "payout_field_decrypt_failed");
+      return null;
+    }
+  };
+  return {
+    payoutLegalName: d.payoutLegalName ?? "",
+    payoutEmail: d.payoutEmail ?? "",
+    payoutBankName: d.payoutBankName ?? "",
+    hasSsn: !!d.payoutSsn,
+    ssnLast4: mask(d.payoutSsn),
+    hasRoutingNumber: !!d.payoutRoutingNumber,
+    routingLast4: mask(d.payoutRoutingNumber),
+    hasAccountNumber: !!d.payoutAccountNumber,
+    accountLast4: mask(d.payoutAccountNumber),
+  };
+}
 
 function parseDriver(d: typeof driversTable.$inferSelect) {
   // payoutSsn/payoutRoutingNumber/payoutAccountNumber are encrypted at rest,
@@ -423,18 +456,8 @@ router.get("/drivers/:id/payout", requireAuth, async (req, res): Promise<void> =
     res.status(403).json({ error: "Access denied" }); return;
   }
 
-  // Return masked sensitive fields — never return raw SSN/routing/account
-  res.json({
-    payoutLegalName: driver.payoutLegalName ?? "",
-    payoutEmail: driver.payoutEmail ?? "",
-    payoutBankName: driver.payoutBankName ?? "",
-    hasSsn: !!driver.payoutSsn,
-    ssnLast4: lastN(driver.payoutSsn, 4),
-    hasRoutingNumber: !!driver.payoutRoutingNumber,
-    routingLast4: lastN(driver.payoutRoutingNumber, 4),
-    hasAccountNumber: !!driver.payoutAccountNumber,
-    accountLast4: lastN(driver.payoutAccountNumber, 4),
-  });
+  // Return masked sensitive fields — never return raw SSN/routing/account.
+  res.json(payoutView(driver, req.log));
 });
 
 router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void> => {
@@ -456,15 +479,40 @@ router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void>
   if (payoutLegalName !== undefined) updates.payoutLegalName = payoutLegalName.trim() || null;
   if (payoutEmail !== undefined) updates.payoutEmail = payoutEmail.trim() || null;
   if (payoutBankName !== undefined) updates.payoutBankName = payoutBankName.trim() || null;
-  // Encrypt sensitive fields before storage
-  if (payoutSsn && payoutSsn.replace(/\D/g, "").length >= 9) {
-    updates.payoutSsn = encryptField(payoutSsn.replace(/\D/g, ""));
+
+  // A silently-dropped secret is worse than a rejected form: the driver sees
+  // "saved", the routing number never lands, and payday is the first anyone
+  // notices. Bad lengths are now named instead of ignored.
+  const ssnDigits = payoutSsn?.replace(/\D/g, "") ?? "";
+  const routingDigits = payoutRoutingNumber?.replace(/\D/g, "") ?? "";
+  const accountDigits = payoutAccountNumber?.replace(/\D/g, "") ?? "";
+  if (payoutSsn && ssnDigits.length !== 9) {
+    res.status(400).json({ error: "SSN must be 9 digits" }); return;
   }
-  if (payoutRoutingNumber && payoutRoutingNumber.replace(/\D/g, "").length === 9) {
-    updates.payoutRoutingNumber = encryptField(payoutRoutingNumber.replace(/\D/g, ""));
+  if (payoutRoutingNumber && routingDigits.length !== 9) {
+    res.status(400).json({ error: "Routing number must be 9 digits" }); return;
   }
-  if (payoutAccountNumber && payoutAccountNumber.replace(/\D/g, "").length >= 4) {
-    updates.payoutAccountNumber = encryptField(payoutAccountNumber.replace(/\D/g, ""));
+  if (payoutAccountNumber && accountDigits.length < 4) {
+    res.status(400).json({ error: "Account number is too short" }); return;
+  }
+
+  // Encrypt sensitive fields before storage. A malformed FIELD_ENCRYPTION_KEY is
+  // a deployment fault: refuse the write and name it, rather than 500-ing or
+  // falling back to storing the number in cleartext.
+  try {
+    if (ssnDigits) updates.payoutSsn = encryptField(ssnDigits);
+    if (routingDigits) updates.payoutRoutingNumber = encryptField(routingDigits);
+    if (accountDigits) updates.payoutAccountNumber = encryptField(accountDigits);
+  } catch (err) {
+    if (isFieldEncryptionConfigError(err)) {
+      req.log.error({ err: err.message }, "field_encryption_misconfigured");
+      res.status(503).json({
+        error: "Your banking details could not be saved securely right now. " +
+               "Our team has been notified — please try again shortly.",
+      });
+      return;
+    }
+    throw err;
   }
 
   if (Object.keys(updates).length === 0) {
@@ -473,17 +521,7 @@ router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void>
 
   const [updated] = await db.update(driversTable).set(updates).where(eq(driversTable.id, id)).returning();
 
-  res.json({
-    payoutLegalName: updated.payoutLegalName ?? "",
-    payoutEmail: updated.payoutEmail ?? "",
-    payoutBankName: updated.payoutBankName ?? "",
-    hasSsn: !!updated.payoutSsn,
-    ssnLast4: lastN(updated.payoutSsn, 4),
-    hasRoutingNumber: !!updated.payoutRoutingNumber,
-    routingLast4: lastN(updated.payoutRoutingNumber, 4),
-    hasAccountNumber: !!updated.payoutAccountNumber,
-    accountLast4: lastN(updated.payoutAccountNumber, 4),
-  });
+  res.json(payoutView(updated!, req.log));
 });
 
 // Statuses where a driver is actively en route to / with a passenger — used to

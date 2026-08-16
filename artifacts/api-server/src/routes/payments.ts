@@ -16,6 +16,7 @@ import { sendNewRideOfferPush } from "../lib/push.js";
 import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
 import { encryptField, safeDecryptField } from "../lib/encrypt.js";
 import { sendStripeError } from "../lib/stripeError.js";
+import { isMissingCustomerError, forgetStaleStripeCustomer } from "../lib/stripeCustomer.js";
 
 const router: IRouter = Router();
 
@@ -278,15 +279,31 @@ router.post("/payments/create-intent", optionalAuth, async (req, res): Promise<v
     // Do NOT use setup_future_usage on the PaymentIntent: it triggers stronger 3DS
     // requirements on real cards and can break the payment flow. Cards are saved to the
     // customer record via the webhook after payment succeeds instead.
-    const paymentIntent = await stripe.paymentIntents.create({
+    const piParams = {
       amount: amountCents,
-      currency: "usd",
-      capture_method: "automatic",
+      currency: "usd" as const,
+      capture_method: "automatic" as const,
       payment_method_types: ["card"],
       metadata,
       description,
-      ...(customerId ? { customer: customerId } : {}),
-    });
+    };
+
+    let paymentIntent;
+    try {
+      paymentIntent = await stripe.paymentIntents.create({
+        ...piParams,
+        ...(customerId ? { customer: customerId } : {}),
+      });
+    } catch (err) {
+      // A stored customer id from a previous Stripe account (or the other mode)
+      // still looks valid but resolves to nothing, and it took the entire
+      // payment down with it. The customer record is only a convenience for
+      // saved cards — drop the dead id and let the payment through.
+      if (!customerId || !isMissingCustomerError(err)) throw err;
+      req.log.warn({ bookingId: bId, customerId, userId: booking.userId }, "stripe_customer_missing_retrying");
+      if (booking.userId) await forgetStaleStripeCustomer(booking.userId, req.log);
+      paymentIntent = await stripe.paymentIntents.create(piParams);
+    }
 
     // Persist the PI ID on the booking immediately so that:
     //  1. "Sync Payment" can locate it even before confirm is called
@@ -1098,6 +1115,14 @@ router.get("/payments/saved-cards", requireAuth, async (req, res): Promise<void>
       })),
     });
   } catch (err: any) {
+    // A customer id Stripe no longer knows means this account genuinely has no
+    // saved cards on the current Stripe account — an empty list is the honest
+    // answer, and it stops the stale id from breaking the profile page too.
+    if (isMissingCustomerError(err)) {
+      await forgetStaleStripeCustomer(caller.userId, req.log);
+      res.json({ cards: [] });
+      return;
+    }
     sendStripeError(req, res, err);
   }
 });
@@ -1211,6 +1236,14 @@ router.post("/payments/tip/:bookingId", requireAuth, async (req, res): Promise<v
 
     res.json({ success: true, tipAmount, paymentIntentId: intent.id });
   } catch (err: any) {
+    // The saved card belongs to a customer Stripe no longer has. Off-session
+    // charging is impossible, so say so plainly and drop the dead reference —
+    // the on-session tip-checkout route below still works.
+    if (isMissingCustomerError(err)) {
+      await forgetStaleStripeCustomer(caller.userId, req.log);
+      res.status(400).json({ error: "Your saved payment method is no longer valid. Please add a card again to leave a tip." });
+      return;
+    }
     sendStripeError(req, res, err, "Tip charge failed — please try again.");
   }
 });
@@ -1381,6 +1414,14 @@ router.post("/payments/save-payment-method", requireAuth, async (req, res): Prom
       },
     });
   } catch (err: any) {
+    // Saving the card is a convenience that runs after the money has already
+    // moved. A dead customer id must never turn that into a visible failure on
+    // the confirmation screen — drop it and report the card as unsaved.
+    if (isMissingCustomerError(err)) {
+      await forgetStaleStripeCustomer(caller.userId, req.log);
+      res.json({ saved: false, reason: "Stripe customer no longer exists — a new one will be created on your next booking." });
+      return;
+    }
     sendStripeError(req, res, err);
   }
 });

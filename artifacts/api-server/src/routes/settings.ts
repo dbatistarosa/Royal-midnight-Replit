@@ -6,13 +6,26 @@ import { isSecretSetting, redactSettings } from "../lib/secretSettings.js";
 
 const router: IRouter = Router();
 
-// Public read of safe settings (min_booking_hours, florida_tax_rate)
+// Public read of safe settings (min_booking_hours, min_charter_hours, florida_tax_rate)
+const PUBLIC_SETTING_KEYS = [
+  "min_booking_hours",
+  // The booking form needs the hourly-charter floor to set the stepper's
+  // minimum. It is published policy — the same number the customer is told
+  // when the server rejects a shorter charter — not deployment information.
+  "min_charter_hours",
+  "florida_tax_rate",
+  "cc_fee_pct",
+  "social_instagram_url",
+  "social_facebook_url",
+  "social_google_profile_url",
+];
+
 router.get("/settings/public", async (_req, res): Promise<void> => {
   const rows = await db.select().from(settingsTable);
   const map: Record<string, string> = {};
   for (const row of rows) {
     // Only expose non-sensitive keys
-    if (["min_booking_hours", "florida_tax_rate", "cc_fee_pct", "social_instagram_url", "social_facebook_url", "social_google_profile_url"].includes(row.key)) {
+    if (PUBLIC_SETTING_KEYS.includes(row.key)) {
       map[row.key] = row.value;
     }
   }

@@ -41,6 +41,10 @@ type PayoutBoard = {
   payouts: DriverPayout[];
   totalGross: number;
   totalDriverNet: number;
+  /** Present when at least one stored banking field could not be decrypted —
+   *  the board still renders, but the masks are missing and the operator needs
+   *  to know why before payday rather than after. */
+  encryptionWarning?: string;
 };
 
 type BankForm = {
@@ -132,12 +136,23 @@ export default function AdminPayouts() {
         headers: { "Content-Type": "application/json", Authorization: authHdr },
         body: JSON.stringify(bankForm),
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        // The server already explains itself — "Routing number must be 9 digits",
+        // or that FIELD_ENCRYPTION_KEY is misconfigured. Swallowing that into a
+        // flat "Could not save bank details" is what made this failure take a
+        // trip through the Vercel logs to diagnose.
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `Save failed (HTTP ${res.status}).`);
+      }
       toast({ title: "Bank details saved", description: `Updated banking info for ${editDriver.driverName}.` });
       setEditDriver(null);
       fetchPayouts();
-    } catch {
-      toast({ title: "Error", description: "Could not save bank details.", variant: "destructive" });
+    } catch (err) {
+      toast({
+        title: "Could not save bank details",
+        description: err instanceof Error ? err.message : "Unexpected error.",
+        variant: "destructive",
+      });
     } finally {
       setSavingBank(false);
     }
@@ -190,6 +205,13 @@ export default function AdminPayouts() {
           </Button>
         </div>
       </div>
+
+      {board?.encryptionWarning && (
+        <div className="mb-6 border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+          <span className="font-medium uppercase tracking-widest text-xs block mb-1">Banking encryption problem</span>
+          {board.encryptionWarning}
+        </div>
+      )}
 
       {/* Summary Cards */}
       {board && (

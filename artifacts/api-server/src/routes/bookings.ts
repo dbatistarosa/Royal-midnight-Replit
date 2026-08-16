@@ -570,8 +570,10 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     charterMode: ext.charterMode,
     charterHours: ext.charterHours,
     userId: isCorporate && caller?.role === "corporate" ? caller.userId : (bookingUserId ?? undefined),
-    // Admins take phone bookings for trips that may be imminent.
+    // Admins take phone bookings for trips that may be imminent, and may agree
+    // a charter block shorter than the published minimum.
     skipLeadTimeCheck: caller?.role === "admin",
+    skipCharterMinimumCheck: caller?.role === "admin",
   });
   if (!quoteOutcome.ok) {
     res.status(quoteOutcome.status).json(quoteOutcome.body);

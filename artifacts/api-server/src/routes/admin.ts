@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { sql, desc, eq, and, isNull, or, gt, inArray } from "drizzle-orm";
 import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable, complianceDocumentsTable, corporateAccountsTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
-import { encryptField, safeDecryptField, lastN } from "../lib/encrypt.js";
+import { encryptField, safeDecryptField, lastN, isFieldEncryptionConfigError, getFieldEncryptionStatus } from "../lib/encrypt.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { Resend } from "resend";
 import {
@@ -339,6 +339,21 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
     });
   }
 
+  // One driver whose stored value cannot be decrypted must not take down the
+  // whole board — that is the screen an operator opens to find out that
+  // something is wrong with payouts in the first place. The failure is reported
+  // once, as a flag on the response, rather than as a 500.
+  let decryptionFailed = false;
+  const readEncrypted = <T>(fn: () => T): T | null => {
+    try {
+      return fn();
+    } catch (err) {
+      decryptionFailed = true;
+      req.log.error({ err: (err as Error).message }, "payout_field_decrypt_failed");
+      return null;
+    }
+  };
+
   const payouts = drivers.map(d => {
     const earnings = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0, tips: 0 };
     const commission = Math.round(earnings.gross * commissionPct * 100) / 100;
@@ -359,8 +374,8 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
       // emails already carry it in full. The account number does not leave the
       // server — the UI has only ever shown its last four, and the emails mask
       // it the same way. Returning it whole was the odd one out.
-      routingNumber: safeDecryptField(d.payoutRoutingNumber),
-      accountLast4: lastN(d.payoutAccountNumber, 4),
+      routingNumber: readEncrypted(() => safeDecryptField(d.payoutRoutingNumber)),
+      accountLast4: readEncrypted(() => lastN(d.payoutAccountNumber, 4)),
       legalName: d.payoutLegalName ?? null,
       payoutEmail: d.payoutEmail ?? d.email,
       hasBankDetails: !!(d.payoutBankName && d.payoutRoutingNumber && d.payoutAccountNumber),
@@ -374,6 +389,9 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
     payouts,
     totalGross: Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) / 100,
     totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
+    ...(decryptionFailed
+      ? { encryptionWarning: "Some banking fields could not be decrypted. Check FIELD_ENCRYPTION_KEY in the deployment environment." }
+      : {}),
   });
 });
 
@@ -488,15 +506,33 @@ router.patch("/admin/drivers/:id/bank", requireAdmin, async (req, res): Promise<
   // The secrets are never blanked by omission or by an empty string: the edit
   // form no longer pre-fills them, so "unchanged" and "cleared" would otherwise
   // look identical. Clearing them is not something this screen needs to do.
-  if (routingNumber) {
-    const digits = routingNumber.replace(/\D/g, "");
-    if (digits.length !== 9) { res.status(400).json({ error: "Routing number must be 9 digits" }); return; }
-    updates.payoutRoutingNumber = encryptField(digits);
-  }
-  if (accountNumber) {
-    const digits = accountNumber.replace(/\D/g, "");
-    if (digits.length < 4) { res.status(400).json({ error: "Account number is too short" }); return; }
-    updates.payoutAccountNumber = encryptField(digits);
+  //
+  // encryptField throws when FIELD_ENCRYPTION_KEY is malformed, and that is a
+  // deployment fault rather than a bad request — answer 503 and name the
+  // variable instead of letting it fall through to a generic 500. Refusing the
+  // write is the point: storing a routing number in cleartext because the key
+  // is broken would be worse than failing.
+  try {
+    if (routingNumber) {
+      const digits = routingNumber.replace(/\D/g, "");
+      if (digits.length !== 9) { res.status(400).json({ error: "Routing number must be 9 digits" }); return; }
+      updates.payoutRoutingNumber = encryptField(digits);
+    }
+    if (accountNumber) {
+      const digits = accountNumber.replace(/\D/g, "");
+      if (digits.length < 4) { res.status(400).json({ error: "Account number is too short" }); return; }
+      updates.payoutAccountNumber = encryptField(digits);
+    }
+  } catch (err) {
+    if (isFieldEncryptionConfigError(err)) {
+      req.log.error({ err: err.message }, "field_encryption_misconfigured");
+      res.status(503).json({
+        error: "Banking details cannot be saved: field encryption is misconfigured on the server. " +
+               "Set FIELD_ENCRYPTION_KEY to a 64-character hex value in the deployment environment, then redeploy.",
+      });
+      return;
+    }
+    throw err;
   }
 
   if (Object.keys(updates).length === 0) {
@@ -579,6 +615,18 @@ router.patch("/admin/vehicle-catalog/:id/approve", requireAdmin, async (req, res
 // GET /admin/mailer-status — check which email provider is active
 router.get("/admin/mailer-status", requireAdmin, (_req, res) => {
   res.json(getMailerStatus());
+});
+
+/**
+ * GET /admin/encryption-status — is field encryption on, off, or broken?
+ *
+ * A misconfigured FIELD_ENCRYPTION_KEY is invisible until someone tries to save
+ * a routing number and the write fails, which is exactly how it went unnoticed
+ * in production. Admin-only: whether a key is present is deployment
+ * information, and never includes the key or anything derived from it.
+ */
+router.get("/admin/encryption-status", requireAdmin, (_req, res) => {
+  res.json(getFieldEncryptionStatus());
 });
 
 // POST /admin/test-email — send a test email to verify Resend is working

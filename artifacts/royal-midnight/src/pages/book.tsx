@@ -205,6 +205,10 @@ export default function Book() {
   const [waypoints, setWaypoints] = useState<string[]>([]);
   const [charterMode, setCharterMode] = useState<"route" | "hourly">("route");
   const [charterHours, setCharterHours] = useState(3);
+  /** Admin-set floor for hourly charters, loaded from /settings/public below.
+   *  Defaults to the server's own default so the stepper is never looser than
+   *  the rule while the request is in flight. */
+  const [minCharterHours, setMinCharterHours] = useState(3);
   // Delegate/EA: booking on behalf of another traveler
   type ManagedTraveler = { eaUserId: number; travelerId: number; travelerName: string | null; travelerEmail: string | null };
   const [managedTravelers, setManagedTravelers] = useState<ManagedTraveler[]>([]);
@@ -398,7 +402,10 @@ export default function Book() {
       if (d.selectedVehicle) setSelectedVehicle(d.selectedVehicle as string);
       if (Array.isArray(d.waypoints)) setWaypoints(d.waypoints as string[]);
       if (d.charterMode === "hourly" || d.charterMode === "route") setCharterMode(d.charterMode);
-      if (typeof d.charterHours === "number") setCharterHours(d.charterHours);
+      // A draft saved before the minimum was raised must not restore a block
+      // the server will now refuse to quote. The clamp against the loaded
+      // minimum happens in the /settings/public effect.
+      if (typeof d.charterHours === "number") setCharterHours(Math.min(24, Math.max(1, d.charterHours)));
       if (typeof d.promoCode === "string" && d.promoCode) setPromoCode(d.promoCode);
       if (d.promoResult) setPromoResult(d.promoResult as typeof promoResult);
       if (Array.isArray(d.selectedExtras)) setSelectedExtras(new Set(d.selectedExtras as number[]));
@@ -425,6 +432,15 @@ export default function Book() {
       .then(r => r.json())
       .then((data: Record<string, string>) => {
         if (data.min_booking_hours) setMinBookingHours(parseFloat(data.min_booking_hours));
+        // The charter stepper used to floor at a hardcoded 1 hour, so a customer
+        // could book — and be quoted for — a block shorter than the published
+        // minimum. The server rejects those now; raising the stepper here means
+        // they never get that far.
+        const min = parseFloat(data.min_charter_hours ?? "");
+        if (Number.isFinite(min) && min >= 1) {
+          setMinCharterHours(min);
+          setCharterHours(h => Math.max(h, min));
+        }
       })
       .catch(() => {});
   }, []);
@@ -1057,11 +1073,21 @@ export default function Book() {
                       <div className="flex items-center gap-2">
                         <label className="text-xs text-gray-500 uppercase tracking-widest">Hours</label>
                         <div className="flex items-center gap-1 border border-white/15 bg-white/5">
-                          <button type="button" onClick={() => setCharterHours(h => Math.max(1, h - 1))} className="px-2 py-1 text-gray-400 hover:text-white text-sm">−</button>
+                          <button
+                            type="button"
+                            onClick={() => setCharterHours(h => Math.max(minCharterHours, h - 1))}
+                            disabled={charterHours <= minCharterHours}
+                            className="px-2 py-1 text-gray-400 hover:text-white text-sm disabled:opacity-30 disabled:hover:text-gray-400"
+                          >
+                            −
+                          </button>
                           <span className="px-2 text-sm text-white w-6 text-center">{charterHours}</span>
                           <button type="button" onClick={() => setCharterHours(h => Math.min(24, h + 1))} className="px-2 py-1 text-gray-400 hover:text-white text-sm">+</button>
                         </div>
                         <span className="text-xs text-gray-600">hr{charterHours !== 1 ? "s" : ""}</span>
+                        {minCharterHours > 1 && (
+                          <span className="text-xs text-gray-600">· {minCharterHours}-hour minimum</span>
+                        )}
                       </div>
                     )}
                   </div>

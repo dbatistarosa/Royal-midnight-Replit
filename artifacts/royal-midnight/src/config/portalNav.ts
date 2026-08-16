@@ -71,6 +71,10 @@ export const driverNavItems: PortalNavItem[] = [
   { label: "Dashboard", href: "/driver/dashboard", icon: LayoutDashboard },
   { label: "Finished", href: "/driver/history", icon: History },
   { label: "Earnings", href: "/driver/earnings", icon: DollarSign },
+  // GET/PATCH /drivers/:id/payout were already live and driver-scoped, but no
+  // portal entry pointed at them — banking details could only be entered by an
+  // admin typing them on the driver's behalf.
+  { label: "Payout", href: "/driver/payout", icon: Wallet },
   { label: "Stats", href: "/driver/stats", icon: BarChart2 },
   { label: "Documents", href: "/driver/documents", icon: FileText },
   { label: "Vehicles", href: "/driver/vehicles", icon: Car },

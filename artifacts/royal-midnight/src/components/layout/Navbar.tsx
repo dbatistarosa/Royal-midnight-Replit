@@ -28,7 +28,7 @@ export function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const navLinks = [
+  const marketingLinks = [
     { name: "Home", path: "/" },
     { name: "About", path: "/about" },
     { name: "Services", path: "/services" },
@@ -36,6 +36,18 @@ export function Navbar() {
     { name: "Contact", path: "/contact" },
     { name: "Drive with Us", path: "/driver/onboarding" },
   ];
+
+  /**
+   * A signed-in chauffeur is not shopping for a ride.
+   *
+   * The public marketing nav — and the Reserve Now button next to it — filled
+   * the whole mobile sheet for drivers, burying the two things they actually
+   * open the site for. "Drive with Us" is the recruitment page they already
+   * completed, so it is the most misleading entry of all. They keep the portal
+   * link and Sign Out; everyone else is unaffected.
+   */
+  const isDriver = user?.role === "driver";
+  const navLinks = isDriver ? [] : marketingLinks;
 
   function handleLogout() {
     logout();
@@ -140,11 +152,13 @@ export function Navbar() {
             </Link>
           )}
 
-          <Link href="/book">
-            <Button className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
-              Reserve Now
-            </Button>
-          </Link>
+          {!isDriver && (
+            <Link href="/book">
+              <Button className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                Reserve Now
+              </Button>
+            </Link>
+          )}
         </div>
 
         {/* Mobile Nav Toggle */}
@@ -185,11 +199,13 @@ export function Navbar() {
               Sign In
             </Link>
           )}
-          <Link href="/book" onClick={() => setMobileMenuOpen(false)}>
-            <Button className="w-full bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm py-6 rounded-none">
-              Reserve Now
-            </Button>
-          </Link>
+          {!isDriver && (
+            <Link href="/book" onClick={() => setMobileMenuOpen(false)}>
+              <Button className="w-full bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm py-6 rounded-none">
+                Reserve Now
+              </Button>
+            </Link>
+          )}
         </div>
       )}
     </nav>

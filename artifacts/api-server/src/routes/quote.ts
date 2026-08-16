@@ -146,6 +146,24 @@ async function getSetting(key: string, fallback: string): Promise<string> {
   }
 }
 
+/** Default minimum billable hours on an hourly charter, used until an admin
+ *  sets `min_charter_hours` in Settings. */
+export const DEFAULT_MIN_CHARTER_HOURS = 3;
+
+/**
+ * The admin-configured hourly-charter minimum, clamped to something sane.
+ *
+ * A missing, blank or nonsense value must not become a floor of NaN (which
+ * compares false against everything and silently disables the rule) or a floor
+ * of 500 hours (which would reject every charter). Both directions of a typo in
+ * Settings degrade to "no worse than the default".
+ */
+export async function getMinCharterHours(): Promise<number> {
+  const raw = parseFloat(await getSetting("min_charter_hours", String(DEFAULT_MIN_CHARTER_HOURS)));
+  if (!Number.isFinite(raw) || raw < 1) return 1;
+  return Math.min(raw, 24);
+}
+
 /** Fetch active pricing rule for a given vehicle class from the DB.
  *  Falls back to hardcoded defaults if none found — the DB row (set via
  *  /admin/pricing) is always authoritative when it exists. */
@@ -221,6 +239,9 @@ export interface QuoteInput {
   userId?: number | undefined;
   /** Admin-created bookings bypass the customer-facing lead-time rule. */
   skipLeadTimeCheck?: boolean | undefined;
+  /** Admins take charter bookings by phone and may agree a shorter block than
+   *  the published minimum; the rule is for the public booking form. */
+  skipCharterMinimumCheck?: boolean | undefined;
 }
 
 export interface QuoteBreakdown {
@@ -274,6 +295,27 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
           error: `Bookings require at least ${minHours} hour${minHours !== 1 ? "s" : ""} advance notice. Please select a later time.`,
           code: "LEAD_TIME_VIOLATION",
           minHours,
+        },
+      };
+    }
+  }
+
+  // Minimum billable duration on an hourly charter. Distinct from
+  // min_booking_hours, which is how far ahead a ride must be booked — these
+  // were conflated, and the charter stepper enforced a hardcoded floor of one
+  // hour that no setting could raise. Checked here rather than only in the
+  // booking form so the price a caller is quoted always reflects the policy,
+  // whichever client asked for it.
+  if (charterMode === "hourly" && !input.skipCharterMinimumCheck) {
+    const minCharterHours = await getMinCharterHours();
+    if (charterHours < minCharterHours) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: `Hourly charters have a ${minCharterHours}-hour minimum. Please select ${minCharterHours} hours or more.`,
+          code: "CHARTER_MINIMUM_VIOLATION",
+          minCharterHours,
         },
       };
     }

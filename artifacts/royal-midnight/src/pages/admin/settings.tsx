@@ -33,6 +33,15 @@ const SETTING_FIELDS: SettingField[] = [
     step: 0.5,
   },
   {
+    key: "min_charter_hours",
+    label: "Minimum Hourly Charter",
+    description: "Shortest block a customer can book on an hourly charter. Different from the lead time above: this is how many hours the charter must last, not how far ahead it must be booked. Admin-created bookings are exempt.",
+    suffix: "hours",
+    min: 1,
+    max: 24,
+    step: 1,
+  },
+  {
     key: "florida_tax_rate",
     label: "Florida Tax Rate",
     description: "Applied to all bookings as a percentage of the subtotal (base + distance + airport fee).",
@@ -60,6 +69,21 @@ const SETTING_FIELDS: SettingField[] = [
     step: 0.1,
   },
 ];
+
+/**
+ * What the API falls back to when a settings row does not exist yet.
+ *
+ * Must stay in step with the server-side defaults (quote.ts and the
+ * getSetting() fallbacks) — this only controls what the admin sees before the
+ * first save, never what is enforced.
+ */
+const SERVER_DEFAULTS: Record<string, string> = {
+  min_booking_hours: "2",
+  min_charter_hours: "3",
+  florida_tax_rate: "0.07",
+  driver_commission_pct: "70",
+  cc_fee_pct: "0",
+};
 
 interface SocialField {
   key: string;
@@ -136,10 +160,15 @@ function AdminSettingsInner() {
     fetch(`${API_BASE}/admin/settings`, { headers: authHeader })
       .then(r => r.json())
       .then((data: Record<string, string>) => {
-        setSettings(data);
+        // A setting the server falls back to but has no row for yet would
+        // otherwise render as "Current:  hours" and read as unconfigured. Show
+        // the value actually in force, so the field is honest before its first
+        // save creates the row.
+        const withDefaults = { ...SERVER_DEFAULTS, ...data };
+        setSettings(withDefaults);
         // Convert stored values for display
         const displayed: Record<string, string> = {};
-        for (const [k, v] of Object.entries(data)) {
+        for (const [k, v] of Object.entries(withDefaults)) {
           if (k === "florida_tax_rate") {
             displayed[k] = String(parseFloat(v) * 100);
           } else {
