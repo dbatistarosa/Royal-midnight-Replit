@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { driverNavItems } from "@/config/portalNav";
+import { PassengerPreferencesPanel, type PassengerPreferences } from "@/components/PassengerPreferencesPanel";
 
 const LOCATION_LS_KEY = "rm_driver_location_sharing";
 
@@ -40,16 +41,6 @@ const STATUS_CONFIG: Record<DriverAvailability, { label: string; color: string; 
   available:   { label: "Available",    color: "text-green-400",  dot: "bg-green-400",  bg: "bg-green-400/10",  border: "border-green-400/20" },
   on_break:    { label: "On a Break",   color: "text-amber-400",  dot: "bg-amber-400",  bg: "bg-amber-400/10",  border: "border-amber-400/20" },
   unavailable: { label: "Unavailable",  color: "text-gray-400",   dot: "bg-gray-400",   bg: "bg-gray-400/10",   border: "border-gray-400/20"  },
-};
-
-type PassengerPreferences = {
-  cabinTempF?: number | null;
-  musicPreference?: string | null;
-  quietRide?: boolean;
-  preferredBeverage?: string | null;
-  opensOwnDoor?: boolean;
-  addressTitle?: string | null;
-  vipNotes?: string | null;
 };
 
 type BookingRow = {
@@ -377,78 +368,9 @@ function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; sh
           </div>
         </div>
       )}
-      {booking.passengerPreferences && (() => {
-        const p = booking.passengerPreferences;
-        const hasPrefs = p.cabinTempF != null || p.musicPreference || p.quietRide || p.preferredBeverage || p.opensOwnDoor || p.addressTitle || p.vipNotes;
-        if (!hasPrefs) return null;
-        return (
-          <div className="mt-3 pt-3 border-t border-primary/20">
-            <p className="text-[10px] uppercase tracking-widest text-primary mb-2">Passenger Preferences</p>
-            {p.vipNotes && (
-              <div className="mb-3 p-2 bg-primary/10 border border-primary/30">
-                <p className="text-[10px] uppercase tracking-widest text-primary mb-1">VIP Note</p>
-                <p className="text-xs text-gray-200 italic">{p.vipNotes}</p>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-              {p.addressTitle && (
-                <div className="flex items-start gap-2">
-                  <Tag className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Address As</p>
-                    <p className="text-xs text-gray-300">{p.addressTitle}</p>
-                  </div>
-                </div>
-              )}
-              {p.cabinTempF != null && (
-                <div className="flex items-start gap-2">
-                  <Thermometer className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Cabin Temp</p>
-                    <p className="text-xs text-gray-300">{p.cabinTempF}°F</p>
-                  </div>
-                </div>
-              )}
-              {p.musicPreference && (
-                <div className="flex items-start gap-2">
-                  <Music className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Music</p>
-                    <p className="text-xs text-gray-300">{p.musicPreference}</p>
-                  </div>
-                </div>
-              )}
-              {p.quietRide && (
-                <div className="flex items-start gap-2">
-                  <Volume2 className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Quiet Ride</p>
-                    <p className="text-xs text-gray-300">Prefers minimal conversation</p>
-                  </div>
-                </div>
-              )}
-              {p.preferredBeverage && (
-                <div className="flex items-start gap-2">
-                  <Coffee className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Beverage</p>
-                    <p className="text-xs text-gray-300">{p.preferredBeverage}</p>
-                  </div>
-                </div>
-              )}
-              {p.opensOwnDoor && (
-                <div className="flex items-start gap-2">
-                  <DoorOpen className="w-3.5 h-3.5 text-primary/70 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest text-gray-600">Door Service</p>
-                    <p className="text-xs text-gray-300">Opens own door</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })()}
+      {/* Shared with the admin passenger screen's "as the driver sees it"
+          preview — same component, so the two can never drift apart. */}
+      <PassengerPreferencesPanel preferences={booking.passengerPreferences} />
     </div>
   );
 }

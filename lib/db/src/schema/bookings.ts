@@ -10,16 +10,6 @@ export const bookingsTable = pgTable("bookings", {
   passengerPhone: text("passenger_phone").notNull(),
   pickupAddress: text("pickup_address").notNull(),
   dropoffAddress: text("dropoff_address").notNull(),
-  /** Pickup coordinates, geocoded once at booking time and cached.
-   *
-   *  The open trip pool is filtered by the driver's assigned service zones, and
-   *  answering "is this pickup inside that zone?" from the address alone would
-   *  mean a Mapbox geocode per pending booking on every pool refresh. Nullable:
-   *  rows predate this column, geocoding is best-effort, and a booking with no
-   *  coordinates falls back to being visible to every driver rather than to
-   *  none — see the pool query in routes/bookings.ts. */
-  pickupLat: numeric("pickup_lat", { precision: 10, scale: 7 }),
-  pickupLng: numeric("pickup_lng", { precision: 10, scale: 7 }),
   pickupAt: timestamp("pickup_at", { withTimezone: true }).notNull(),
   vehicleClass: text("vehicle_class").notNull().default("standard"),
   passengers: integer("passengers").notNull().default(1),
@@ -91,6 +81,24 @@ export const bookingsTable = pgTable("bookings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 
+/**
+ * pickup_lat / pickup_lng are deliberately NOT declared above.
+ *
+ * They exist in the database from migration 0009 and cache the geocoded pickup
+ * so the driver service-area filter never has to geocode a pending booking on
+ * every pool refresh. Declaring them here would put them into every
+ * `db.select().from(bookingsTable)` in the codebase — and this project deploys
+ * code and migrations as separate steps. That is not hypothetical: doing so
+ * took GET /bookings, GET /users/:id/bookings and the admin dashboard down with
+ * `column "pickup_lat" does not exist` the moment the code shipped ahead of the
+ * schema.
+ *
+ * They are read and written through narrow, guarded queries in
+ * lib/serviceZones.ts instead, which tolerate the column being absent. Same
+ * reasoning as tracking_token and booking_driver_blocks elsewhere in this
+ * codebase: a feature that degrades is fine, a table-wide select that throws is
+ * not.
+ */
 export const insertBookingSchema = createInsertSchema(bookingsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertBooking = z.infer<typeof insertBookingSchema>;
 export type Booking = typeof bookingsTable.$inferSelect;

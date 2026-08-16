@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db, geoZonesTable, driverServiceZonesTable } from "@workspace/db";
 import { pointInZone } from "./pricing.js";
 import { tableExists } from "./schemaGuards.js";
@@ -116,11 +116,64 @@ export function isTripVisibleToDriver(pickup: PickupPoint, coverage: ZoneCoverag
   return staffedContaining.some(z => coverage.driverZoneIds.has(z.id));
 }
 
-/** Parse the numeric-typed lat/lng drizzle returns as strings. */
-export function toPickupPoint(lat: string | null, lng: string | null): PickupPoint {
+/** Parse the numeric-typed lat/lng Postgres returns as strings. */
+export function toPickupPoint(lat: string | number | null, lng: string | number | null): PickupPoint {
   if (lat == null || lng == null) return null;
-  const latNum = parseFloat(lat);
-  const lngNum = parseFloat(lng);
+  const latNum = typeof lat === "number" ? lat : parseFloat(lat);
+  const lngNum = typeof lng === "number" ? lng : parseFloat(lng);
   if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return null;
   return { lat: latNum, lng: lngNum };
+}
+
+/**
+ * Cached pickup coordinates for a set of bookings.
+ *
+ * Read with an explicit query rather than off the booking row, because
+ * pickup_lat / pickup_lng are not in the drizzle schema — see the note in
+ * lib/db/src/schema/bookings.ts for why putting them there took production
+ * down. An absent column, or any other failure, yields an empty map, and every
+ * booking is then treated as "location unknown" and stays visible.
+ */
+export async function loadPickupPoints(bookingIds: number[]): Promise<Map<number, PickupPoint>> {
+  const out = new Map<number, PickupPoint>();
+  if (bookingIds.length === 0) return out;
+  try {
+    const result = await db.execute(
+      sql`SELECT id, pickup_lat, pickup_lng FROM bookings WHERE id IN (${sql.join(bookingIds.map(id => sql`${id}`), sql`, `)})`,
+    );
+    const rows = (result as unknown as { rows?: PickupRow[] }).rows ?? (result as unknown as PickupRow[]);
+    for (const row of rows ?? []) {
+      out.set(Number(row.id), toPickupPoint(row.pickup_lat, row.pickup_lng));
+    }
+  } catch {
+    // Column not there yet (migration 0009), or a transient failure. Either way
+    // the filter falls back to showing everything rather than hiding trips.
+  }
+  return out;
+}
+
+type PickupRow = { id: number | string; pickup_lat: string | number | null; pickup_lng: string | number | null };
+
+/** Single-booking variant, for the accept route. */
+export async function loadPickupPoint(bookingId: number): Promise<PickupPoint> {
+  return (await loadPickupPoints([bookingId])).get(bookingId) ?? null;
+}
+
+/**
+ * Cache the geocoded pickup on a booking. Best-effort by design: a booking that
+ * cannot be created — or updated — is a far worse outcome than one the pool
+ * filter treats as location-unknown.
+ */
+export async function savePickupPoint(
+  bookingId: number,
+  point: { lat: number; lng: number },
+  log?: { error: (obj: object, msg: string) => void },
+): Promise<void> {
+  try {
+    await db.execute(
+      sql`UPDATE bookings SET pickup_lat = ${String(point.lat)}, pickup_lng = ${String(point.lng)} WHERE id = ${bookingId}`,
+    );
+  } catch (err) {
+    log?.error({ bookingId, err: (err as Error).message }, "pickup_point_cache_failed");
+  }
 }

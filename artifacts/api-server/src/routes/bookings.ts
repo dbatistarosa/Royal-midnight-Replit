@@ -7,7 +7,7 @@ import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { signedObjectDownloadPath } from "../lib/signedUrl.js";
 import { hasPgErrorCode, UNDEFINED_COLUMN } from "../lib/pgError.js";
 import { hasDriverBlockTable } from "../lib/schemaGuards.js";
-import { loadZoneCoverage, isTripVisibleToDriver, toPickupPoint } from "../lib/serviceZones.js";
+import { loadZoneCoverage, isTripVisibleToDriver, loadPickupPoints, loadPickupPoint, savePickupPoint } from "../lib/serviceZones.js";
 import { serializeBooking } from "../lib/serializeBooking.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import { HOURLY_RATES, DEFAULT_RATE_PER_MILE, computeQuote, readQuoteExtensions } from "./quote.js";
@@ -443,14 +443,9 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     if (isDriverOpenPoolQuery && poolDriverId != null) {
       const coverage = await loadZoneCoverage(poolDriverId);
       if (coverage.enabled) {
+        const points = await loadPickupPoints(driverBookings.map(b => b.id));
         driverBookings = driverBookings.filter(b =>
-          isTripVisibleToDriver(
-            toPickupPoint(
-              (b as { pickupLat?: string | null }).pickupLat ?? null,
-              (b as { pickupLng?: string | null }).pickupLng ?? null,
-            ),
-            coverage,
-          ),
+          isTripVisibleToDriver(points.get(b.id) ?? null, coverage),
         );
       }
     }
@@ -691,23 +686,13 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
   }
 
   // Cache the geocoded pickup so the driver service-area filter never has to
-  // geocode a pending booking on a pool refresh. Written as a separate,
-  // best-effort UPDATE rather than as insert columns on purpose: pickup_lat /
-  // pickup_lng arrive with migration 0009, and this project deploys code and
-  // migrations separately. A booking that cannot be created is a far worse
-  // outcome than one without coordinates — which the filter already treats as
-  // "location unknown" and shows to every driver.
+  // geocode a pending booking on a pool refresh. Fire-and-forget, and written
+  // through a guarded raw statement rather than the drizzle schema — see the
+  // note in lib/db/src/schema/bookings.ts. A booking that cannot be created is
+  // a far worse outcome than one without coordinates, which the filter treats
+  // as "location unknown" and shows to every driver.
   if (quote.pickupPoint) {
-    db.update(bookingsTable)
-      .set({ pickupLat: String(quote.pickupPoint.lat), pickupLng: String(quote.pickupPoint.lng) })
-      .where(eq(bookingsTable.id, booking.id))
-      .catch((err: unknown) => {
-        if (isUndefinedColumn(err)) {
-          console.error("[bookings] pickup_lat/pickup_lng missing — run migration 0009_service_areas.sql");
-          return;
-        }
-        console.error("[bookings] pickup coordinate cache failed:", err);
-      });
+    void savePickupPoint(booking.id, quote.pickupPoint, req.log);
   }
 
   // trackingToken rides alongside the contract response rather than inside it:
@@ -1350,7 +1335,7 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
   // the pool is presentation, and booking ids are sequential. Without this a
   // driver could take a trip three metros away simply by POSTing its id.
   const coverage = await loadZoneCoverage(driverRow.id);
-  if (!isTripVisibleToDriver(toPickupPoint(booking.pickupLat, booking.pickupLng), coverage)) {
+  if (coverage.enabled && !isTripVisibleToDriver(await loadPickupPoint(booking.id), coverage)) {
     req.log.warn(
       { ip: req.ip, path: req.path, userId: caller.userId, driverId: driverRow.id, bookingId: id },
       "authorization_failed",
