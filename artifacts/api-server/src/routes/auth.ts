@@ -5,7 +5,7 @@ import { db, usersTable, driversTable, passwordResetTokensTable, corporateAccoun
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
-import { requireAdmin, SESSION_COOKIE } from "../middleware/auth.js";
+import { requireAdmin, requireAuth, SESSION_COOKIE } from "../middleware/auth.js";
 import { hashPassword, verifyPassword, isLegacyHash } from "../lib/hash.js";
 import { sendPasswordResetEmail } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
@@ -179,6 +179,45 @@ router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> =>
 
   res.json({
     token,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      createdAt: user.createdAt.toISOString(),
+    },
+    ...(driverId != null ? { driverId } : {}),
+  });
+});
+
+/**
+ * GET /auth/me — who the current session belongs to, according to the server.
+ *
+ * The web app restored its user from localStorage and never checked whether the
+ * session behind it was still alive, so an expired or revoked session produced a
+ * dashboard that rendered normally and stayed empty: AuthGuard saw a user and
+ * let the page through, then every data call came back 401 with nothing
+ * listening for it. No error, no redirect to the login page, just blank panels.
+ *
+ * It also means the role the client trusts now comes from the server rather than
+ * from a blob the user can edit in DevTools.
+ */
+router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
+  const caller = req.currentUser!;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, caller.userId));
+  if (!user) {
+    res.status(401).json({ error: "Invalid or expired session" });
+    return;
+  }
+
+  let driverId: number | null = null;
+  if (user.role === "driver") {
+    const [driver] = await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.userId, user.id));
+    driverId = driver?.id ?? null;
+  }
+
+  res.json({
     user: {
       id: user.id,
       name: user.name,
