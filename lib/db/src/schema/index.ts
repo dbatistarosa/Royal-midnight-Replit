@@ -26,3 +26,4 @@ export * from "./driver-vehicles";
 export * from "./fixed-routes";
 export * from "./extra-services";
 export * from "./object-owners";
+export * from "./driver-accountability";
