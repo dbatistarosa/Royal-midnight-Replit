@@ -502,6 +502,62 @@ export async function sendStatusChangedAdmin(bookingId: number, oldStatus: strin
   await send(ADMIN_EMAIL, `Booking #${bookingId} → ${newStatus} (${passengerName})`, html, "status_changed_admin");
 }
 
+/**
+ * Sent when an administrator edits a reservation that a passenger already has
+ * in hand.
+ *
+ * Changing someone's pickup time or address without telling them is the kind of
+ * silent edit that turns into a missed ride, so the admin edit screen offers
+ * this and defaults it on. Only the fields that actually changed are listed —
+ * a diff is far easier to act on than a re-sent copy of the whole booking, and
+ * it makes clear that nothing else moved.
+ */
+export async function sendBookingUpdatedPassenger(
+  b: BookingEmailData,
+  changes: Array<{ label: string; from: string; to: string }>,
+) {
+  if (changes.length === 0) return;
+  const refNum = `RM-${String(b.id).padStart(4, "0")}`;
+  const dateStr = new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" });
+
+  const changeRows = changes.map(c => `
+    <tr>
+      <td style="padding:8px 0;color:#888;font-size:13px;width:140px;vertical-align:top">${escapeHtml(c.label)}</td>
+      <td style="padding:8px 0;font-size:13px;color:#e8e0d0">
+        <span style="color:#777;text-decoration:line-through">${escapeHtml(c.from)}</span><br />
+        <span style="color:#c9a84c">${escapeHtml(c.to)}</span>
+      </td>
+    </tr>`).join("");
+
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Your Reservation Has Been Updated</h2>
+<p style="color:#888;font-size:13px;margin:0 0 24px;line-height:1.6">
+  Dear ${escapeHtml(b.passengerName.split(" ")[0])}, we have updated reservation
+  <strong style="color:#c9a84c">${refNum}</strong>. Here is exactly what changed.
+</p>
+
+<div style="background:#0d0d0d;border:1px solid #c9a84c40;padding:20px;margin-bottom:20px">
+  <p style="color:#c9a84c;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin:0 0 14px">What Changed</p>
+  <table style="width:100%;border-collapse:collapse">${changeRows}</table>
+</div>
+
+<div style="background:#0d0d0d;border:1px solid #222;padding:20px;margin-bottom:20px">
+  <p style="color:#c9a84c;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin:0 0 14px">Your Reservation Now</p>
+  <table style="width:100%;border-collapse:collapse">
+    ${row("Date &amp; Time", dateStr)}
+    ${row("Pick-up", escapeHtml(b.pickupAddress))}
+    ${row("Drop-off", escapeHtml(b.dropoffAddress))}
+    ${b.flightNumber ? row("Flight", escapeHtml(b.flightNumber)) : ""}
+    ${row("Passengers", String(b.passengers))}
+  </table>
+</div>
+
+<p style="color:#888;font-size:12px;margin:0;line-height:1.6">
+  If anything here is not what you expected, reply to this email or call us and we will put it right.
+</p>`);
+  await send(b.passengerEmail, `Reservation ${refNum} updated — please review`, html, "booking_updated_passenger");
+}
+
 export type ReminderEmailData = {
   id: number;
   passengerName: string;

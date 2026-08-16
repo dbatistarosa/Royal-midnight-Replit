@@ -3,6 +3,7 @@ import { eq, desc, or, and, isNull, isNotNull, inArray } from "drizzle-orm";
 import { db, usersTable, bookingsTable, userFavoriteDriversTable, driversTable, managedTravelersTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { ensureUniqueReferralCode, fetchReferralCreditAmount } from "../lib/referrals.js";
+import { serializeBooking } from "../lib/serializeBooking.js";
 import {
   ListUsersQueryParams,
   ListUsersResponse,
@@ -169,18 +170,11 @@ router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> =
       .catch(err => console.error("[users] retroactive link error:", err));
   }
 
-  res.json(
-    GetUserBookingsResponse.parse(
-      bookings.map((b) => ({
-        ...b,
-        priceQuoted: parseFloat(b.priceQuoted ?? "0"),
-        discountAmount: b.discountAmount != null ? parseFloat(b.discountAmount) : null,
-        pickupAt: b.pickupAt.toISOString(),
-        createdAt: b.createdAt.toISOString(),
-        updatedAt: b.updatedAt.toISOString(),
-      }))
-    )
-  );
+  // This mapping used to be a third local copy that never learned to parse
+  // fare_subtotal, so the response schema rejected every booking that had one
+  // and the passenger's "My Rides" page — upcoming and past alike — showed
+  // nothing at all. See lib/serializeBooking.ts.
+  res.json(GetUserBookingsResponse.parse(bookings.map(serializeBooking)));
 });
 
 // ─── Referral program ─────────────────────────────────────────────────────────

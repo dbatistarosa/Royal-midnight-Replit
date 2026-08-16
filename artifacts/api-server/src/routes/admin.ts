@@ -4,6 +4,7 @@ import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTick
 import { requireAdmin } from "../middleware/auth.js";
 import { encryptField, safeDecryptField, lastN, isFieldEncryptionConfigError, getFieldEncryptionStatus } from "../lib/encrypt.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
+import { serializeBooking } from "../lib/serializeBooking.js";
 import { Resend } from "resend";
 import {
   GetAdminStatsResponse,
@@ -15,16 +16,9 @@ import {
 
 const router: IRouter = Router();
 
-function parseBooking(b: typeof bookingsTable.$inferSelect) {
-  return {
-    ...b,
-    priceQuoted: parseFloat(b.priceQuoted ?? "0"),
-    discountAmount: b.discountAmount != null ? parseFloat(b.discountAmount) : null,
-    pickupAt: b.pickupAt.toISOString(),
-    createdAt: b.createdAt.toISOString(),
-    updatedAt: b.updatedAt.toISOString(),
-  };
-}
+// Was a local copy that never learned to parse fare_subtotal, which is what
+// made GET /admin/recent-bookings answer 500. See lib/serializeBooking.ts.
+const parseBooking = serializeBooking;
 
 function parseDriver(d: typeof driversTable.$inferSelect) {
   return {

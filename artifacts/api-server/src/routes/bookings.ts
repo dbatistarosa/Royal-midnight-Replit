@@ -7,6 +7,8 @@ import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { signedObjectDownloadPath } from "../lib/signedUrl.js";
 import { hasPgErrorCode, UNDEFINED_COLUMN } from "../lib/pgError.js";
 import { hasDriverBlockTable } from "../lib/schemaGuards.js";
+import { loadZoneCoverage, isTripVisibleToDriver, toPickupPoint } from "../lib/serviceZones.js";
+import { serializeBooking } from "../lib/serializeBooking.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import { HOURLY_RATES, DEFAULT_RATE_PER_MILE, computeQuote, readQuoteExtensions } from "./quote.js";
 import { evaluatePromoCode } from "./promos.js";
@@ -107,21 +109,7 @@ function isUndefinedColumn(err: unknown): boolean {
   return hasPgErrorCode(err, UNDEFINED_COLUMN);
 }
 
-function parseBooking(b: typeof bookingsTable.$inferSelect) {
-  return {
-    ...b,
-    priceQuoted: parseFloat(b.priceQuoted ?? "0"),
-    // Commission base: falls back to priceQuoted for legacy rows / booking paths
-    // that don't supply it (e.g. admin manual bookings).
-    fareSubtotal: b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : parseFloat(b.priceQuoted ?? "0"),
-    discountAmount: b.discountAmount != null ? parseFloat(b.discountAmount) : null,
-    tipAmount: b.tipAmount != null ? parseFloat(b.tipAmount) : null,
-    pickupAt: b.pickupAt.toISOString(),
-    authorizedAt: b.authorizedAt != null ? b.authorizedAt.toISOString() : null,
-    createdAt: b.createdAt.toISOString(),
-    updatedAt: b.updatedAt.toISOString(),
-  };
-}
+const parseBooking = serializeBooking;
 
 // ─── Cancellation policy ─────────────────────────────────────────────────────
 
@@ -276,6 +264,8 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   // driverBusyWindows is populated here and used later to filter the open pool results.
   let driverBusyWindows: BusyWindow[] = [];
   let isDriverOpenPoolQuery = false;
+  // Needed after this block to filter the pool by the driver's service zones.
+  let poolDriverId: number | null = null;
 
   if (caller.role === "driver") {
     const requestedDriverId = parsed.data.driverId;
@@ -386,6 +376,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
         conditions.push(isNull(bookingsTable.driverId));
         conditions.push(inArray(bookingsTable.status, ["pending", "authorized", "confirmed"]));
         isDriverOpenPoolQuery = true;
+        poolDriverId = driverRow.id;
         driverBusyWindows = await getDriverBusyWindows(driverRow.id);
       } else {
         // Default: own assigned bookings only
@@ -443,6 +434,25 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     // For the open pool, hide trips that conflict with the driver's existing schedule.
     if (isDriverOpenPoolQuery && driverBusyWindows.length > 0) {
       driverBookings = parsed2.filter(b => !hasConflict(new Date(b.pickupAt), driverBusyWindows));
+    }
+
+    // ...and trips outside the driver's service areas. Coverage is read once
+    // per request; the per-booking test is then pure geometry with no further
+    // queries. A trip whose pickup no staffed zone covers stays visible to
+    // everyone rather than vanishing — see lib/serviceZones.ts.
+    if (isDriverOpenPoolQuery && poolDriverId != null) {
+      const coverage = await loadZoneCoverage(poolDriverId);
+      if (coverage.enabled) {
+        driverBookings = driverBookings.filter(b =>
+          isTripVisibleToDriver(
+            toPickupPoint(
+              (b as { pickupLat?: string | null }).pickupLat ?? null,
+              (b as { pickupLng?: string | null }).pickupLng ?? null,
+            ),
+            coverage,
+          ),
+        );
+      }
     }
 
     // The open pool is a broadcast: every approved driver in the fleet sees it,
@@ -678,6 +688,26 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     );
     const { trackingToken: _omitted, ...withoutToken } = bookingValues;
     [booking] = await db.insert(bookingsTable).values(withoutToken).returning() as [typeof bookingsTable.$inferSelect];
+  }
+
+  // Cache the geocoded pickup so the driver service-area filter never has to
+  // geocode a pending booking on a pool refresh. Written as a separate,
+  // best-effort UPDATE rather than as insert columns on purpose: pickup_lat /
+  // pickup_lng arrive with migration 0009, and this project deploys code and
+  // migrations separately. A booking that cannot be created is a far worse
+  // outcome than one without coordinates — which the filter already treats as
+  // "location unknown" and shows to every driver.
+  if (quote.pickupPoint) {
+    db.update(bookingsTable)
+      .set({ pickupLat: String(quote.pickupPoint.lat), pickupLng: String(quote.pickupPoint.lng) })
+      .where(eq(bookingsTable.id, booking.id))
+      .catch((err: unknown) => {
+        if (isUndefinedColumn(err)) {
+          console.error("[bookings] pickup_lat/pickup_lng missing — run migration 0009_service_areas.sql");
+          return;
+        }
+        console.error("[bookings] pickup coordinate cache failed:", err);
+      });
   }
 
   // trackingToken rides alongside the contract response rather than inside it:
@@ -1313,6 +1343,19 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
   // payment step) still waiting for a driver to claim it.
   if (!["pending", "authorized", "confirmed"].includes(booking.status) || booking.driverId != null) {
     res.status(400).json({ error: "Booking is already assigned or not available" });
+    return;
+  }
+
+  // Service-area check, for the same reason as the block check above: filtering
+  // the pool is presentation, and booking ids are sequential. Without this a
+  // driver could take a trip three metros away simply by POSTing its id.
+  const coverage = await loadZoneCoverage(driverRow.id);
+  if (!isTripVisibleToDriver(toPickupPoint(booking.pickupLat, booking.pickupLng), coverage)) {
+    req.log.warn(
+      { ip: req.ip, path: req.path, userId: caller.userId, driverId: driverRow.id, bookingId: id },
+      "authorization_failed",
+    );
+    res.status(403).json({ error: "This trip is outside your assigned service area." });
     return;
   }
 

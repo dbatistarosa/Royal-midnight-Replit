@@ -8,8 +8,7 @@ import {
   isAirportTrip,
   resolveAddress,
   fallbackDistance,
-  haversineKm,
-  pointInPolygon,
+  pointInZone,
   normalizePercentRate,
   computeFareBreakdown,
 } from "../lib/pricing";
@@ -98,42 +97,56 @@ async function geocodeAddress(address: string): Promise<{ lat: number; lng: numb
   }
 }
 
-/** Find the highest rate multiplier among active zones that cover any of the given addresses */
-async function getZoneMultiplier(addresses: string[]): Promise<number> {
+/**
+ * Highest rate multiplier among active zones covering any of the given
+ * addresses, plus the coordinates it geocoded on the way.
+ *
+ * The points come back because the caller needs the pickup coordinate anyway —
+ * bookings cache it so the driver service-area filter does not have to geocode
+ * every pending trip on every pool refresh. Geocoding it twice would be a
+ * second billable Mapbox call for an answer already in hand.
+ *
+ * Zone matching itself is delegated to pointInZone() in lib/pricing.ts, which
+ * the service-area filter also uses, so a trip is never priced by one
+ * interpretation of a zone's geometry and dispatched by another.
+ */
+async function getZoneMultiplier(
+  addresses: string[],
+): Promise<{ multiplier: number; points: Array<{ lat: number; lng: number } | null> }> {
+  const points: Array<{ lat: number; lng: number } | null> = [];
   try {
-    const zones = await db.select().from(geoZonesTable).where(eq(geoZonesTable.isActive, true));
-    if (!zones.length) return 1.0;
+    // Explicit column list, not select(). `is_service_area` arrives with
+    // migration 0009 and this project deploys code ahead of schema; a
+    // select-star would fail with undefined_column, be swallowed by the catch
+    // below, and silently price every trip at multiplier 1.0 — a surcharge
+    // quietly not charged is the worst possible way for that to fail.
+    const zones = await db
+      .select({
+        id: geoZonesTable.id,
+        type: geoZonesTable.type,
+        geometry: geoZonesTable.geometry,
+        rateMultiplier: geoZonesTable.rateMultiplier,
+      })
+      .from(geoZonesTable)
+      .where(eq(geoZonesTable.isActive, true));
 
     let maxMultiplier = 1.0;
 
     for (const address of addresses) {
       const point = await geocodeAddress(address);
-      if (!point) continue;
+      points.push(point);
+      if (!point || !zones.length) continue;
 
       for (const zone of zones) {
-        let inZone = false;
-        try {
-          const geom = JSON.parse(zone.geometry) as Record<string, unknown>;
-          if (zone.type === "circle") {
-            const center = geom["center"] as [number, number];
-            const radiusKm = geom["radiusKm"] as number;
-            inZone = haversineKm(point.lat, point.lng, center[0], center[1]) <= radiusKm;
-          } else if (zone.type === "polygon") {
-            const coords = geom["coordinates"] as number[][];
-            inZone = pointInPolygon(point.lat, point.lng, coords);
-          }
-        } catch {
-          // malformed geometry — skip
-        }
-        if (inZone && zone.rateMultiplier > maxMultiplier) {
+        if (pointInZone(point.lat, point.lng, zone) && zone.rateMultiplier > maxMultiplier) {
           maxMultiplier = zone.rateMultiplier;
         }
       }
     }
 
-    return maxMultiplier;
+    return { multiplier: maxMultiplier, points };
   } catch {
-    return 1.0;
+    return { multiplier: 1.0, points };
   }
 }
 
@@ -264,6 +277,14 @@ export interface QuoteBreakdown {
   currency: string;
   fixedRoutePrice?: number | null;
   fixedRouteId?: number | null;
+  /** Geocoded pickup coordinate, resolved while checking zone pricing.
+   *
+   *  Booking creation caches this on the row so the driver service-area filter
+   *  can test "is this pickup in that zone?" without geocoding every pending
+   *  trip on every pool refresh. Null when Mapbox is unconfigured or the
+   *  address could not be resolved — callers treat that as "location unknown",
+   *  never as "out of area". Not part of the customer-facing quote response. */
+  pickupPoint?: { lat: number; lng: number } | null;
 }
 
 export type QuoteOutcome =
@@ -364,8 +385,11 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
   const isAirport = allAddresses.some(a => isAirportTrip(a));
   const airportFee = isAirport ? ruleAirportFee : 0;
 
-  // Geo zone pricing modifier (checked against all route addresses)
-  const zoneMultiplier = await getZoneMultiplier(allAddresses.map(resolveAddress));
+  // Geo zone pricing modifier (checked against all route addresses). The first
+  // entry of `points` is the pickup, which the caller caches on the booking for
+  // the driver service-area filter.
+  const { multiplier: zoneMultiplier, points: routePoints } = await getZoneMultiplier(allAddresses.map(resolveAddress));
+  const pickupPoint = routePoints[0] ?? null;
 
   // Card processing fee, passed through to the customer and shown as its
   // own line item (admin-configurable via the `cc_fee_pct` setting).
@@ -520,6 +544,7 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
         currency: "USD",
         fixedRoutePrice,
         fixedRouteId,
+        pickupPoint,
       },
     };
   }
@@ -544,6 +569,7 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
       estimatedDuration,
       estimatedDistance,
       currency: "USD",
+      pickupPoint,
     },
   };
 }

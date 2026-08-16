@@ -10,6 +10,16 @@ export const bookingsTable = pgTable("bookings", {
   passengerPhone: text("passenger_phone").notNull(),
   pickupAddress: text("pickup_address").notNull(),
   dropoffAddress: text("dropoff_address").notNull(),
+  /** Pickup coordinates, geocoded once at booking time and cached.
+   *
+   *  The open trip pool is filtered by the driver's assigned service zones, and
+   *  answering "is this pickup inside that zone?" from the address alone would
+   *  mean a Mapbox geocode per pending booking on every pool refresh. Nullable:
+   *  rows predate this column, geocoding is best-effort, and a booking with no
+   *  coordinates falls back to being visible to every driver rather than to
+   *  none — see the pool query in routes/bookings.ts. */
+  pickupLat: numeric("pickup_lat", { precision: 10, scale: 7 }),
+  pickupLng: numeric("pickup_lng", { precision: 10, scale: 7 }),
   pickupAt: timestamp("pickup_at", { withTimezone: true }).notNull(),
   vehicleClass: text("vehicle_class").notNull().default("standard"),
   passengers: integer("passengers").notNull().default(1),

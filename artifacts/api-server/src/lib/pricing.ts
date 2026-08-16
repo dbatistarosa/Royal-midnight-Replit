@@ -98,6 +98,43 @@ export function pointInPolygon(lat: number, lng: number, coords: number[][]): bo
   return inside;
 }
 
+/** The stored shape of a geo zone, as far as the geometry test is concerned. */
+export type ZoneGeometry = {
+  type: string;          // "circle" | "polygon"
+  geometry: string;      // JSON string
+};
+
+/**
+ * Does a point fall inside a zone?
+ *
+ * Both the pricing surcharge and the driver service-area filter ask exactly
+ * this question, so it lives in one place and is unit-tested rather than being
+ * re-implemented per caller. Malformed geometry answers "no": a zone nobody can
+ * parse must not silently swallow trips (for the pool filter) or silently
+ * surcharge them (for pricing).
+ */
+export function pointInZone(lat: number, lng: number, zone: ZoneGeometry): boolean {
+  try {
+    const geom = JSON.parse(zone.geometry) as Record<string, unknown>;
+    if (zone.type === "circle") {
+      const center = geom["center"] as [number, number] | undefined;
+      const radiusKm = geom["radiusKm"] as number | undefined;
+      if (!Array.isArray(center) || center.length !== 2 || typeof radiusKm !== "number") return false;
+      return haversineKm(lat, lng, center[0], center[1]) <= radiusKm;
+    }
+    if (zone.type === "polygon") {
+      const coords = geom["coordinates"] as number[][] | undefined;
+      // A ring needs at least three distinct corners to enclose anything; a
+      // shorter array would make pointInPolygon return a meaningless answer.
+      if (!Array.isArray(coords) || coords.length < 3) return false;
+      return pointInPolygon(lat, lng, coords);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /** Normalises a percent-style setting that may be stored as a whole number
  *  (e.g. "7" meaning 7%) or as a decimal fraction (e.g. "0.07"). */
 export function normalizePercentRate(rate: number): number {
