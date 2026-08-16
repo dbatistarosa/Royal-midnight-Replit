@@ -1,18 +1,22 @@
 import { Router, type IRouter } from "express";
 import { db, geoZonesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { requireAuth } from "../middleware/auth";
+import { requireAdmin } from "../middleware/auth.js";
 import { hasPgErrorCode, UNDEFINED_COLUMN } from "../lib/pgError.js";
 
 const router: IRouter = Router();
 
-function requireAdmin(req: any, res: any, next: any) {
-  if (!req.user || req.user.role !== "admin") {
-    res.status(403).json({ error: "Admin access required" });
-    return;
-  }
-  next();
-}
+/**
+ * This file used to define its own requireAdmin that read `req.user`. Nothing
+ * in the codebase ever sets that property — the auth middleware populates
+ * `req.currentUser` — so the guard's `!req.user` was unconditionally true and
+ * every request here answered 403, including a correctly authenticated
+ * administrator's. The Geo Zones screen could not list, create or edit a single
+ * zone; it simply failed silently on load.
+ *
+ * Replaced with the shared requireAdmin, which every other admin route already
+ * uses and which also handles the bearer-token path these routes were missing.
+ */
 
 /**
  * A zone does two independent jobs (see the schema comment): it can apply a
@@ -57,7 +61,7 @@ function isUndefinedColumn(err: unknown): boolean {
 }
 
 // List all geo zones (admin only)
-router.get("/admin/geo-zones", requireAuth, requireAdmin, async (_req, res): Promise<void> => {
+router.get("/admin/geo-zones", requireAdmin, async (_req, res): Promise<void> => {
   try {
     const zones = await db
       .select({ ...ZONE_COLUMNS, isServiceArea: geoZonesTable.isServiceArea })
@@ -72,7 +76,7 @@ router.get("/admin/geo-zones", requireAuth, requireAdmin, async (_req, res): Pro
 });
 
 // Create a new zone
-router.post("/admin/geo-zones", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.post("/admin/geo-zones", requireAdmin, async (req, res): Promise<void> => {
   const { name, description, type, geometry, rateMultiplier, isServiceArea } = req.body as {
     name: string;
     description?: string;
@@ -116,7 +120,7 @@ router.post("/admin/geo-zones", requireAuth, requireAdmin, async (req, res): Pro
 });
 
 // Toggle active / update multiplier / mark as a service area
-router.patch("/admin/geo-zones/:id", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.patch("/admin/geo-zones/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"]!, 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
 
@@ -166,7 +170,7 @@ router.patch("/admin/geo-zones/:id", requireAuth, requireAdmin, async (req, res)
 });
 
 // Delete a zone
-router.delete("/admin/geo-zones/:id", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+router.delete("/admin/geo-zones/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = parseInt(req.params["id"]!, 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
 
