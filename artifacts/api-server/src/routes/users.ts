@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, or, and, isNull, isNotNull, inArray } from "drizzle-orm";
+import { eq, ne, desc, or, and, isNull, isNotNull, inArray } from "drizzle-orm";
 import { db, usersTable, bookingsTable, userFavoriteDriversTable, driversTable, managedTravelersTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { ensureUniqueReferralCode, fetchReferralCreditAmount } from "../lib/referrals.js";
@@ -99,6 +99,31 @@ router.patch("/users/:id", requireAuth, async (req, res): Promise<void> => {
   if (parsed.data.phone !== undefined) updateData.phone = parsed.data.phone;
   // Cabin preference fields — all optional, nulls explicitly allowed to clear them
   const body = req.body as Record<string, unknown>;
+
+  // Email — admin only. It is the passenger's login and their bookings are
+  // matched by it (see GET /users/:id/bookings, which unions on
+  // passengerEmail), so a passenger changing their own would silently orphan
+  // their history. Admins genuinely need it for typos taken over the phone.
+  // Checked for collision first: users.email is unique, and letting the
+  // constraint fire would surface as an opaque 500.
+  if ("email" in body && caller.role === "admin") {
+    const raw = body["email"];
+    if (typeof raw !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.trim())) {
+      res.status(400).json({ error: "Enter a valid email address." });
+      return;
+    }
+    const nextEmail = raw.trim().toLowerCase();
+    const clashing = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(and(eq(usersTable.email, nextEmail), ne(usersTable.id, params.data.id)));
+    if (clashing.length > 0) {
+      res.status(409).json({ error: "Another account already uses that email address." });
+      return;
+    }
+    updateData.email = nextEmail;
+  }
+
   if ("cabinTempF" in body) updateData.cabinTempF = body["cabinTempF"] ?? null;
   if ("musicPreference" in body) updateData.musicPreference = body["musicPreference"] ?? null;
   if ("quietRide" in body) updateData.quietRide = !!body["quietRide"];

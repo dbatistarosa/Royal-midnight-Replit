@@ -21,6 +21,9 @@ type GeoZone = {
   type: "circle" | "polygon";
   geometry: CircleGeometry | PolygonGeometry;
   rateMultiplier: number;
+  /** When set, chauffeurs can be assigned to this zone and the trip pool is
+   *  filtered by it. A zone may price trips, staff them, both, or neither. */
+  isServiceArea: boolean;
   isActive: boolean;
   createdAt: string;
 };
@@ -28,12 +31,25 @@ type GeoZone = {
 const LABEL = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const INPUT = "w-full bg-white/5 border border-white/10 text-white px-3 py-2 text-sm focus:outline-none focus:border-primary placeholder:text-gray-600 rounded-none";
 
-const PRESET_ZONES: Array<{ name: string; description: string; geometry: CircleGeometry }> = [
-  { name: "Florida Keys", description: "Monroe County — Keys surcharge zone", geometry: { center: [24.8, -81.2], radiusKm: 80 } },
-  { name: "Orlando Metro", description: "Orange County area", geometry: { center: [28.54, -81.38], radiusKm: 40 } },
-  { name: "Tampa Bay", description: "Hillsborough & Pinellas counties", geometry: { center: [27.98, -82.53], radiusKm: 40 } },
-  { name: "Jacksonville", description: "Duval County area", geometry: { center: [30.33, -81.66], radiusKm: 35 } },
-  { name: "Panhandle", description: "Northwest Florida corridor", geometry: { center: [30.4, -86.0], radiusKm: 120 } },
+/**
+ * Starting shapes for the regions this operator actually works, each centred
+ * between its airports so a single circle covers them and the addresses around
+ * them — which is the point: a service area is a metro, not an airport.
+ *
+ *   South Florida  MIA / FLL / PBI
+ *   Tampa Bay      TPA / PIE / SRQ
+ *   Orlando        MCO / SFB
+ *
+ * `serviceArea: true` pre-ticks "drivers can be assigned"; the Keys entry is a
+ * surcharge zone and deliberately does not.
+ */
+const PRESET_ZONES: Array<{ name: string; description: string; geometry: CircleGeometry; multiplier?: string; serviceArea?: boolean }> = [
+  { name: "South Florida", description: "MIA, FLL, PBI and surrounding addresses", geometry: { center: [26.05, -80.20], radiusKm: 75 }, serviceArea: true },
+  { name: "Tampa Bay", description: "TPA, PIE, SRQ and surrounding addresses", geometry: { center: [27.85, -82.50], radiusKm: 65 }, serviceArea: true },
+  { name: "Orlando", description: "MCO, SFB and surrounding addresses", geometry: { center: [28.48, -81.32], radiusKm: 55 }, serviceArea: true },
+  { name: "Jacksonville", description: "JAX and Duval County", geometry: { center: [30.33, -81.66], radiusKm: 45 }, serviceArea: true },
+  { name: "Southwest Florida", description: "RSW, Fort Myers and Naples", geometry: { center: [26.40, -81.80], radiusKm: 55 }, serviceArea: true },
+  { name: "Florida Keys", description: "Monroe County — surcharge zone, not a service area", geometry: { center: [24.8, -81.2], radiusKm: 80 }, multiplier: "1.40" },
 ];
 
 function MultiplierBadge({ value }: { value: number }) {
@@ -62,7 +78,8 @@ function ZoneModal({
   const [lng, setLng] = useState("");
   const [radiusKm, setRadiusKm] = useState("25");
   const [polygonInput, setPolygonInput] = useState("");
-  const [multiplier, setMultiplier] = useState("1.25");
+  const [multiplier, setMultiplier] = useState("1.00");
+  const [isServiceArea, setIsServiceArea] = useState(false);
   const [saving, setSaving] = useState(false);
   const [usePreset, setUsePreset] = useState(false);
 
@@ -73,6 +90,8 @@ function ZoneModal({
     setLat(String(preset.geometry.center[0]));
     setLng(String(preset.geometry.center[1]));
     setRadiusKm(String(preset.geometry.radiusKm));
+    setMultiplier(preset.multiplier ?? "1.00");
+    setIsServiceArea(!!preset.serviceArea);
     setUsePreset(false);
   };
 
@@ -105,15 +124,22 @@ function ZoneModal({
       const res = await fetch(`${API_BASE}/admin/geo-zones`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() || null, type, geometry, rateMultiplier: multN }),
+        body: JSON.stringify({ name: name.trim(), description: description.trim() || null, type, geometry, rateMultiplier: multN, isServiceArea }),
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `Could not create the zone (HTTP ${res.status}).`);
+      }
       const zone = await res.json() as GeoZone;
       onSaved(zone);
       toast({ title: "Zone created" });
       onClose();
-    } catch {
-      toast({ title: "Error saving zone", variant: "destructive" });
+    } catch (err) {
+      toast({
+        title: "Error saving zone",
+        description: err instanceof Error ? err.message : undefined,
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }
@@ -123,7 +149,7 @@ function ZoneModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
       <div className="bg-[#0a0a0a] border border-white/12 w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/8">
-          <h2 className="font-serif text-lg">New Pricing Zone</h2>
+          <h2 className="font-serif text-lg">New Zone</h2>
           <button onClick={onClose}><X className="w-4 h-4 text-gray-500 hover:text-white" /></button>
         </div>
 
@@ -219,6 +245,17 @@ function ZoneModal({
               })()}
             </p>
           </div>
+
+          <label className={`flex items-start gap-3 border px-4 py-3 cursor-pointer transition-colors ${isServiceArea ? "border-primary/50 bg-primary/5" : "border-white/12 hover:border-white/25"}`}>
+            <input type="checkbox" checked={isServiceArea} onChange={e => setIsServiceArea(e.target.checked)} className="accent-primary mt-0.5" />
+            <span>
+              <span className="block text-sm text-white">Drivers can be assigned to this area</span>
+              <span className="block text-xs text-gray-500 mt-0.5">
+                Chauffeurs assigned here are the only ones offered trips picking up inside it. Leave off for a
+                pure surcharge zone like the Keys.
+              </span>
+            </span>
+          </label>
         </div>
 
         <div className="px-6 pb-6 flex gap-3">
@@ -246,6 +283,7 @@ export default function AdminGeoZones() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [toggling, setToggling] = useState<number | null>(null);
+  const [togglingArea, setTogglingArea] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
 
   const load = async () => {
@@ -284,8 +322,37 @@ export default function AdminGeoZones() {
     }
   };
 
+  const toggleServiceArea = async (zone: GeoZone) => {
+    setTogglingArea(zone.id);
+    try {
+      const res = await fetch(`${API_BASE}/admin/geo-zones/${zone.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token ?? ""}` },
+        body: JSON.stringify({ isServiceArea: !zone.isServiceArea }),
+      });
+      if (!res.ok) {
+        // 503 here means migration 0009 has not run — say so rather than
+        // failing silently, since the checkbox would otherwise just snap back.
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `Could not update the zone (HTTP ${res.status}).`);
+      }
+      const updated = await res.json() as GeoZone;
+      setZones(prev => prev.map(z => z.id === zone.id ? updated : z));
+      toast({
+        title: updated.isServiceArea ? "Now a service area" : "No longer a service area",
+        description: updated.isServiceArea
+          ? "Assign chauffeurs to it from the Drivers screen."
+          : "Any chauffeur assignments to this area have been removed.",
+      });
+    } catch (err) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    } finally {
+      setTogglingArea(null);
+    }
+  };
+
   const deleteZone = async (id: number) => {
-    if (!confirm("Delete this pricing zone?")) return;
+    if (!confirm("Delete this zone? Any chauffeurs assigned to it as a service area lose that assignment.")) return;
     setDeleting(id);
     try {
       await fetch(`${API_BASE}/admin/geo-zones/${id}`, {
@@ -314,9 +381,9 @@ export default function AdminGeoZones() {
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="font-serif text-2xl sm:text-3xl mb-1">Geo Pricing Zones</h1>
+          <h1 className="font-serif text-2xl sm:text-3xl mb-1">Geo Zones</h1>
           <p className="text-sm text-muted-foreground">
-            Draw zones on the map — when a route passes through a zone the quote engine applies the rate multiplier automatically.
+            Zones do two jobs: they can adjust the fare, and they can define which chauffeurs are offered which trips.
           </p>
         </div>
         <button
@@ -331,9 +398,15 @@ export default function AdminGeoZones() {
       <div className="bg-primary/5 border border-primary/20 p-4 mb-6 text-xs text-gray-400 leading-relaxed">
         <strong className="text-primary uppercase tracking-widest text-[10px]">How it works</strong>
         <p className="mt-1.5">
-          When a passenger gets a quote, the system geocodes the pickup, drop-off, and all waypoints.
-          If any point falls inside an active zone the highest matching multiplier is applied to the fare.
-          Use multipliers above 1.0 for surcharge zones (e.g. Florida Keys &rarr; 1.40) and below 1.0 for discount zones.
+          <span className="text-gray-300">Pricing.</span> When a passenger gets a quote the system geocodes the pickup,
+          drop-off and every waypoint. If any point falls inside an active zone, the highest matching multiplier is applied.
+          Leave the multiplier at 1.00 for a zone that should not change the fare.
+        </p>
+        <p className="mt-2">
+          <span className="text-gray-300">Service areas.</span> A zone marked as a service area can have chauffeurs
+          assigned to it under <span className="text-primary">Drivers</span>. Those chauffeurs are then the only ones
+          offered trips picking up inside it. A trip that no assigned chauffeur covers stays visible to everyone, so
+          nothing is ever lost to a gap between zones.
         </p>
       </div>
 
@@ -357,6 +430,7 @@ export default function AdminGeoZones() {
                   <th className="px-6 py-4 font-medium text-muted-foreground">Type</th>
                   <th className="px-6 py-4 font-medium text-muted-foreground">Geometry</th>
                   <th className="px-6 py-4 font-medium text-muted-foreground">Modifier</th>
+                  <th className="px-6 py-4 font-medium text-muted-foreground">Service Area</th>
                   <th className="px-6 py-4 font-medium text-muted-foreground">Status</th>
                   <th className="px-6 py-4" />
                 </tr>
@@ -373,6 +447,23 @@ export default function AdminGeoZones() {
                     </td>
                     <td className="px-6 py-4 text-xs text-muted-foreground font-mono">{formatGeometry(zone)}</td>
                     <td className="px-6 py-4"><MultiplierBadge value={zone.rateMultiplier} /></td>
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => toggleServiceArea(zone)}
+                        disabled={togglingArea === zone.id}
+                        className="flex items-center gap-1.5 text-xs"
+                        title="Chauffeurs can be assigned to a service area, and only they are offered trips inside it."
+                      >
+                        {togglingArea === zone.id
+                          ? <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
+                          : zone.isServiceArea
+                            ? <ToggleRight className="w-5 h-5 text-primary" />
+                            : <ToggleLeft className="w-5 h-5 text-gray-600" />}
+                        <span className={zone.isServiceArea ? "text-primary" : "text-gray-600"}>
+                          {zone.isServiceArea ? "Staffed" : "Pricing only"}
+                        </span>
+                      </button>
+                    </td>
                     <td className="px-6 py-4">
                       <button
                         onClick={() => toggleActive(zone)}

@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet, Star, Gift, Building2 } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet, Star, Gift, Building2, Pencil } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
@@ -11,6 +11,7 @@ import { PlacesAutocomplete } from "@/components/maps/PlacesAutocomplete";
 import { AIRLINES_BY_AIRPORT } from "@/data/airlines";
 import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 import { adminNavItems } from "@/config/portalNav";
+import { EditBookingModal } from "@/components/admin/EditBookingModal";
 
 type AirportCode = "FLL" | "MIA" | "PBI";
 function detectAirportCode(address: string): AirportCode | null {
@@ -137,6 +138,7 @@ export default function AdminBookings() {
   const [pickupAirline, setPickupAirline] = useState("");
   const [dropoffAirline, setDropoffAirline] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [editingBooking, setEditingBooking] = useState<BookingRow | null>(null);
   const [bookingRatings, setBookingRatings] = useState<Record<number, number | null>>({});
 
   // Fetch rating for a booking when it's expanded
@@ -733,16 +735,24 @@ export default function AdminBookings() {
                       )}
                     </td>
                     <td className="px-5 py-4">
-                      <button
-                        onClick={() => setExpandedId(expandedId === b.id ? null : b.id)}
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors whitespace-nowrap"
-                      >
-                        {expandedId === b.id ? (
-                          <><ChevronUp className="w-3.5 h-3.5" /> Hide</>
-                        ) : (
-                          <><ChevronDown className="w-3.5 h-3.5" /> View</>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setExpandedId(expandedId === b.id ? null : b.id)}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors whitespace-nowrap"
+                        >
+                          {expandedId === b.id ? (
+                            <><ChevronUp className="w-3.5 h-3.5" /> Hide</>
+                          ) : (
+                            <><ChevronDown className="w-3.5 h-3.5" /> View</>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => setEditingBooking(b)}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors whitespace-nowrap"
+                        >
+                          <Pencil className="w-3.5 h-3.5" /> Edit
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   {expandedId === b.id && (
@@ -1230,6 +1240,14 @@ export default function AdminBookings() {
             </div>
           </div>
         </div>
+      )}
+      {editingBooking && (
+        <EditBookingModal
+          booking={editingBooking}
+          token={token ?? ""}
+          onClose={() => setEditingBooking(null)}
+          onSaved={refetch}
+        />
       )}
     </PortalLayout>
   );

@@ -8,6 +8,7 @@ import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { adminNavItems } from "@/config/portalNav";
+import { EditDriverModal } from "@/components/admin/EditDriverModal";
 
 const LABEL = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const FINPUT = "bg-white/5 border-white/10 text-white rounded-none h-10 text-sm";
@@ -285,12 +286,6 @@ type AddDriverForm = {
 };
 const EMPTY_DRIVER: AddDriverForm = { name: "", email: "", phone: "", licenseNumber: "", vehicleClass: "", vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: "" };
 
-type EditDriverForm = {
-  name: string; phone: string; licenseNumber: string;
-  vehicleClass: string; vehicleYear: string; vehicleMake: string; vehicleModel: string; vehicleColor: string; passengerCapacity: string;
-};
-
-
 type DriverRow = {
   id: number;
   userId?: number | null;
@@ -351,8 +346,6 @@ export default function AdminDrivers() {
   const [addForm, setAddForm] = useState<AddDriverForm>(EMPTY_DRIVER);
   const [addSaving, setAddSaving] = useState(false);
   const [editingDriver, setEditingDriver] = useState<DriverRow | null>(null);
-  const [editForm, setEditForm] = useState<EditDriverForm>({ name: "", phone: "", licenseNumber: "", vehicleClass: "", vehicleYear: "", vehicleMake: "", vehicleModel: "", vehicleColor: "", passengerCapacity: "" });
-  const [editSaving, setEditSaving] = useState(false);
 
   // Per-driver compliance docs (loaded lazily when row is expanded)
   const [driverDocs, setDriverDocs] = useState<Record<number, DriverDocuments>>({});
@@ -542,42 +535,10 @@ export default function AdminDrivers() {
   const handleDeactivate = (d: DriverRow) => patchDriver(d.id, { status: "inactive", approvalStatus: "rejected" }, `${d.name} deactivated.`);
   const handleReactivate = (d: DriverRow) => patchDriver(d.id, { status: "active", approvalStatus: "approved" }, `${d.name} reactivated.`);
 
-  const openEdit = (d: DriverRow) => {
-    setEditForm({
-      name: d.name ?? "", phone: d.phone ?? "", licenseNumber: d.licenseNumber ?? "",
-      vehicleClass: "", vehicleYear: d.vehicleYear ?? "", vehicleMake: d.vehicleMake ?? "",
-      vehicleModel: d.vehicleModel ?? "", vehicleColor: d.vehicleColor ?? "",
-      passengerCapacity: d.passengerCapacity != null ? String(d.passengerCapacity) : "",
-    });
-    setEditingDriver(d);
-  };
-
-  const handleEditSave = async () => {
-    if (!editingDriver) return;
-    setEditSaving(true);
-    try {
-      const body: Record<string, unknown> = {};
-      if (editForm.name) body.name = editForm.name;
-      if (editForm.phone) body.phone = editForm.phone;
-      if (editForm.licenseNumber) body.licenseNumber = editForm.licenseNumber;
-      if (editForm.vehicleMake !== undefined) body.vehicleMake = editForm.vehicleMake || null;
-      if (editForm.vehicleModel !== undefined) body.vehicleModel = editForm.vehicleModel || null;
-      if (editForm.vehicleYear !== undefined) body.vehicleYear = editForm.vehicleYear || null;
-      if (editForm.vehicleColor !== undefined) body.vehicleColor = editForm.vehicleColor || null;
-      if (editForm.vehicleClass !== undefined) body.vehicleClass = editForm.vehicleClass || null;
-      if (editForm.passengerCapacity) body.passengerCapacity = parseInt(editForm.passengerCapacity);
-      const res = await fetch(`${API_BASE}/drivers/${editingDriver.id}`, {
-        method: "PATCH", headers: authHeaders, body: JSON.stringify(body),
-      });
-      if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error || "Failed"); }
-      toast({ title: "Driver updated" });
-      setEditingDriver(null);
-      refetch();
-    } catch (err: unknown) {
-      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not update driver.", variant: "destructive" });
-    }
-    setEditSaving(false);
-  };
+  // The modal now owns its own draft state and talks to
+  // PATCH /admin/drivers/:id/details, which reaches every column rather than
+  // the nine the old inline form could set.
+  const openEdit = (d: DriverRow) => setEditingDriver(d);
 
   const pendingCount = drivers?.filter(d => !d.approvalStatus || d.approvalStatus === "pending").length ?? 0;
 
@@ -963,61 +924,12 @@ export default function AdminDrivers() {
       )}
 
       {editingDriver && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="bg-card border border-border w-full max-w-lg">
-            <div className="flex items-center justify-between px-7 py-5 border-b border-border">
-              <h2 className="font-serif text-xl">Edit Driver — {editingDriver.name}</h2>
-              <button onClick={() => setEditingDriver(null)} className="text-muted-foreground hover:text-white"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-7 space-y-4 max-h-[60vh] overflow-y-auto">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className={LABEL}>Full Name</label>
-                  <Input value={editForm.name} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))} className={FINPUT} />
-                </div>
-                <div>
-                  <label className={LABEL}>Phone</label>
-                  <Input value={editForm.phone} onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))} className={FINPUT} />
-                </div>
-                <div>
-                  <label className={LABEL}>License Number</label>
-                  <Input value={editForm.licenseNumber} onChange={e => setEditForm(p => ({ ...p, licenseNumber: e.target.value }))} className={FINPUT} />
-                </div>
-              </div>
-              <div className="border-t border-white/10 pt-4">
-                <p className="text-xs text-muted-foreground mb-3 uppercase tracking-widest">Vehicle</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={LABEL}>Make</label>
-                    <Input value={editForm.vehicleMake} onChange={e => setEditForm(p => ({ ...p, vehicleMake: e.target.value }))} className={FINPUT} placeholder="Mercedes-Benz" />
-                  </div>
-                  <div>
-                    <label className={LABEL}>Model</label>
-                    <Input value={editForm.vehicleModel} onChange={e => setEditForm(p => ({ ...p, vehicleModel: e.target.value }))} className={FINPUT} placeholder="S-Class" />
-                  </div>
-                  <div>
-                    <label className={LABEL}>Year</label>
-                    <Input value={editForm.vehicleYear} onChange={e => setEditForm(p => ({ ...p, vehicleYear: e.target.value }))} className={FINPUT} placeholder="2026" />
-                  </div>
-                  <div>
-                    <label className={LABEL}>Color</label>
-                    <Input value={editForm.vehicleColor} onChange={e => setEditForm(p => ({ ...p, vehicleColor: e.target.value }))} className={FINPUT} placeholder="Black" />
-                  </div>
-                  <div>
-                    <label className={LABEL}>Passenger Capacity</label>
-                    <Input type="number" min="1" max="14" value={editForm.passengerCapacity} onChange={e => setEditForm(p => ({ ...p, passengerCapacity: e.target.value }))} className={FINPUT} placeholder="3" />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="px-7 py-5 border-t border-border flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setEditingDriver(null)} className="rounded-none border-white/20 text-white hover:bg-white/10 text-xs uppercase tracking-widest">Cancel</Button>
-              <Button onClick={handleEditSave} disabled={editSaving} className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-6">
-                {editSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving...</> : "Save Changes"}
-              </Button>
-            </div>
-          </div>
-        </div>
+        <EditDriverModal
+          driver={editingDriver}
+          token={token ?? ""}
+          onClose={() => setEditingDriver(null)}
+          onSaved={refetch}
+        />
       )}
 
       <DocReviewModal
