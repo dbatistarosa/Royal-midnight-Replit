@@ -24,6 +24,10 @@ const ROUTES = [
   "/book",
   "/privacy",
   "/terms",
+  // A prospective chauffeur reads this before signing up, and an existing one
+  // may need to produce it later — it belongs with the other legal pages
+  // rather than behind a client-side render.
+  "/driver-agreement",
 ];
 
 // React 19 renders react-helmet-async's <title>/<meta>/<link>/<script> tags
