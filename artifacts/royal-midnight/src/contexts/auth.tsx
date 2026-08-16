@@ -112,29 +112,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void fetch(`${API_BASE}/auth/logout`, { method: "POST" }).catch(() => undefined);
   }
 
-  // A session can also die mid-visit — it expires, an admin revokes it, or a
-  // password reset invalidates it. Pages here call fetch directly in dozens of
-  // places, so rather than touching every call site this watches responses once
-  // and reacts to the only status that means "your session is gone". Login and
-  // logout are excluded: a 401 there is a wrong password, not an expiry.
-  useEffect(() => {
-    const original = window.fetch;
-    window.fetch = async (...args: Parameters<typeof fetch>) => {
-      const response = await original(...args);
-      try {
-        if (response.status === 401) {
-          const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url ?? "";
-          const isApiCall = url.includes(`${API_BASE}/`);
-          const isCredentialCheck = url.includes("/auth/login") || url.includes("/auth/logout");
-          if (isApiCall && !isCredentialCheck) clearSession();
-        }
-      } catch {
-        // Never let this bookkeeping break the caller's request.
-      }
-      return response;
-    };
-    return () => { window.fetch = original; };
-  }, []);
+  // A session dying mid-visit is handled by reloading, not by intercepting.
+  //
+  // There was a global fetch wrapper here that watched for 401s. It took every
+  // admin screen down: `const original = window.fetch` and then calling
+  // `original(...)` loses the `window` receiver, and Chrome rejects that with
+  // "Illegal invocation". Pages that .catch() without clearing their loading
+  // flag then span forever on "Loading...".
+  //
+  // It is not worth a second attempt. The reported problem — a dead session
+  // showing empty dashboards — is already solved by the /auth/me check above,
+  // which runs on every page load. Patching a global to also catch an expiry
+  // that happens between two loads buys very little and risks all of it.
 
   return (
     <AuthContext.Provider value={{ user, token, driverId, login, logout, isAuthenticated: !!user, isLoading }}>
