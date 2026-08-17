@@ -133,7 +133,7 @@ function Modal({ title, onClose, onSubmit, submitting, children }: {
 }
 
 export default function AdminBookings() {
-  const { token } = useAuth();
+  const { token, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
@@ -237,7 +237,7 @@ export default function AdminBookings() {
   const limits = VEHICLE_LIMITS[createForm.vehicleClass as keyof typeof VEHICLE_LIMITS] ?? VEHICLE_LIMITS.business;
 
   const refetch = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setIsLoading(true);
     fetch(`${API_BASE}/bookings`, { headers: { Authorization: authHdr } })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
@@ -248,7 +248,7 @@ export default function AdminBookings() {
 
   useEffect(() => {
     refetch();
-    if (!token) return;
+    if (!isAuthenticated) return;
     fetch(`${API_BASE}/drivers`, { headers: { Authorization: authHdr } })
       .then(r => r.ok ? r.json() as Promise<DriverOption[]> : Promise.resolve([]))
       .then(data => setDrivers(Array.isArray(data) ? data : []))

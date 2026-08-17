@@ -65,7 +65,7 @@ function getMonday(date: Date): Date {
 }
 
 export default function AdminPayouts() {
-  const { token } = useAuth();
+  const { token, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [board, setBoard] = useState<PayoutBoard | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -80,7 +80,7 @@ export default function AdminPayouts() {
   const currentWeekStart = getMonday(addWeeks(new Date(), weekOffset));
 
   const fetchPayouts = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setIsLoading(true);
     const weekParam = format(currentWeekStart, "yyyy-MM-dd");
     fetch(`${API_BASE}/admin/payouts/weekly?week=${weekParam}`, { headers: { Authorization: authHdr } })

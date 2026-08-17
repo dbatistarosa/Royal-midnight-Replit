@@ -211,6 +211,23 @@ async function getPricingForClass(vc: string): Promise<{ baseFare: number; rateP
 
 // Hourly charter rates per vehicle class ($/hr, before tax) — only used when a
 // vehicle class has no admin-set hourlyRate on its pricing_rules row.
+/**
+ * The hourly rate a charter of this vehicle class is quoted at: the admin-set
+ * rate on the pricing rule when there is one, otherwise the built-in default.
+ *
+ * Exported so booking creation can freeze the same number onto the row that the
+ * customer was quoted, rather than re-deriving it later and risking a different
+ * answer if pricing changed in between.
+ */
+export async function resolveHourlyRate(vehicleClass: string): Promise<number> {
+  const { hourlyRate, baseFare } = await getPricingForClass(vehicleClass);
+  return hourlyRate ?? HOURLY_RATES[vehicleClass] ?? Math.round(baseFare * 1.5 * 100) / 100;
+}
+
+/** Miles per hour included in an hourly charter before extra mileage applies.
+ *  Matches the value trip/start has always frozen onto the booking. */
+export const DEFAULT_MAX_MILES_PER_HOUR = 30;
+
 export const HOURLY_RATES: Record<string, number> = {
   business: 95,
   suv: 125,

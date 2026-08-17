@@ -42,7 +42,18 @@ export function DriverStatusProvider({ children }: { children: ReactNode }) {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (!user?.id || !token || user.role !== "driver") {
+    // Gated on the user, NOT on the token.
+    //
+    // The bearer token is memory-only by design (CN-014 moved the session into
+    // an HttpOnly cookie), so it is gone after any page reload. This effect used
+    // to require it, so on refresh it set driverRecord to null and the dashboard
+    // fell back to rendering the not-yet-approved state — a working chauffeur
+    // was told their account was "pending" until they signed out and back in.
+    //
+    // The cookie is what actually authenticates, API_BASE is same-origin, and
+    // fetch sends same-origin cookies by default. The header below is kept only
+    // for the tab that still holds a token in memory.
+    if (!user?.id || user.role !== "driver") {
       setDriverRecord(null);
       setIsLoading(false);
       return;
@@ -50,7 +61,7 @@ export function DriverStatusProvider({ children }: { children: ReactNode }) {
 
     setIsLoading(true);
     fetch(`${API_BASE}/drivers/by-user/${user.id}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then(r => r.ok ? r.json() as Promise<DriverRecord> : Promise.reject(new Error("Not found")))
       .then(d => setDriverRecord(d))

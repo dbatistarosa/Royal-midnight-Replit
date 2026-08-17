@@ -15,7 +15,7 @@ import { computeHourlyOverage } from "../lib/hourlyOverage.js";
 import { driverBlockReason, driverBlockMessage } from "../lib/driverEligibility.js";
 import { getDriverWindows } from "../lib/driverWindows.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
-import { HOURLY_RATES, DEFAULT_RATE_PER_MILE, computeQuote, readQuoteExtensions } from "./quote.js";
+import { HOURLY_RATES, DEFAULT_RATE_PER_MILE, DEFAULT_MAX_MILES_PER_HOUR, computeQuote, readQuoteExtensions, resolveHourlyRate } from "./quote.js";
 import { evaluatePromoCode } from "./promos.js";
 import {
   sendBookingConfirmationPassenger,
@@ -696,6 +696,11 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
   // server-derived price, so a client can no longer force it.
   const isFreeBooking = !isCorporate && priceQuoted <= 0;
 
+  // The hourly rate this charter was actually quoted at: the admin-set rate for
+  // the vehicle class if there is one, otherwise the built-in default. Resolved
+  // here so it can be frozen onto the booking below.
+  const hourlyRateForBooking = await resolveHourlyRate(parsed.data.vehicleClass as string);
+
   const bookingValues = {
       // Explicit field list — never spread the request body, which would let a
       // caller set columns the schema does not intend them to control.
@@ -716,6 +721,24 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       fareSubtotal: String(fareSubtotal),
       discountAmount: discountAmount > 0 ? String(discountAmount) : null,
       paymentType: parsed.data.paymentType ?? "standard",
+      // The trip's own shape, which was priced and then thrown away.
+      //
+      // readQuoteExtensions() has always read charterMode/charterHours/waypoints
+      // off the body and computeQuote() has always priced them — an hourly
+      // charter was billed at the hourly rate correctly. But none of the three
+      // was ever written to the row, so every booking was stored as a plain
+      // point-to-point transfer with charter_mode NULL. Nothing downstream could
+      // tell an hourly charter from an airport run: not the driver's manifest,
+      // not the passenger's receipt, not the admin list, and not the overage
+      // timer, which needs charter_hours to know what was contracted.
+      charterMode: ext.charterMode === "hourly" ? "hourly" : null,
+      charterHours: ext.charterMode === "hourly" ? (ext.charterHours ?? null) : null,
+      waypoints: ext.waypoints?.length ? JSON.stringify(ext.waypoints) : null,
+      // Frozen now rather than at trip start so the passenger's receipt can show
+      // the terms they agreed to, and so overage is computed against the rate
+      // quoted at booking even if pricing changes in between.
+      hourlyRate: ext.charterMode === "hourly" ? String(hourlyRateForBooking) : null,
+      maxMilesPerHour: ext.charterMode === "hourly" ? DEFAULT_MAX_MILES_PER_HOUR : null,
       // Corporate bookings are confirmed immediately; fully-discounted bookings skip
       // payment and go straight to pending (open driver pool). Everyone else
       // (including admin-manual) awaits payment.

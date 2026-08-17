@@ -93,7 +93,7 @@ type NewSubmission = {
 };
 
 export default function AdminFleet() {
-  const { token } = useAuth();
+  const { token, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>("vehicles");
 
@@ -141,7 +141,7 @@ export default function AdminFleet() {
   const authHdr = token ? `Bearer ${token}` : "";
 
   const fetchVehicles = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setVehiclesLoading(true);
     fetch(`${API_BASE}/vehicles`, { headers: { Authorization: authHdr } })
       .then(r => r.ok ? r.json() as Promise<Vehicle[]> : Promise.resolve([]))
@@ -151,7 +151,7 @@ export default function AdminFleet() {
   }, [token, authHdr]);
 
   const fetchCatalog = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setCatalogLoading(true);
     fetch(`${API_BASE}/admin/vehicle-catalog`, { headers: { Authorization: authHdr } })
       .then(r => r.ok ? r.json() as Promise<CatalogEntry[]> : Promise.resolve([]))
@@ -161,7 +161,7 @@ export default function AdminFleet() {
   }, [token, authHdr]);
 
   const fetchCompliance = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setComplianceLoading(true);
     Promise.all([
       fetch(`${API_BASE}/admin/compliance`, { headers: { Authorization: `Bearer ${token}` } })

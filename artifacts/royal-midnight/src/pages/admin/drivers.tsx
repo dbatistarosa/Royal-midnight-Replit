@@ -335,7 +335,7 @@ function DetailRow({ label, value }: { label: string; value?: string | number | 
 
 export default function AdminDrivers() {
   const { toast } = useToast();
-  const { token } = useAuth();
+  const { token, isAuthenticated } = useAuth();
   const [drivers, setDrivers] = useState<DriverRow[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
@@ -359,7 +359,7 @@ export default function AdminDrivers() {
   };
 
   const refetch = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setIsLoading(true);
     fetch(`${API_BASE}/drivers`, {
       headers: { Authorization: `Bearer ${token}` },

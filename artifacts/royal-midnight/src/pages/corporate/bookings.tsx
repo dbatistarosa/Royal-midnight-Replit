@@ -30,7 +30,7 @@ const CLASS_LABELS: Record<string, string> = {
 };
 
 function CorporateBookingsInner() {
-  const { token } = useAuth();
+  const { token, isAuthenticated } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "upcoming" | "completed">("all");
@@ -38,7 +38,7 @@ function CorporateBookingsInner() {
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     fetch(`${API_BASE}/bookings`, { headers: authHeader })
       .then(r => r.ok ? r.json() as Promise<Booking[]> : Promise.reject())
       .then(data => setBookings(data))

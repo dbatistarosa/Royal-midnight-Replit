@@ -127,7 +127,7 @@ function formToPayload(form: RouteFormState): Record<string, unknown> {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function AdminExtras() {
-  const { token } = useAuth();
+  const { token, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const authHdr = { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 
@@ -152,7 +152,7 @@ export default function AdminExtras() {
   const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
 
   const fetchRoutes = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setRouteLoading(true);
     fetch(`${API_BASE}/admin/fixed-routes`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() as Promise<FixedRoute[]> : Promise.resolve([]))
@@ -161,7 +161,7 @@ export default function AdminExtras() {
   }, [token]);
 
   const fetchExtras = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setExtrasLoading(true);
     fetch(`${API_BASE}/admin/extras`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() as Promise<ExtraService[]> : Promise.resolve([]))
@@ -170,7 +170,7 @@ export default function AdminExtras() {
   }, [token]);
 
   const fetchPricingRules = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     fetch(`${API_BASE}/pricing`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() as Promise<PricingRule[]> : Promise.resolve([]))
       .then(rules => setPricingRules(rules.filter(r => r.isActive)))

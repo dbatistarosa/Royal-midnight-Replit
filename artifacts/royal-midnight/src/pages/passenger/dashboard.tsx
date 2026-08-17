@@ -18,8 +18,11 @@ function ReferralCard({ userId, token }: { userId: number; token: string | null 
   const { toast } = useToast();
 
   useEffect(() => {
-    if (!token) return;
-    fetch(`${API_BASE}/users/${userId}/referral`, { headers: { Authorization: `Bearer ${token}` } })
+    // No token gate: this is a child that receives the memory-only bearer as a
+    // prop, and it is null after any reload. The same-origin session cookie is
+    // what authenticates; the header is sent only when a token happens to exist.
+    if (!userId) return;
+    fetch(`${API_BASE}/users/${userId}/referral`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
       .then(res => (res.ok ? res.json() : null))
       .then(data => data && setReferral(data))
       .catch(() => {});
@@ -69,7 +72,7 @@ function ReferralCard({ userId, token }: { userId: number; token: string | null 
 
 
 function PassengerDashboardInner() {
-  const { user, token } = useAuth();
+  const { user, token, isAuthenticated } = useAuth();
   const userId = user?.id;
   const { data: bookings, isLoading } = useGetUserBookings(userId ?? 0, { query: { enabled: !!userId, queryKey: ["userBookings", userId ?? 0] } });
 

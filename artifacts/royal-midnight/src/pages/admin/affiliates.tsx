@@ -41,7 +41,7 @@ type AffiliateData = {
 };
 
 export default function AdminAffiliates() {
-  const { token } = useAuth();
+  const { token, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [data, setData] = useState<AffiliateData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,7 +49,7 @@ export default function AdminAffiliates() {
   const authHdr = token ? `Bearer ${token}` : "";
 
   const fetchAffiliates = useCallback(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setIsLoading(true);
     fetch(`${API_BASE}/admin/affiliates`, { headers: { Authorization: authHdr } })
       .then(r => r.ok ? r.json() as Promise<AffiliateData> : Promise.reject(new Error("Failed")))

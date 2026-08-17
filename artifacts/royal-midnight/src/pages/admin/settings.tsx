@@ -139,7 +139,7 @@ type CorporateAccount = { id: number; name: string; email: string; phone: string
 
 function AdminSettingsInner() {
   const { toast } = useToast();
-  const { token } = useAuth();
+  const { token, isAuthenticated } = useAuth();
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
@@ -203,7 +203,7 @@ function AdminSettingsInner() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     fetch(`${API_BASE}/auth/corporate-accounts`, { headers: authHeader })
       .then(r => r.ok ? r.json() as Promise<CorporateAccount[]> : Promise.reject())
       .then(data => setCorporateAccounts(data))

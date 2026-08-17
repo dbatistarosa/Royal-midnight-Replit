@@ -231,7 +231,7 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
 function PassengerRideDetailInner() {
   const params = useParams();
   const id = parseInt(params.id || "0", 10);
-  const { token, user: authUser } = useAuth();
+  const { token, user: authUser, isAuthenticated } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [booking, setBooking] = useState<BookingDetail | null>(null);
@@ -247,7 +247,7 @@ function PassengerRideDetailInner() {
   const [driverSaving, setDriverSaving] = useState(false);
 
   const handleSaveDriver = async (driverId: number) => {
-    if (!token || !authUser) return;
+    if (!isAuthenticated || !authUser) return;
     setDriverSaving(true);
     try {
       const res = await fetch(`${API_BASE}/users/${authUser.id}/favorite-drivers/${driverId}`, {
@@ -318,7 +318,7 @@ function PassengerRideDetailInner() {
 
   // Fetch driver info whenever booking changes and has a driverId
   useEffect(() => {
-    if (!id || !token || !booking?.driverId) { setDriverInfo(null); return; }
+    if (!id || !isAuthenticated || !booking?.driverId) { setDriverInfo(null); return; }
     fetch(`${API_BASE}/bookings/${id}/driver-info`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -364,7 +364,7 @@ function PassengerRideDetailInner() {
 
   // Fetch saved card for tip off-session charging
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     fetch(`${API_BASE}/payments/saved-cards`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -386,7 +386,7 @@ function PassengerRideDetailInner() {
   }, [id, token]);
 
   const handleCancelPreview = async () => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setCancelLoading(true);
     try {
       const res = await fetch(`${API_BASE}/bookings/${id}/cancel-preview`, {
@@ -403,7 +403,7 @@ function PassengerRideDetailInner() {
   };
 
   const handleConfirmCancel = async () => {
-    if (!token || !cancelPreview) return;
+    if (!isAuthenticated || !cancelPreview) return;
     setCancelConfirming(true);
     try {
       const res = await fetch(`${API_BASE}/bookings/${id}`, {
@@ -424,7 +424,7 @@ function PassengerRideDetailInner() {
 
   const handleTipSubmit = async () => {
     const amount = parseFloat(tipAmount);
-    if (!token || isNaN(amount) || amount <= 0) return;
+    if (!isAuthenticated || isNaN(amount) || amount <= 0) return;
     setTipSubmitting(true);
     try {
       const res = await fetch(`${API_BASE}/payments/tip/${id}`, {
@@ -454,7 +454,7 @@ function PassengerRideDetailInner() {
   };
 
   const handleTipCheckout = async (amount: number) => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     setTipCheckoutLoading(true);
     setTipCardError(null);
     try {
@@ -479,7 +479,7 @@ function PassengerRideDetailInner() {
   };
 
   const handleTipCardSuccess = async (paymentIntentId: string) => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     try {
       const res = await fetch(`${API_BASE}/payments/tip-confirm/${id}`, {
         method: "POST",
@@ -523,7 +523,10 @@ function PassengerRideDetailInner() {
   };
 
   const handleRatingSubmit = async () => {
-    if (!token || ratingValue < 1) return;
+    // Same reason as everywhere else on this page: after a reload the bearer is
+    // gone but the session cookie is not, and silently doing nothing left the
+    // Submit button dead with no explanation.
+    if (!isAuthenticated || ratingValue < 1) return;
     setRatingSubmitting(true);
     try {
       const res = await fetch(`${API_BASE}/bookings/${id}/rate`, {

@@ -23,14 +23,14 @@ type Booking = {
 };
 
 function CorporateDashboardInner() {
-  const { user, token } = useAuth();
+  const { user, token, isAuthenticated } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     fetch(`${API_BASE}/bookings`, { headers: authHeader })
       .then(r => r.ok ? r.json() as Promise<Booking[]> : Promise.reject())
       .then(data => setBookings(data))

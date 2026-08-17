@@ -171,7 +171,7 @@ function detectAirportCode(address: string): AirportCode | null {
 export default function Book() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { user, login, token } = useAuth();
+  const { user, login, token, isAuthenticated } = useAuth();
   const [step, setStep] = useState<StepKey>(1);
   const [quotes, setQuotes] = useState<Record<string, QuoteResult | null>>({});
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
@@ -468,8 +468,8 @@ export default function Book() {
 
   // Load saved cards when reaching payment step (logged-in users only)
   useEffect(() => {
-    if (step !== 3 || !token || !user) return;
-    fetch(`${API_BASE}/payments/saved-cards`, { headers: { Authorization: `Bearer ${token}` } })
+    if (step !== 3 || !isAuthenticated || !user) return;
+    fetch(`${API_BASE}/payments/saved-cards`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
       .then(r => r.ok ? r.json() as Promise<{ cards: Array<{ id: string; brand: string; last4: string; expMonth: number; expYear: number; isDefault: boolean }> }> : null)
       .then(data => { if (data?.cards?.length) setSavedCards(data.cards); })
       .catch(() => {});
@@ -477,8 +477,8 @@ export default function Book() {
 
   // Load favorite drivers + managed travelers when reaching step 2 for logged-in users
   useEffect(() => {
-    if (step !== 2 || !token || !user) return;
-    fetch(`${API_BASE}/users/${user.id}/favorite-drivers`, { headers: { Authorization: `Bearer ${token}` } })
+    if (step !== 2 || !isAuthenticated || !user) return;
+    fetch(`${API_BASE}/users/${user.id}/favorite-drivers`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
       .then(r => r.ok ? r.json() as Promise<FavoriteDriver[]> : Promise.resolve([]))
       .then(data => setFavoriteDrivers(Array.isArray(data) ? data : []))
       .catch(() => {});
