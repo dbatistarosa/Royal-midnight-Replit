@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders } from "@/lib/authHeaders";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { passengerNavItems } from "@/config/portalNav";
 
@@ -67,7 +68,7 @@ export default function PassengerReports() {
   const [pdfLoading, setPdfLoading] = useState(false);
 
   useEffect(() => {
-    if (!user?.id || !token) return;
+    if (!user?.id) return;
     setIsLoading(true);
     const params = new URLSearchParams();
     params.set("userId", String(user.id));
@@ -76,7 +77,7 @@ export default function PassengerReports() {
       params.set("endDate", dateRange.endDate.toISOString());
     }
     fetch(`${API_BASE}/bookings?${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(token),
     })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
       .then(data => setAllBookings(Array.isArray(data) ? data : []))

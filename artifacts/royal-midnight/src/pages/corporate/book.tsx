@@ -28,12 +28,28 @@ const VEHICLE_OPTIONS = [
 
 type BookingResult = { id: number };
 type QuoteResult = {
+  /** The PRE-TAX, pre-card-fee subtotal — not what gets invoiced. */
   estimatedPrice: number;
+  /** Subtotal + tax + card fee: the amount that lands on the account. */
+  totalWithTax: number;
   baseFare: number;
   distanceCharge: number;
   surgeAdjustment: number;
   fixedRoutePrice?: number | null;
 };
+
+/**
+ * What this trip will actually cost the account.
+ *
+ * This screen used to quote `estimatedPrice`, which is the quote's *subtotal* —
+ * before Florida tax and the card processing fee. So a corporate booker was
+ * shown one number, agreed to it, and the invoice arrived ~11% higher, because
+ * the server (correctly) bills totalWithTax. Falls back to the subtotal only if
+ * an older API build omits the field.
+ */
+function invoicedTotal(q: QuoteResult): number {
+  return q.totalWithTax ?? q.estimatedPrice;
+}
 
 // Driver commission base: base fare + billable miles (+surge). Airport fee,
 // taxes and card fees are company-side. Flat routes commission on the flat price.
@@ -85,7 +101,7 @@ function CorporateBookInner() {
       });
       if (res.ok) {
         const data = await res.json() as QuoteResult;
-        setQuotedPrice(data.estimatedPrice);
+        setQuotedPrice(invoicedTotal(data));
         setQuotedFareBase(driverFareBase(data));
       }
     } catch {
@@ -121,7 +137,7 @@ function CorporateBookInner() {
         });
         if (qRes.ok) {
           const qData = await qRes.json() as QuoteResult;
-          price = qData.estimatedPrice;
+          price = invoicedTotal(qData);
           fareBase = driverFareBase(qData);
           setQuotedPrice(price);
           setQuotedFareBase(fareBase);

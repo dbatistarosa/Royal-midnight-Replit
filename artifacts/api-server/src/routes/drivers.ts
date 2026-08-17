@@ -7,6 +7,7 @@ import { signedObjectDownloadPath } from "../lib/signedUrl.js";
 import { revokeAllSessionsForUser } from "../lib/session.js";
 import { encryptField, lastN, safeDecryptField, isFieldEncryptionConfigError } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
+import { loadDriverEarningRows } from "../lib/fareBreakdown.js";
 import { hashPassword } from "../lib/hash.js";
 import { sendDriverAccountSetupEmail } from "../lib/mailer.js";
 import {
@@ -803,16 +804,67 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
   const periodEarnings = Math.round((periodCommission + periodTips) * 100) / 100;
   const periodRides = stats?.ridesPeriod ?? 0;
 
-  // Total driver payout = commission (% of fare) + tips (100%)
-  const totalEarnings = Math.round((commissionAllTime + tipsTotal) * 100) / 100;
-  const thisWeek = Math.round((commissionThisWeek + tipsThisWeek) * 100) / 100;
-  const thisMonth = Math.round(((stats?.fareThisMonth ?? 0) * commissionPct + (stats?.tipsThisMonth ?? 0)) * 100) / 100;
-  const today = Math.round(((stats?.fareToday ?? 0) * commissionPct + tipsToday) * 100) / 100;
+  // ── The two components this endpoint never counted ──────────────────────────
+  //
+  // A chauffeur's trip card on the dashboard has shown three components since
+  // add-ons shipped — fare commission, add-ons paid in full, overtime — but this
+  // endpoint summed only the first. So the Earnings screen disagreed with the
+  // trip list on the same account: fit a car seat and work an extra hour, and
+  // neither appeared in "Total Earnings".
+  //
+  // Overtime earns commission (it is time worked); add-ons flagged
+  // paid_to_driver are paid in full with no commission taken.
+  const extraRows = await loadDriverEarningRows(driverId);
+
+  const inWindow = (d: Date, from: Date | null, to: Date | null) =>
+    (from === null || d >= from) && (to === null || d <= to);
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  // Postgres date_trunc('week') starts on Monday; match it so the two halves of
+  // this response cover the same days.
+  const startOfWeek = (() => {
+    const d = new Date(startOfToday);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return d;
+  })();
+
+  const sumExtras = (from: Date | null, to: Date | null) => {
+    let overtime = 0;
+    let addons = 0;
+    for (const r of extraRows) {
+      if (!inWindow(r.createdAt, from, to)) continue;
+      overtime += r.overageFare;
+      addons += r.driverExtras;
+    }
+    return Math.round((overtime * commissionPct + addons) * 100) / 100;
+  };
+
+  const extrasAllTime = sumExtras(null, null);
+  const extrasThisMonth = sumExtras(startOfMonth, null);
+  const extrasThisWeek = sumExtras(startOfWeek, null);
+  const extrasToday = sumExtras(startOfToday, null);
+  const extrasPeriod = sumExtras(filterStart, filterEnd);
+
+  // Total driver payout = commission (% of fare + overtime) + add-ons kept in
+  // full + tips (100%)
+  const totalEarnings = Math.round((commissionAllTime + tipsTotal + extrasAllTime) * 100) / 100;
+  const thisWeek = Math.round((commissionThisWeek + tipsThisWeek + extrasThisWeek) * 100) / 100;
+  const thisMonth = Math.round(((stats?.fareThisMonth ?? 0) * commissionPct + (stats?.tipsThisMonth ?? 0) + extrasThisMonth) * 100) / 100;
+  const today = Math.round(((stats?.fareToday ?? 0) * commissionPct + tipsToday + extrasToday) * 100) / 100;
+
+  const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const extrasByDay = new Map<string, number>();
+  for (const r of extraRows) {
+    const key = dayKey(r.createdAt);
+    extrasByDay.set(key, (extrasByDay.get(key) ?? 0) + r.overageFare * commissionPct + r.driverExtras);
+  }
 
   const recentPayouts = dailyRaw.map(d => ({
     date: d.date,
     rides: d.rides,
-    amount: Math.round((d.fare * commissionPct + d.tip) * 100) / 100,
+    amount: Math.round((d.fare * commissionPct + d.tip + (extrasByDay.get(d.date) ?? 0)) * 100) / 100,
   }));
 
   res.json(
@@ -828,7 +880,7 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
       tipsTotal,
       tipsThisWeek,
       tipsToday,
-      periodEarnings,
+      periodEarnings: Math.round((periodEarnings + extrasPeriod) * 100) / 100,
       periodRides,
       periodTips,
       commissionPct,

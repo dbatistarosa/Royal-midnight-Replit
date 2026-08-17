@@ -7,6 +7,7 @@ import {
   Mail, Clock, ExternalLink, Lock, Gift, Building2, FileText, ShieldCheck, ShieldX,
 } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
+import { assertOk } from "@/lib/assertOk";
 import { useAuth } from "@/contexts/auth";
 import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { useToast } from "@/hooks/use-toast";
@@ -220,11 +221,16 @@ export default function AdminFleet() {
     if (!confirm(`Delete ${entry.make} ${entry.model} from the catalog?`)) return;
     setDeletingId(entry.id);
     try {
-      await fetch(`${API_BASE}/admin/vehicle-catalog/${entry.id}`, { method: "DELETE", headers: { Authorization: authHdr } });
+      // The response used to be discarded, so a rejected delete still said
+      // "Deleted" and the entry simply reappeared in the reloaded list.
+      await assertOk(
+        await fetch(`${API_BASE}/admin/vehicle-catalog/${entry.id}`, { method: "DELETE", headers: { Authorization: authHdr } }),
+        "Could not delete catalog entry",
+      );
       toast({ title: "Deleted" });
       fetchCatalog();
-    } catch {
-      toast({ title: "Error", description: "Could not delete catalog entry.", variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Error", description: e instanceof Error ? e.message : "Could not delete catalog entry.", variant: "destructive" });
     } finally {
       setDeletingId(null);
     }

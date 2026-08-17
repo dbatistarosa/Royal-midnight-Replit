@@ -9,6 +9,7 @@ import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders } from "@/lib/authHeaders";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@workspace/object-storage-web";
 import { differenceInDays, parseISO, isValid } from "date-fns";
@@ -344,10 +345,10 @@ export default function DriverDocuments() {
   const authHeader = `Bearer ${token ?? ""}`;
 
   const loadDocs = () => {
-    if (!driverRecord?.id || !token) return;
+    if (!driverRecord?.id) return;
     setLoading(true);
     fetch(`${API_BASE}/drivers/${driverRecord.id}/documents`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(token),
     })
       .then(r => r.ok ? r.json() as Promise<DocsResponse> : Promise.reject(new Error("Failed to load")))
       .then(d => setDocs(d))
@@ -356,9 +357,12 @@ export default function DriverDocuments() {
   };
 
   useEffect(() => {
-    if (driverRecord?.id && token) loadDocs();
+    // `loading` starts true, so a driver record that never arrives has to clear
+    // it explicitly — otherwise this screen is a spinner for ever.
+    if (driverRecord?.id) loadDocs();
+    else if (!driverLoading) setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driverRecord?.id, token]);
+  }, [driverRecord?.id, token, driverLoading]);
 
   if (driverLoading || loading) {
     return (

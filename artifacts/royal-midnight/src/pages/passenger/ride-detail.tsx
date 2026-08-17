@@ -7,6 +7,8 @@ import { Link, useParams, useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders } from "@/lib/authHeaders";
+import { buildReceipt, type StoredReceipt } from "@/lib/receipt";
 import { CharterBadge, CharterDetails, TripExtras, type TripExtra } from "@/components/TripExtrasAndCharter";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -44,6 +46,12 @@ type BookingDetail = {
   hourlyRate?: number | null;
   extraCharge?: number | null;
   overageMinutes?: number | null;
+  receipt?: StoredReceipt | null;
+};
+
+const TONE_CLASS: Record<string, string> = {
+  credit: "text-green-400",
+  extra: "text-amber-300",
 };
 
 type DriverLocation = {
@@ -286,10 +294,8 @@ function PassengerRideDetailInner() {
         vehicleClass: booking.vehicleClass,
         passengers: booking.passengers,
         flightNumber: booking.flightNumber,
-        priceQuoted: booking.priceQuoted!,
-        discountAmount: booking.discountAmount,
-        tipAmount: booking.tipAmount,
         status: booking.status,
+        receipt: buildReceipt({ ...booking, priceQuoted: booking.priceQuoted ?? 0 }),
       });
     } catch {
       toast({ title: "Error", description: "Could not generate receipt PDF.", variant: "destructive" });
@@ -343,9 +349,12 @@ function PassengerRideDetailInner() {
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
 
   const loadBooking = useCallback(() => {
-    if (!id || !token) return;
+    // Not gated on `token`: it is memory-only and null after any reload, while
+    // the HttpOnly session cookie still authenticates. Returning early here left
+    // isLoading pinned at true, so a refreshed ride page span for ever.
+    if (!id) { setIsLoading(false); return; }
     fetch(`${API_BASE}/bookings/${id}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(token),
     })
       .then(r => {
         if (!r.ok) throw new Error("Not found");
@@ -374,7 +383,7 @@ function PassengerRideDetailInner() {
   useEffect(() => {
     if (!isAuthenticated) return;
     fetch(`${API_BASE}/payments/saved-cards`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(token),
     })
       .then(r => r.ok ? r.json() as Promise<{ cards: SavedCard[] }> : Promise.resolve({ cards: [] }))
       .then(data => setSavedCard(data.cards?.[0] ?? null))
@@ -383,9 +392,9 @@ function PassengerRideDetailInner() {
 
   // Poll booking status every 15 seconds so the map appears automatically when driver departs
   useEffect(() => {
-    if (!id || !token) return;
+    if (!id) return;
     const interval = setInterval(() => {
-      fetch(`${API_BASE}/bookings/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+      fetch(`${API_BASE}/bookings/${id}`, { headers: authHeaders(token) })
         .then(r => r.ok ? r.json() as Promise<BookingDetail> : Promise.reject())
         .then(data => setBooking(prev => (prev?.status !== data.status ? data : prev)))
         .catch(() => {});
@@ -716,69 +725,33 @@ function PassengerRideDetailInner() {
 
           <div className="space-y-5">
             {/* Receipt */}
-            {booking.priceQuoted != null && (
+            {booking.priceQuoted != null && (() => {
+              const receipt = buildReceipt({ ...booking, priceQuoted: booking.priceQuoted ?? 0 });
+              return (
               <div className="bg-card border border-border p-5 sm:p-6">
                 <h2 className="font-serif text-xl mb-5 flex items-center justify-between">
                   <span>Receipt</span>
                   <CreditCard className="w-4 h-4 text-muted-foreground" />
                 </h2>
                 <div className="space-y-3 text-sm mb-5">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">
-                      {booking.charterMode === "hourly" && booking.charterHours
-                        ? `Hourly charter · ${booking.charterHours} hr${booking.charterHours === 1 ? "" : "s"}`
-                        : "Base Fare"}
-                    </span>
-                    <span>${(booking.priceQuoted * 0.8).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Taxes & Fees</span>
-                    <span>${(booking.priceQuoted * 0.2).toFixed(2)}</span>
-                  </div>
-                  {/* The add-ons the passenger chose. Charged at booking and,
-                      until now, itemised nowhere they could see. */}
-                  {(booking.extras ?? []).map(e => (
-                    <div key={e.id} className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        {e.name}{e.quantity > 1 ? ` × ${e.quantity}` : ""}
+                  {receipt.lines.map(line => (
+                    <div key={line.label} className={`flex justify-between ${line.tone ? TONE_CLASS[line.tone] : ""}`}>
+                      <span className={line.tone ? "" : "text-muted-foreground"}>
+                        {line.label}
+                        {line.note && <span className="text-xs opacity-60"> · {line.note}</span>}
                       </span>
-                      <span>${Number(e.total).toFixed(2)}</span>
+                      <span>{line.amount < 0 ? "-" : ""}${Math.abs(line.amount).toFixed(2)}</span>
                     </div>
                   ))}
-                  {booking.extraCharge != null && Number(booking.extraCharge) > 0 && (
-                    <div className="flex justify-between text-amber-300">
-                      <span>
-                        Extra time
-                        {booking.overageMinutes != null && (
-                          <span className="text-amber-300/60 text-xs"> · {booking.overageMinutes} min over</span>
-                        )}
-                      </span>
-                      <span>+${Number(booking.extraCharge).toFixed(2)}</span>
-                    </div>
-                  )}
-                  {booking.discountAmount != null && booking.discountAmount > 0 && (
-                    <div className="flex justify-between text-green-400">
-                      <span>Discount</span>
-                      <span>-${booking.discountAmount.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {booking.tipAmount != null && booking.tipAmount > 0 && (
-                    <div className="flex justify-between text-green-400">
-                      <span>Gratuity</span>
-                      <span>+${Number(booking.tipAmount).toFixed(2)}</span>
-                    </div>
-                  )}
                   <div className="flex justify-between font-medium text-base pt-3 border-t border-border">
                     <span>Total</span>
-                    <span className="text-primary">
-                      ${(
-                        booking.priceQuoted
-                        + (booking.tipAmount != null ? Number(booking.tipAmount) : 0)
-                        + (booking.extras ?? []).reduce((sum, e) => sum + Number(e.total), 0)
-                        + Number(booking.extraCharge ?? 0)
-                      ).toFixed(2)}
-                    </span>
+                    <span className="text-primary">${receipt.total.toFixed(2)}</span>
                   </div>
+                  {receipt.extraTimeUnpaid && (
+                    <p className="text-xs text-amber-400/80 pt-1">
+                      The additional time above has not been charged to your card yet. Our team will be in touch.
+                    </p>
+                  )}
                 </div>
                 <CharterDetails booking={booking} audience="passenger" />
                 <div className="flex items-center justify-between gap-2 bg-background p-3">
@@ -799,7 +772,8 @@ function PassengerRideDetailInner() {
                   )}
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* Add a Tip (completed trips with no tip yet) */}
             {booking?.status === "completed" && !booking.tipAmount && !tipSubmitted && !showTipCardEntry && (

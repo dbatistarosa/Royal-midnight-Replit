@@ -19,6 +19,32 @@ const FUNCTION_INVOKE_SECRET = Deno.env.get("FUNCTION_INVOKE_SECRET");
 const RENOTIFY_INTERVAL_MINUTES = 15;
 
 /**
+ * This function NOTIFIES. It does not price.
+ *
+ * It used to compute `extraMinutes * (hourlyRate / 60)` — a pro-rata meter —
+ * and write the result straight onto `bookings.extra_charge` every minute a
+ * charter ran long. The operator's published rule is the opposite: past a
+ * 20-minute allowance the next WHOLE hour is charged, used or not. Worse, the
+ * completion handler preferred any pre-existing extra_charge over its own
+ * correct figure, so this estimate always won: a charter 26 minutes over was
+ * billed $32.16 where the customer's own receipt said the rule was $75.00.
+ *
+ * The number below is now only ever shown in a warning email, and it uses the
+ * real rule so the email and the final invoice agree. `extra_charge` is written
+ * in exactly one place — POST /bookings/:id/trip/complete — which is also the
+ * only place that can charge the card.
+ *
+ * Keep in step with artifacts/api-server/src/lib/hourlyOverage.ts. Two runtimes,
+ * no shared module; the test suite for the rule lives with that file.
+ */
+const OVERAGE_GRACE_MINUTES = 20;
+
+function billableOverageHours(overtimeMinutes: number): number {
+  if (overtimeMinutes <= OVERAGE_GRACE_MINUTES) return 0;
+  return Math.ceil(overtimeMinutes / 60);
+}
+
+/**
  * Constant-time string comparison.
  *
  * Hashing first means the comparison always runs over two fixed-length 32-byte
@@ -79,8 +105,11 @@ async function sendOverageEmail(to: string, name: string, extraMinutes: number, 
     <div style="font-family:Inter,sans-serif;color:#111;padding:24px">
       <h2 style="color:#f59e0b;font-size:18px;margin:0 0 8px">⏱️ Your trip has run past its scheduled time</h2>
       <p>Hi ${escapeHtml(String(name ?? "").split(" ")[0] ?? "")}, your hourly service has continued ${extraMinutes} minute${extraMinutes === 1 ? "" : "s"} past the time included in your booking.</p>
-      <p>Estimated extra charge so far: <strong>$${extraCharge.toFixed(2)}</strong></p>
-      <p style="color:#888;font-size:12px;margin-top:16px">This will be added to your final invoice when the trip ends.</p>
+      <p>Additional time so far: <strong>$${extraCharge.toFixed(2)}</strong></p>
+      <p style="color:#888;font-size:12px;margin-top:16px">
+        Past the first ${OVERAGE_GRACE_MINUTES} minutes, additional time is charged by the whole hour.
+        Tax and card processing are added to this amount, and it is charged to the card on file when the trip ends.
+      </p>
     </div>`;
 
   const res = await fetch("https://api.resend.com/emails", {
@@ -183,9 +212,13 @@ Deno.serve(async (req: Request) => {
     overdue++;
     const extraMinutes = elapsedMinutes - scheduledMinutes;
     const hourlyRate = parseFloat(booking.hourly_rate ?? "95") || 95;
-    const extraCharge = round2(extraMinutes * (hourlyRate / 60));
+    const billedHours = billableOverageHours(extraMinutes);
+    const extraCharge = round2(billedHours * hourlyRate);
 
-    await supabase.from("bookings").update({ extra_charge: extraCharge }).eq("id", booking.id);
+    // Deliberately no write to bookings.extra_charge — see the note above.
+
+    // Inside the free allowance there is nothing to warn about yet.
+    if (billedHours === 0) continue;
 
     const lastNotified = booking.overage_notified_at ? new Date(booking.overage_notified_at).getTime() : null;
     const shouldNotify = !lastNotified || (now - lastNotified) / 60_000 >= RENOTIFY_INTERVAL_MINUTES;

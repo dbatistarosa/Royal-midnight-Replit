@@ -626,22 +626,32 @@ export async function sendWeeklyDriverPayout(params: {
   rides: number;
   grossEarnings: number;
   commissionPct: number;
+  /** Commission on grossEarnings, computed by lib/weeklyPayouts.ts. */
+  commission: number;
+  /** Add-ons the chauffeur keeps in full, with no commission taken. */
+  extrasTotal: number;
   tipsTotal: number;
   driverNet: number;
   bankName: string | null;
   routingNumber: string | null;
-  accountNumber: string | null;
+  /** Last four digits, already decrypted by the caller. */
+  accountLast4: string | null;
   legalName: string | null;
 }) {
   const {
     driverName, driverEmail, weekLabel, rides,
-    grossEarnings, commissionPct, tipsTotal, driverNet,
-    bankName, routingNumber, accountNumber,
+    grossEarnings, commissionPct, commission, extrasTotal, tipsTotal, driverNet,
+    bankName, accountLast4,
   } = params;
 
   const commPctDisplay = `${Math.round(commissionPct * 100)}%`;
-  const maskAccount = accountNumber ? `****${accountNumber.slice(-4)}` : "Not on file";
-  const commission = Math.round((grossEarnings * commissionPct) * 100) / 100;
+  // The caller supplies the last four. This used to receive the whole
+  // payout_account_number column and slice(-4) it — but that column is AES-GCM
+  // ciphertext, so the mask shown to the chauffeur was four characters of
+  // encrypted data. And `commission` used to be recomputed here from
+  // grossEarnings, a third copy of the formula that no longer added up to
+  // driverNet once add-ons entered the payout.
+  const maskAccount = accountLast4 ? `****${accountLast4}` : "Not on file";
 
   const html = wrap(`
 <h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Weekly Earnings Statement</h2>
@@ -653,6 +663,7 @@ export async function sendWeeklyDriverPayout(params: {
   ${row("Gross Revenue", `$${grossEarnings.toFixed(2)}`)}
   ${row("Your Commission Rate", commPctDisplay)}
   ${row("Commission Earnings", `$${commission.toFixed(2)}`)}
+  ${extrasTotal > 0 ? row("Add-ons (paid in full)", `<span style='color:#c9a84c'>+$${extrasTotal.toFixed(2)}</span>`) : ""}
   ${tipsTotal > 0 ? row("Tips Earned", `<span style='color:#c9a84c'>+$${tipsTotal.toFixed(2)}</span>`) : ""}
   ${row("Total Payout", `<strong style='color:#c9a84c;font-size:18px'>$${driverNet.toFixed(2)}</strong>`)}
 </table>
@@ -682,18 +693,26 @@ export async function sendWeeklyPayoutAdminReport(params: {
     driverEmail: string;
     rides: number;
     grossEarnings: number;
+    extrasTotal: number;
     tipsTotal: number;
     driverNet: number;
     bankName: string | null;
     routingNumber: string | null;
-    accountNumber: string | null;
+    /** Last four digits, already decrypted by the caller. */
+    accountLast4: string | null;
     legalName: string | null;
   }>;
 }) {
   const { weekLabel, commissionPct, totalGross, totalDriverNet, payouts } = params;
   const commPctDisplay = `${Math.round(commissionPct * 100)}%`;
-  const companyNet = Math.round((totalGross - totalDriverNet) * 100) / 100;
+  // totalGross here is the commission base for the week — fares and overtime
+  // before tax, the card fee and add-ons — so what is left after payouts is the
+  // company's share of the fare, NOT its net income. It was labelled
+  // "Company Net", which is the figure the Reports screen shows and a different
+  // number entirely.
+  const companyFareShare = Math.round((totalGross - totalDriverNet) * 100) / 100;
   const totalTips = Math.round(payouts.reduce((s, p) => s + (p.tipsTotal ?? 0), 0) * 100) / 100;
+  const totalExtras = Math.round(payouts.reduce((s, p) => s + (p.extrasTotal ?? 0), 0) * 100) / 100;
 
   const driverRows = payouts.map(p => `
 <tr style="border-bottom:1px solid #27272a;">
@@ -705,7 +724,7 @@ export async function sendWeeklyPayoutAdminReport(params: {
   <td style="padding:10px 8px;text-align:right;color:#c9a84c;font-weight:600;">$${p.driverNet.toFixed(2)}</td>
   <td style="padding:10px 8px;color:#9ca3af;font-size:12px;">${p.bankName ? escapeHtml(p.bankName) : '<span style="color:#ef4444">Missing</span>'}</td>
   <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.routingNumber ? escapeHtml(p.routingNumber) : '—'}</td>
-  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.accountNumber ? `****${escapeHtml(p.accountNumber.slice(-4))}` : '—'}</td>
+  <td style="padding:10px 8px;color:#9ca3af;font-size:12px;font-family:monospace;">${p.accountLast4 ? `****${escapeHtml(p.accountLast4)}` : '—'}</td>
 </tr>`).join("");
 
   const html = wrap(`
@@ -713,11 +732,16 @@ export async function sendWeeklyPayoutAdminReport(params: {
 <p style="color:#9ca3af;margin:0 0 24px;font-size:14px">${weekLabel} — For Admin Review</p>
 <table style="width:100%;border-collapse:collapse;margin:0 0 24px;">
   ${row("Week", weekLabel)}
-  ${row("Total Gross Revenue", `$${totalGross.toFixed(2)}`)}
+  ${row("Commission Base (fares + overtime, pre-tax)", `$${totalGross.toFixed(2)}`)}
+  ${totalExtras > 0 ? row("Add-ons Paid in Full", `<span style="color:#c9a84c">+$${totalExtras.toFixed(2)}</span>`) : ""}
   ${totalTips > 0 ? row("Total Tips", `<span style="color:#c9a84c">+$${totalTips.toFixed(2)}</span>`) : ""}
-  ${row(`Total Driver Payouts (${commPctDisplay} + tips)`, `$${totalDriverNet.toFixed(2)}`)}
-  ${row("Company Net", `<strong style='color:#22c55e'>$${companyNet.toFixed(2)}</strong>`)}
+  ${row(`Total Driver Payouts (${commPctDisplay} + add-ons + tips)`, `$${totalDriverNet.toFixed(2)}`)}
+  ${row("Company Share of Fares", `<strong style='color:#22c55e'>$${companyFareShare.toFixed(2)}</strong>`)}
 </table>
+<p style="color:#6b7280;font-size:11px;margin:-16px 0 24px;">
+  Fare figures only — taxes, the card processing fee and add-ons the company keeps are not in this table.
+  See Reports for company net income.
+</p>
 <h3 style="color:#c9a84c;margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:0.1em;">Driver Breakdown</h3>
 <div style="overflow-x:auto;">
 <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -1014,4 +1038,69 @@ export async function sendDriverNoConfirmationWarning(params: {
   <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
 </p>`);
   await send(params.driverEmail, `Warning: trip ${bookingRef} removed — no confirmation`, html, "driver_warning");
+}
+
+// ─── Support ──────────────────────────────────────────────────────────────────
+//
+// Support tickets were a silent inbox. A customer filled in the contact form,
+// the row landed in support_tickets, and nothing anywhere said so — the only
+// way to discover it was for an administrator to open the Support screen and
+// look. The reply box on that screen says "Type your reply to the passenger",
+// and the reply likewise went nowhere: it sat in ticket_messages until the
+// passenger happened to reopen their own Support page.
+//
+// Both directions are best-effort. A ticket that exists but was not announced
+// is recoverable; a ticket rejected because an email bounced is not.
+
+export async function notifyNewSupportTicket(t: {
+  id: number;
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  priority: string;
+}) {
+  const ref = `#${t.id}`;
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">New Support Ticket ${ref}</h2>
+<p style="color:#9ca3af;margin:0 0 20px;font-size:14px">Priority: ${escapeHtml(t.priority)}</p>
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+  ${row("From", escapeHtml(t.name))}
+  ${row("Email", escapeHtml(t.email))}
+  ${row("Subject", escapeHtml(t.subject))}
+</table>
+<div style="background:#18181b;border:1px solid #27272a;padding:16px;color:#e8e0d0;font-size:14px;line-height:1.6;white-space:pre-wrap">${escapeHtml(t.message)}</div>
+<p style="color:#6b7280;font-size:12px;margin-top:20px">Reply from the Support screen in the admin portal.</p>`);
+  await send(ADMIN_EMAIL, `Support ${ref}: ${t.subject}`, html, "support_ticket_new");
+}
+
+export async function notifySupportReply(p: {
+  ticketId: number;
+  subject: string;
+  message: string;
+  /** True when an administrator wrote it — the passenger is the recipient. */
+  fromAdmin: boolean;
+  passengerName: string;
+  passengerEmail: string;
+}) {
+  const ref = `#${p.ticketId}`;
+  const body = `<div style="background:#18181b;border:1px solid #27272a;padding:16px;color:#e8e0d0;font-size:14px;line-height:1.6;white-space:pre-wrap">${escapeHtml(p.message)}</div>`;
+
+  if (p.fromAdmin) {
+    const html = wrap(`
+<h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Re: ${escapeHtml(p.subject)}</h2>
+<p style="color:#9ca3af;margin:0 0 20px;font-size:14px">Ticket ${ref}</p>
+<p style="color:#e8e0d0">Hello ${escapeHtml(String(p.passengerName ?? "").split(" ")[0] ?? "")},</p>
+<p style="color:#9ca3af;line-height:1.6">Our team has replied to your enquiry:</p>
+${body}
+<p style="color:#6b7280;font-size:12px;margin-top:20px">You can continue the conversation from the Support page in your Royal Midnight account.</p>`);
+    await send(p.passengerEmail, `Royal Midnight Support — ${p.subject} (${ref})`, html, "support_reply_passenger");
+    return;
+  }
+
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Customer replied — ${ref}</h2>
+<p style="color:#9ca3af;margin:0 0 20px;font-size:14px">${escapeHtml(p.passengerName)} (${escapeHtml(p.passengerEmail)}) · ${escapeHtml(p.subject)}</p>
+${body}`);
+  await send(ADMIN_EMAIL, `Support ${ref}: customer replied`, html, "support_reply_admin");
 }

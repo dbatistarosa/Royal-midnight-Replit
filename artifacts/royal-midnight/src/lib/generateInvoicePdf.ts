@@ -4,6 +4,8 @@
  * in the browser without any server round-trip.
  */
 
+import type { Receipt } from "./receipt";
+
 export type InvoiceData = {
   bookingId: number;
   passengerName: string;
@@ -14,10 +16,17 @@ export type InvoiceData = {
   vehicleClass?: string | null;
   passengers?: number | null;
   flightNumber?: string | null;
-  priceQuoted: number;
-  discountAmount?: number | null;
-  tipAmount?: number | null;
   status: string;
+  /**
+   * The charge lines, built by lib/receipt.ts — the same object the ride-detail
+   * screen renders, so the PDF and the page can never disagree again.
+   *
+   * This file used to compute its own: `priceQuoted * 0.8` for the fare,
+   * `priceQuoted * 0.2` for "Taxes & Fees", and a total of
+   * `priceQuoted - discount + tip` — which subtracted a discount price_quoted
+   * had already been reduced by, and omitted add-ons and extra time entirely.
+   */
+  receipt: Receipt;
 };
 
 function vehicleLabel(cls: string | null | undefined): string {
@@ -173,18 +182,12 @@ export async function generateInvoicePdf(data: InvoiceData): Promise<void> {
   doc.text("CHARGES", 48, y);
   y += 16;
 
-  const baseFare = data.priceQuoted * 0.8;
-  const taxesFees = data.priceQuoted * 0.2;
-  const discount = data.discountAmount ?? 0;
-  const tip = data.tipAmount ? Number(data.tipAmount) : 0;
-  const total = data.priceQuoted - discount + tip;
-
-  const chargeRows: [string, string, boolean?][] = [
-    ["Base Fare", `$${baseFare.toFixed(2)}`],
-    ["Taxes & Fees", `$${taxesFees.toFixed(2)}`],
-  ];
-  if (discount > 0) chargeRows.push(["Discount", `-$${discount.toFixed(2)}`, true]);
-  if (tip > 0) chargeRows.push(["Gratuity", `+$${tip.toFixed(2)}`, true]);
+  const chargeRows: [string, string, boolean?][] = data.receipt.lines.map(line => [
+    line.note ? `${line.label} (${line.note})` : line.label,
+    `${line.amount < 0 ? "-" : ""}$${Math.abs(line.amount).toFixed(2)}`,
+    line.tone === "credit",
+  ]);
+  const total = data.receipt.total;
 
   doc.setFontSize(11);
   for (const [label, amount, isGreen] of chargeRows) {

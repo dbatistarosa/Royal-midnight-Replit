@@ -19,6 +19,14 @@ export interface FullRevenueStats {
   companyNetIncome?: number;
   taxRatePct?: number;
   ccFeePct?: number;
+  /** Gratuities collected and passed to chauffeurs in full. Reported alongside
+   *  the calculation, not inside it — they are in neither gross nor net. */
+  totalTips?: number;
+  /** Add-ons flagged paid_to_driver, paid to the chauffeur with no commission. */
+  totalDriverExtras?: number;
+  /** Bookings in range with no recorded tax/fee breakdown, whose figures are
+   *  estimated from the current rates. */
+  estimatedRows?: number;
 }
 
 export interface RevenueStatsParams {

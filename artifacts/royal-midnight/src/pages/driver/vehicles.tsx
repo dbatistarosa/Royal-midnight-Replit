@@ -3,6 +3,8 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { LayoutDashboard, History, DollarSign, BarChart2, FileText, User, Car, Plus, Trash2, Star, Loader2, X } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
+import { assertOk } from "@/lib/assertOk";
+import { authHeaders, jsonAuthHeaders } from "@/lib/authHeaders";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
 import { Button } from "@/components/ui/button";
@@ -22,7 +24,7 @@ const FINPUT = "bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
 function VehiclesInner() {
   const { token, user } = useAuth();
   const { toast } = useToast();
-  const authHdr = { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  const authHdr = jsonAuthHeaders(token);
 
   const [driverId, setDriverId] = useState<number | null>(null);
   const [vehicles, setVehicles] = useState<DriverVehicle[]>([]);
@@ -33,17 +35,21 @@ function VehiclesInner() {
   const [deleting, setDeleting] = useState<number | null>(null);
 
   const loadDriver = useCallback(async () => {
-    if (!user || !token) return;
-    const r = await fetch(`${API_BASE}/drivers/by-user/${user.id}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!user) { setLoading(false); return; }
+    const r = await fetch(`${API_BASE}/drivers/by-user/${user.id}`, { headers: authHeaders(token) });
     if (r.ok) { const d = await r.json() as { id: number }; setDriverId(d.id); }
+    else setLoading(false);
   }, [user, token]);
 
   const loadVehicles = useCallback(async () => {
-    if (!driverId || !token) return;
+    if (!driverId) return;
     setLoading(true);
-    const r = await fetch(`${API_BASE}/drivers/${driverId}/vehicles`, { headers: { Authorization: `Bearer ${token}` } });
-    if (r.ok) setVehicles(await r.json() as DriverVehicle[]);
-    setLoading(false);
+    try {
+      const r = await fetch(`${API_BASE}/drivers/${driverId}/vehicles`, { headers: authHeaders(token) });
+      if (r.ok) setVehicles(await r.json() as DriverVehicle[]);
+    } finally {
+      setLoading(false);
+    }
   }, [driverId, token]);
 
   useEffect(() => { void loadDriver(); }, [loadDriver]);
@@ -75,15 +81,33 @@ function VehiclesInner() {
   const handleDelete = async (id: number) => {
     if (!driverId) return;
     setDeleting(id);
-    await fetch(`${API_BASE}/drivers/${driverId}/vehicles/${id}`, { method: "DELETE", headers: authHdr });
-    void loadVehicles();
-    setDeleting(null);
+    try {
+      await assertOk(
+        await fetch(`${API_BASE}/drivers/${driverId}/vehicles/${id}`, { method: "DELETE", headers: authHdr }),
+        "Could not remove the vehicle",
+      );
+      toast({ title: "Vehicle removed" });
+      void loadVehicles();
+    } catch (e: unknown) {
+      toast({ title: "Error", description: e instanceof Error ? e.message : "Failed", variant: "destructive" });
+    } finally {
+      setDeleting(null);
+    }
   };
 
   const handleSetDefault = async (id: number) => {
     if (!driverId) return;
-    await fetch(`${API_BASE}/drivers/${driverId}/vehicles/${id}`, { method: "PATCH", headers: authHdr, body: JSON.stringify({ isDefault: true }) });
-    void loadVehicles();
+    try {
+      await assertOk(
+        await fetch(`${API_BASE}/drivers/${driverId}/vehicles/${id}`, {
+          method: "PATCH", headers: authHdr, body: JSON.stringify({ isDefault: true }),
+        }),
+        "Could not set the default vehicle",
+      );
+      void loadVehicles();
+    } catch (e: unknown) {
+      toast({ title: "Error", description: e instanceof Error ? e.message : "Failed", variant: "destructive" });
+    }
   };
 
   return (

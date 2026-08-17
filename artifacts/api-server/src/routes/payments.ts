@@ -17,6 +17,7 @@ import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
 import { encryptField, safeDecryptField } from "../lib/encrypt.js";
 import { sendStripeError } from "../lib/stripeError.js";
 import { isMissingCustomerError, forgetStaleStripeCustomer } from "../lib/stripeCustomer.js";
+import { fetchCommissionPct, driverEarningsForBooking } from "../lib/commission.js";
 
 const router: IRouter = Router();
 
@@ -69,11 +70,8 @@ async function getWebhookSecret(): Promise<string | null> {
   return safeDecryptField(row?.value) ?? null;
 }
 
-async function getCommissionPct(): Promise<number> {
-  const [row] = await db.select({ value: settingsTable.value }).from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct")).limit(1);
-  const raw = parseFloat(row?.value ?? "70");
-  return raw > 1 ? raw / 100 : raw;
-}
+/** Third copy of this lookup, folded into the shared one. */
+const getCommissionPct = fetchCommissionPct;
 
 async function firePostPaymentEmails(bookingId: number): Promise<void> {
   const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
@@ -94,7 +92,9 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
     vehicleClass: booking.vehicleClass ?? "business",
     passengers: booking.passengers ?? 1,
     priceQuoted,
-    driverEarnings: Math.round(fareSubtotal * commissionPct * 100) / 100,
+    // Commission plus the add-ons the chauffeur keeps in full, so the offer
+    // email and push match the figure their app shows for the same trip.
+    driverEarnings: await driverEarningsForBooking(booking.id, fareSubtotal, commissionPct),
     flightNumber: booking.flightNumber ?? null,
     specialRequests: booking.specialRequests ?? null,
   };

@@ -20,8 +20,13 @@ type DriverPayout = {
   driverEmail: string;
   driverPhone: string;
   rides: number;
+  /** Commission base: fares plus any pre-tax overtime. */
   grossEarnings: number;
   commissionPct: number;
+  /** Commission on grossEarnings, computed server-side. */
+  commission: number;
+  /** Add-ons the chauffeur keeps in full — pet, car seat — no commission taken. */
+  extrasTotal: number;
   tipsTotal: number;
   driverNet: number;
   bankName: string | null;
@@ -217,17 +222,23 @@ export default function AdminPayouts() {
       {board && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-card border border-border p-5">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Total Gross</p>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Commission Base</p>
             <p className="font-serif text-2xl text-primary">${board.totalGross.toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Fares + overtime, pre-tax</p>
           </div>
           <div className="bg-card border border-border p-5">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Total Driver Payouts</p>
             <p className="font-serif text-2xl text-amber-400">${board.totalDriverNet.toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{Math.round(board.commissionPct * 100)}% commission + tips</p>
+            <p className="text-xs text-muted-foreground mt-1">{Math.round(board.commissionPct * 100)}% commission + add-ons + tips</p>
           </div>
           <div className="bg-card border border-border p-5">
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Company Net</p>
+            {/* This card said "Company Net", which is the figure on Reports and
+                a different number: it excludes tax, the card fee and the add-ons
+                the company keeps. What is left here is only the company's share
+                of the fare. */}
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Company Share of Fares</p>
             <p className="font-serif text-2xl text-green-400">${companyNet.toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Before tax &amp; fees — see Reports</p>
           </div>
           <div className="bg-card border border-border p-5">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Active Drivers</p>
@@ -268,6 +279,7 @@ export default function AdminPayouts() {
                   <th className="px-5 py-4 text-left text-xs text-muted-foreground uppercase tracking-widest font-medium">Driver</th>
                   <th className="px-5 py-4 text-center text-xs text-muted-foreground uppercase tracking-widest font-medium">Rides</th>
                   <th className="px-5 py-4 text-right text-xs text-muted-foreground uppercase tracking-widest font-medium">Gross</th>
+                  <th className="px-5 py-4 text-right text-xs text-muted-foreground uppercase tracking-widest font-medium">Add-ons</th>
                   <th className="px-5 py-4 text-right text-xs text-muted-foreground uppercase tracking-widest font-medium">Tips</th>
                   <th className="px-5 py-4 text-right text-xs text-muted-foreground uppercase tracking-widest font-medium">Total to Driver</th>
                   <th className="px-5 py-4 text-left text-xs text-muted-foreground uppercase tracking-widest font-medium">Bank Details</th>
@@ -291,6 +303,11 @@ export default function AdminPayouts() {
                       <span className={driver.grossEarnings > 0 ? "text-white" : "text-muted-foreground"}>
                         ${driver.grossEarnings.toFixed(2)}
                       </span>
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      {driver.extrasTotal > 0
+                        ? <span className="text-primary font-medium">+${driver.extrasTotal.toFixed(2)}</span>
+                        : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-5 py-4 text-right">
                       {driver.tipsTotal > 0

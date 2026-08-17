@@ -168,7 +168,12 @@ function PassengerAddressesInner() {
   };
 
   useEffect(() => {
-    if (userId && token) void fetchAddresses();
+    // Not gated on `token` — it is memory-only and null after any reload, while
+    // the HttpOnly session cookie still authenticates. Gating on it left
+    // `loading` pinned at true, so this screen was a spinner until the
+    // passenger signed out and back in.
+    if (userId) void fetchAddresses();
+    else setLoading(false);
   }, [userId, token]);
 
   const handleAdd = async () => {

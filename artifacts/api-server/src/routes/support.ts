@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, asc } from "drizzle-orm";
 import { db, supportTicketsTable, ticketMessagesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
+import { notifyNewSupportTicket, notifySupportReply } from "../lib/mailer.js";
 import {
   ListTicketsQueryParams,
   ListTicketsResponse,
@@ -56,13 +57,31 @@ router.post("/support", optionalAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // If the caller is authenticated, always use their real userId (ignore body value)
-  const insertData = req.currentUser
-    ? { ...parsed.data, userId: req.currentUser.userId }
-    : parsed.data;
+  // userId is never taken from the body.
+  //
+  // The authenticated branch already overrode it, but the anonymous branch
+  // passed `parsed.data` through untouched — and CreateTicketBody accepts a
+  // `userId`. So an unauthenticated POST to /api/support with `userId: 6`
+  // injected a ticket into that passenger's support list, under an
+  // attacker-chosen name, email and message, which then rendered as theirs on
+  // both the admin board and their own Support screen.
+  const insertData = { ...parsed.data, userId: req.currentUser?.userId ?? null };
 
   const [ticket] = await db.insert(supportTicketsTable).values(insertData).returning();
   res.status(201).json(parseTicket(ticket));
+
+  // Tell someone. Support has been a silent inbox: a ticket landed in the
+  // table and nothing anywhere announced it, so the only way to find out a
+  // customer had written in was for an administrator to open the screen and
+  // look. Fire-and-forget — a failed notification must not fail the ticket.
+  void notifyNewSupportTicket({
+    id: ticket.id,
+    name: ticket.name,
+    email: ticket.email,
+    subject: ticket.subject,
+    message: ticket.message,
+    priority: ticket.priority,
+  }).catch(err => console.error("[support] new-ticket notification failed:", err));
 });
 
 router.patch("/support/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -169,6 +188,19 @@ router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void
   }
 
   res.status(201).json({ ...msg, createdAt: msg.createdAt.toISOString() });
+
+  // The admin screen's reply box says "Type your reply to the passenger" and
+  // nothing was ever sent to the passenger — the reply sat in ticket_messages
+  // until they happened to reopen the Support page. Same in reverse: a
+  // passenger's follow-up reached nobody.
+  void notifySupportReply({
+    ticketId: id,
+    subject: ticket.subject,
+    message,
+    fromAdmin: authorRole === "admin",
+    passengerName: ticket.name,
+    passengerEmail: ticket.email,
+  }).catch(err => console.error("[support] reply notification failed:", err));
 });
 
 export default router;

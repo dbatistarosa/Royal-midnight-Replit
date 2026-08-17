@@ -10,6 +10,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders } from "@/lib/authHeaders";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { driverNavItems } from "@/config/portalNav";
 
@@ -58,7 +59,7 @@ export default function DriverEarnings() {
   const [pdfLoading, setPdfLoading] = useState(false);
 
   useEffect(() => {
-    if (!driverRecord?.id || !token) return;
+    if (!driverRecord?.id) return;
     setIsLoading(true);
     const params = new URLSearchParams();
     if (dateRange) {
@@ -66,7 +67,7 @@ export default function DriverEarnings() {
       params.set("endDate", dateRange.endDate.toISOString());
     }
     fetch(`${API_BASE}/drivers/${driverRecord.id}/earnings?${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(token),
     })
       .then(r => r.ok ? r.json() as Promise<EarningsData> : Promise.resolve(null))
       .then(data => setEarnings(data))

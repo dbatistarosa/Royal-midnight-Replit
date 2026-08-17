@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders, jsonAuthHeaders } from "@/lib/authHeaders";
 import { passengerNavItems } from "@/config/portalNav";
 
 
@@ -52,7 +53,7 @@ function TogglePill({
 
 type ManagedTraveler = { eaUserId: number; travelerId: number; travelerName: string | null; travelerEmail: string | null };
 
-function ManagedTravelersPanel({ userId, token }: { userId: number; token: string }) {
+function ManagedTravelersPanel({ userId, token }: { userId: number; token: string | null }) {
   const { toast } = useToast();
   const [travelers, setTravelers] = useState<ManagedTraveler[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +62,7 @@ function ManagedTravelersPanel({ userId, token }: { userId: number; token: strin
   const [removing, setRemoving] = useState<number | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/users/${userId}/managed-travelers`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/users/${userId}/managed-travelers`, { headers: authHeaders(token) })
       .then(r => r.ok ? r.json() as Promise<ManagedTraveler[]> : Promise.resolve([]))
       .then(setTravelers)
       .catch(() => {})
@@ -74,7 +75,7 @@ function ManagedTravelersPanel({ userId, token }: { userId: number; token: strin
     try {
       const res = await fetch(`${API_BASE}/users/${userId}/managed-travelers`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: jsonAuthHeaders(token),
         body: JSON.stringify({ email: addEmail.trim() }),
       });
       if (!res.ok) {
@@ -96,7 +97,7 @@ function ManagedTravelersPanel({ userId, token }: { userId: number; token: strin
     setRemoving(travelerId);
     try {
       await fetch(`${API_BASE}/users/${userId}/managed-travelers/${travelerId}`, {
-        method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+        method: "DELETE", headers: authHeaders(token),
       });
       setTravelers(prev => prev.filter(t => t.travelerId !== travelerId));
       toast({ title: "Traveler removed" });
@@ -236,15 +237,14 @@ function PassengerProfileInner() {
   };
 
   const handleSavePrefs = async () => {
-    if (userId == null || !token) return;
+    // Not gated on `token` — it is null after any reload and this button then
+    // did nothing at all, silently.
+    if (userId == null) return;
     setPrefsSaving(true);
     try {
       const res = await fetch(`/api/users/${userId}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: jsonAuthHeaders(token),
         body: JSON.stringify(prefs),
       });
       if (!res.ok) throw new Error("Failed");
@@ -418,8 +418,10 @@ function PassengerProfileInner() {
         </div>
       )}
 
-      {/* Managed Travelers / Delegate panel */}
-      {authUser && token && (
+      {/* Managed Travelers / Delegate panel. Rendered on the user alone — it
+          used to require `token` as well, so the whole panel vanished after a
+          reload even though the session cookie was still valid. */}
+      {authUser && (
         <ManagedTravelersPanel userId={authUser.id} token={token} />
       )}
     </PortalLayout>

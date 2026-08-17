@@ -8,6 +8,7 @@ import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { API_BASE } from "@/lib/constants";
+import { jsonAuthHeaders } from "@/lib/authHeaders";
 import { format } from "date-fns";
 import { useUpload } from "@workspace/object-storage-web";
 import { driverNavItems } from "@/config/portalNav";
@@ -121,14 +122,14 @@ export default function DriverProfile() {
   }, [driverRecord?.id]);
 
   const handlePhotoUploaded = async (objectPath: string) => {
-    if (!driverRecord?.id || !token) {
+    if (!driverRecord?.id) {
       setPendingPhotoPath(objectPath);
       return;
     }
     try {
       const res = await fetch(`${API_BASE}/drivers/${driverRecord.id}/contact`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: jsonAuthHeaders(token),
         body: JSON.stringify({ profilePicture: objectPath }),
       });
       if (!res.ok) {
@@ -145,7 +146,7 @@ export default function DriverProfile() {
   };
 
   const handleSave = async () => {
-    if (!driverRecord?.id || !token) return;
+    if (!driverRecord?.id) return;
     setIsSaving(true);
     try {
       const body: Record<string, string> = { phone };
@@ -153,7 +154,7 @@ export default function DriverProfile() {
 
       const res = await fetch(`${API_BASE}/drivers/${driverRecord.id}/contact`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: jsonAuthHeaders(token),
         body: JSON.stringify(body),
       });
       if (!res.ok) {

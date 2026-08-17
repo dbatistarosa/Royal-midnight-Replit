@@ -7,6 +7,7 @@ import {
   pointInPolygon,
   normalizePercentRate,
   computeFareBreakdown,
+  computePostTripCharge,
   AIRPORT_ADDRESSES,
 } from "./pricing";
 
@@ -143,5 +144,86 @@ describe("computeFareBreakdown", () => {
     });
     expect(result.corporateDiscountAmount).toBe(0);
     expect(result.subtotal).toBe(100);
+  });
+
+  it("charges tax and the card fee on add-ons, not just on the fare", () => {
+    const result = computeFareBreakdown({
+      baseFare: 100,
+      distanceCharge: 0,
+      airportFee: 0,
+      zoneMultiplier: 1,
+      extrasTotal: 900,
+      taxRate: 0.07,
+      cardProcessingFeeRate: 0.04,
+    });
+    // Add-ons used to be added to the total AFTER this function had finished,
+    // so a $900 champagne order carried no tax and no processing fee at all.
+    expect(result.taxableSubtotal).toBe(1000);
+    expect(result.taxAmount).toBe(70);
+    expect(result.cardProcessingFee).toBeCloseTo(42.8, 2);
+    expect(result.totalWithTax).toBeCloseTo(1112.8, 2);
+    // The commission base is unchanged: the chauffeur still earns on the fare.
+    expect(result.subtotal).toBe(100);
+  });
+
+  it("reproduces booking #13 — the charter that was billed with untaxed add-ons", () => {
+    // Business sedan, 3-hour charter at $75/hr: base 20 + distance 205 + $10
+    // airport fee, with $860 of add-ons. It was sold for $1,121.51, of which
+    // $860 carried neither tax nor card fee.
+    const result = computeFareBreakdown({
+      baseFare: 20,
+      distanceCharge: 205,
+      airportFee: 10,
+      zoneMultiplier: 1,
+      extrasTotal: 860,
+      taxRate: 0.07,
+      cardProcessingFeeRate: 0.04,
+    });
+    expect(result.subtotal).toBe(235);
+    expect(result.taxableSubtotal).toBe(1095);
+    expect(result.taxAmount).toBeCloseTo(76.65, 2);
+    expect(result.cardProcessingFee).toBeCloseTo(46.87, 2);
+    expect(result.totalWithTax).toBeCloseTo(1218.52, 2);
+  });
+
+  it("leaves the total untouched when there are no add-ons", () => {
+    const withField = computeFareBreakdown({
+      baseFare: 55, distanceCharge: 35, airportFee: 10, zoneMultiplier: 1,
+      extrasTotal: 0, taxRate: 0.07, cardProcessingFeeRate: 0.03,
+    });
+    const without = computeFareBreakdown({
+      baseFare: 55, distanceCharge: 35, airportFee: 10, zoneMultiplier: 1,
+      taxRate: 0.07, cardProcessingFeeRate: 0.03,
+    });
+    expect(withField.totalWithTax).toBe(without.totalWithTax);
+    expect(without.totalWithTax).toBeCloseTo(110.21, 2);
+  });
+});
+
+describe("computePostTripCharge", () => {
+  it("adds tax and the card fee to a full-hour overage", () => {
+    const r = computePostTripCharge({ fare: 75, taxRate: 0.07, cardProcessingFeeRate: 0.04 });
+    expect(r.fare).toBe(75);
+    expect(r.taxAmount).toBeCloseTo(5.25, 2);
+    expect(r.cardProcessingFee).toBeCloseTo(3.21, 2);
+    expect(r.total).toBeCloseTo(83.46, 2);
+  });
+
+  it("keeps the pre-tax fare separate, because that is the commission base", () => {
+    // Paying the chauffeur 70% of `total` would hand them a share of Florida's
+    // sales tax and of the card processor's fee.
+    const r = computePostTripCharge({ fare: 150, taxRate: 0.07, cardProcessingFeeRate: 0.04 });
+    expect(r.fare).toBe(150);
+    expect(r.total).toBeGreaterThan(r.fare);
+  });
+
+  it("charges nothing when there is no overage", () => {
+    const r = computePostTripCharge({ fare: 0, taxRate: 0.07, cardProcessingFeeRate: 0.04 });
+    expect(r).toEqual({ fare: 0, taxAmount: 0, cardProcessingFee: 0, total: 0 });
+  });
+
+  it("never produces a negative charge from a negative input", () => {
+    const r = computePostTripCharge({ fare: -50, taxRate: 0.07, cardProcessingFeeRate: 0.04 });
+    expect(r.total).toBe(0);
   });
 });

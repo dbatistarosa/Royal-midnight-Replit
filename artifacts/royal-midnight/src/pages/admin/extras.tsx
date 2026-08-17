@@ -6,6 +6,7 @@ import {
   Plus, Trash2, Pencil, X, Loader2, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
+import { assertOk } from "@/lib/assertOk";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
 import { Button } from "@/components/ui/button";
@@ -248,17 +249,33 @@ export default function AdminExtras() {
 
   const handleDeleteRoute = async (id: number) => {
     setRouteDeleting(id);
-    await fetch(`${API_BASE}/admin/fixed-routes/${id}`, { method: "DELETE", headers: authHdr });
-    fetchRoutes();
-    setRouteDeleting(null);
+    try {
+      await assertOk(
+        await fetch(`${API_BASE}/admin/fixed-routes/${id}`, { method: "DELETE", headers: authHdr }),
+        "Could not delete the route",
+      );
+      toast({ title: "Route deleted" });
+      fetchRoutes();
+    } catch (e: unknown) {
+      toast({ title: "Error", description: e instanceof Error ? e.message : "Failed", variant: "destructive" });
+    } finally {
+      setRouteDeleting(null);
+    }
   };
 
   const handleToggleRoute = async (r: FixedRoute) => {
-    await fetch(`${API_BASE}/admin/fixed-routes/${r.id}`, {
-      method: "PATCH", headers: authHdr,
-      body: JSON.stringify({ isActive: !r.isActive }),
-    });
-    fetchRoutes();
+    try {
+      await assertOk(
+        await fetch(`${API_BASE}/admin/fixed-routes/${r.id}`, {
+          method: "PATCH", headers: authHdr,
+          body: JSON.stringify({ isActive: !r.isActive }),
+        }),
+        "Could not change the route status",
+      );
+      fetchRoutes();
+    } catch (e: unknown) {
+      toast({ title: "Error", description: e instanceof Error ? e.message : "Failed", variant: "destructive" });
+    }
   };
 
   // ── Extra modal ─────────────────────────────────────────────────────────────
@@ -300,17 +317,33 @@ export default function AdminExtras() {
 
   const handleDeleteExtra = async (id: number) => {
     setExtraDeleting(id);
-    await fetch(`${API_BASE}/admin/extras/${id}`, { method: "DELETE", headers: authHdr });
-    fetchExtras();
-    setExtraDeleting(null);
+    try {
+      await assertOk(
+        await fetch(`${API_BASE}/admin/extras/${id}`, { method: "DELETE", headers: authHdr }),
+        "Could not delete the add-on",
+      );
+      toast({ title: "Add-on deleted" });
+      fetchExtras();
+    } catch (e: unknown) {
+      toast({ title: "Error", description: e instanceof Error ? e.message : "Failed", variant: "destructive" });
+    } finally {
+      setExtraDeleting(null);
+    }
   };
 
   const handleToggleExtra = async (e: ExtraService) => {
-    await fetch(`${API_BASE}/admin/extras/${e.id}`, {
-      method: "PATCH", headers: authHdr,
-      body: JSON.stringify({ isActive: !e.isActive }),
-    });
-    fetchExtras();
+    try {
+      await assertOk(
+        await fetch(`${API_BASE}/admin/extras/${e.id}`, {
+          method: "PATCH", headers: authHdr,
+          body: JSON.stringify({ isActive: !e.isActive }),
+        }),
+        "Could not change the add-on status",
+      );
+      fetchExtras();
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Failed", variant: "destructive" });
+    }
   };
 
   /** Who keeps this add-on's price. Surfaces the server's error rather than

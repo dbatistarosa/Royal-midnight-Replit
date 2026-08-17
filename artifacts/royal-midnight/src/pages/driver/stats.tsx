@@ -4,6 +4,7 @@ import { LayoutDashboard, History, DollarSign, User, Loader2, BarChart2, FileTex
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders } from "@/lib/authHeaders";
 import { driverNavItems } from "@/config/portalNav";
 
 
@@ -29,10 +30,10 @@ export default function DriverStats() {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!driverRecord?.id || !token) return;
+    if (!driverRecord?.id) return;
     setIsLoading(true);
     fetch(`${API_BASE}/drivers/${driverRecord.id}/earnings`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(token),
     })
       .then(r => r.ok ? r.json() as Promise<EarningsData> : Promise.resolve(null))
       .then(data => setEarnings(data))

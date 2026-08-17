@@ -267,6 +267,10 @@ export interface QuoteInput {
   charterHours?: number | undefined;
   /** Logged-in caller, used for the corporate volume discount. */
   userId?: number | undefined;
+  /** Add-ons already priced from extra_services. Included in the taxable base
+   *  so tax and the card fee are charged on them; omitted (0) by the public
+   *  /quote endpoint, which runs before add-ons are chosen. */
+  extrasTotal?: number | undefined;
   /** Admin-created bookings bypass the customer-facing lead-time rule. */
   skipLeadTimeCheck?: boolean | undefined;
   /** Admins take charter bookings by phone and may agree a shorter block than
@@ -284,6 +288,10 @@ export interface QuoteBreakdown {
   airportFee: number;
   surgeAdjustment: number;
   subtotal: number;
+  /** Add-ons folded into this quote (0 for the public /quote endpoint). */
+  extrasTotal: number;
+  /** subtotal + extrasTotal — what tax and the card fee are charged on. */
+  taxableSubtotal: number;
   taxRate: number;
   taxAmount: number;
   cardProcessingFeeRate: number;
@@ -417,12 +425,15 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
   // with an active billing account; anonymous/passenger quotes are unaffected.
   const corporateDiscountPct = await getCorporateDiscountPct(input.userId);
 
-  const { subtotal, surgeAdjustment, taxAmount, cardProcessingFee, totalWithTax } = computeFareBreakdown({
+  const extrasTotal = Math.max(0, input.extrasTotal ?? 0);
+
+  const { subtotal, surgeAdjustment, taxableSubtotal, taxAmount, cardProcessingFee, totalWithTax } = computeFareBreakdown({
     baseFare,
     distanceCharge,
     airportFee,
     zoneMultiplier,
     corporateDiscountPct,
+    extrasTotal,
     taxRate,
     cardProcessingFeeRate,
   });
@@ -536,6 +547,7 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
       airportFee: 0,
       zoneMultiplier: 1,
       corporateDiscountPct,
+      extrasTotal,
       taxRate,
       cardProcessingFeeRate,
     });
@@ -551,6 +563,8 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
         airportFee: 0,
         surgeAdjustment: 0,
         subtotal: fixedBreakdown.subtotal,
+        extrasTotal: fixedBreakdown.extrasTotal,
+        taxableSubtotal: fixedBreakdown.taxableSubtotal,
         taxRate,
         taxAmount: fixedBreakdown.taxAmount,
         cardProcessingFeeRate,
@@ -578,6 +592,8 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
       airportFee,
       surgeAdjustment,
       subtotal,
+      extrasTotal,
+      taxableSubtotal,
       taxRate,
       taxAmount,
       cardProcessingFeeRate,

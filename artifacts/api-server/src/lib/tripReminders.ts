@@ -127,7 +127,7 @@ async function runReminderStage(stage: (typeof STAGES)[number]): Promise<void> {
 
 async function sendStageEmails(row: ReminderRow, label: string, stageKey: "24h" | "2h"): Promise<void> {
   const { sendTripReminderPassenger, sendTripReminderDriver, sendTripReminderAdmin } = await import("./mailer.js");
-  const { fetchCommissionPct } = await import("./commission.js");
+  const { fetchCommissionPct, driverEarningsForBooking } = await import("./commission.js");
 
   const driver = row.driverId
     ? (await db.select().from(driversTable).where(eq(driversTable.id, row.driverId)))[0]
@@ -149,7 +149,9 @@ async function sendStageEmails(row: ReminderRow, label: string, stageKey: "24h" 
     priceQuoted,
     driverName: driver?.name,
     driverPhone: driver?.phone,
-    driverEarnings: Math.round(fareSubtotal * commissionPct * 100) / 100,
+    // Includes the add-ons the chauffeur keeps in full — the reminder used to
+    // quote commission alone, below what their app showed for the same trip.
+    driverEarnings: await driverEarningsForBooking(row.id, fareSubtotal, commissionPct),
   };
 
   await sendTripReminderPassenger(data, label);

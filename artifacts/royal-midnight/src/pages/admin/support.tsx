@@ -123,10 +123,11 @@ function TicketPanel({ ticket, authHeader, onStatusChange }: {
         headers: { "Content-Type": "application/json", Authorization: authHeader },
         body: JSON.stringify({ status: "open" }),
       });
-      if (res.ok) {
-        onStatusChange(ticket.id, "open");
-        toast({ title: "Ticket reopened" });
-      }
+      // A rejected reopen used to fall through in silence: the ticket stayed
+      // closed and nothing said so.
+      if (!res.ok) throw new Error("Reopen rejected");
+      onStatusChange(ticket.id, "open");
+      toast({ title: "Ticket reopened" });
     } catch {
       toast({ title: "Error", description: "Could not reopen ticket.", variant: "destructive" });
     }

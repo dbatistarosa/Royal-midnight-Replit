@@ -3,6 +3,8 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, X, Loader2, Plane, ChevronDown, ChevronUp, Phone, Briefcase, Clock, CreditCard, FileText, User, Send, AlertCircle, AlertTriangle, CheckCircle, XCircle, Ban, RefreshCw, Link, Wallet, Star, Gift, Building2, Pencil } from "lucide-react";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
+import type { StoredReceipt } from "@/lib/receipt";
+import { jsonAuthHeaders } from "@/lib/authHeaders";
 import { useAuth } from "@/contexts/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -58,6 +60,8 @@ type BookingRow = {
   hourlyRate?: number | null;
   tripStartedAt?: string | null;
   extraCharge?: number | string | null;
+  /** Recorded money breakdown; null for bookings sold before migration 0012. */
+  receipt?: StoredReceipt | null;
   overageMinutes?: number | null;
 };
 
@@ -181,7 +185,19 @@ export default function AdminBookings() {
   // We detect this on mount, confirm the booking server-side, then clean the URL.
   const handled3DS = useRef(false);
   useEffect(() => {
-    if (handled3DS.current || !token) return;
+    // NOT gated on `token`.
+    //
+    // Stripe returns from 3DS by navigating the browser to this URL, which is a
+    // fresh page load — so the memory-only bearer token is null at exactly this
+    // moment, every time. The guard that used to be here therefore fired on
+    // every single 3DS return: the effect bailed out, the booking was never
+    // confirmed, and an administrator who had just watched a card clear had to
+    // notice and press "Sync Payment" by hand.
+    //
+    // The HttpOnly session cookie survives the redirect and is what
+    // authenticates; POST /payments/confirm/:bookingId does not even require a
+    // session, since it verifies the PaymentIntent with Stripe directly.
+    if (handled3DS.current) return;
     const params = new URLSearchParams(window.location.search);
     const pi = params.get("payment_intent");
     const redirectStatus = params.get("redirect_status");
@@ -196,7 +212,7 @@ export default function AdminBookings() {
       .then(({ bookingId }) =>
         fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: authHdr },
+          headers: jsonAuthHeaders(token),
           body: JSON.stringify({ paymentIntentId: pi }),
         })
       )
@@ -914,17 +930,41 @@ export default function AdminBookings() {
                                   audience="admin"
                                 />
                               )}
-                              {Number(b.extraCharge ?? 0) > 0 && (
-                                <div className="border border-amber-400/30 bg-amber-400/10 px-3 py-2">
-                                  <p className="text-[10px] uppercase tracking-widest text-amber-400">Extra time charged</p>
-                                  <p className="text-amber-200 text-sm">
-                                    ${Number(b.extraCharge).toFixed(2)}
-                                    {b.overageMinutes != null && (
-                                      <span className="text-amber-300/70 text-xs"> · ran {b.overageMinutes} min over</span>
+                              {Number(b.extraCharge ?? 0) > 0 && (() => {
+                                // "Charged" was the label whether or not a card
+                                // had ever been presented — and until now none
+                                // ever had. Say which it is.
+                                const collected = !!b.receipt?.extraChargePaymentIntentId;
+                                const known = b.receipt?.overageFare != null;
+                                const outstanding = known && !collected;
+                                return (
+                                  <div className={`border px-3 py-2 ${outstanding
+                                    ? "border-red-400/40 bg-red-400/10"
+                                    : "border-amber-400/30 bg-amber-400/10"}`}>
+                                    <p className={`text-[10px] uppercase tracking-widest ${outstanding ? "text-red-400" : "text-amber-400"}`}>
+                                      {outstanding ? "Extra time — NOT collected" : "Extra time charged"}
+                                    </p>
+                                    <p className={`text-sm ${outstanding ? "text-red-200" : "text-amber-200"}`}>
+                                      ${Number(b.extraCharge).toFixed(2)}
+                                      {b.overageMinutes != null && (
+                                        <span className="opacity-70 text-xs"> · ran {b.overageMinutes} min over</span>
+                                      )}
+                                      {b.receipt?.overageFare != null && (
+                                        <span className="opacity-70 text-xs">
+                                          {" "}· ${b.receipt.overageFare.toFixed(2)} fare
+                                          {(b.receipt.overageTax ?? 0) > 0 && ` + $${(b.receipt.overageTax ?? 0).toFixed(2)} tax`}
+                                          {(b.receipt.overageCardFee ?? 0) > 0 && ` + $${(b.receipt.overageCardFee ?? 0).toFixed(2)} card fee`}
+                                        </span>
+                                      )}
+                                    </p>
+                                    {outstanding && (
+                                      <p className="text-red-300/80 text-xs mt-1">
+                                        The card on file could not be charged. Collect this manually.
+                                      </p>
                                     )}
-                                  </p>
-                                </div>
-                              )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
 
@@ -937,7 +977,19 @@ export default function AdminBookings() {
                               <div>
                                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Amount Charged</p>
                                 <div className="flex items-baseline gap-2 flex-wrap">
-                                  <p className="text-primary font-medium text-base">${b.priceQuoted?.toFixed(2)}</p>
+                                  {/* Extra time is money taken from the same
+                                      card and belonged in this figure; the row
+                                      used to show the quoted price alone, so a
+                                      charter that ran long read as if nothing
+                                      extra had been billed. */}
+                                  <p className="text-primary font-medium text-base">
+                                    ${((b.priceQuoted ?? 0) + Number(b.extraCharge ?? 0)).toFixed(2)}
+                                  </p>
+                                  {Number(b.extraCharge ?? 0) > 0 && (
+                                    <span className="text-muted-foreground text-xs">
+                                      (${(b.priceQuoted ?? 0).toFixed(2)} + ${Number(b.extraCharge).toFixed(2)} extra time)
+                                    </span>
+                                  )}
                                   {b.tipAmount != null && b.tipAmount > 0 && (
                                     <span className="text-amber-400 text-sm">+ ${b.tipAmount.toFixed(2)} gratuity</span>
                                   )}

@@ -12,6 +12,10 @@ import { serializeBooking } from "../lib/serializeBooking.js";
 import { recordAcceptance, recordAcceptances } from "../lib/legalAcceptance.js";
 import { loadBookingExtras, loadExtrasFor, driverExtrasTotal } from "../lib/bookingExtras.js";
 import { computeHourlyOverage } from "../lib/hourlyOverage.js";
+import { computePostTripCharge } from "../lib/pricing.js";
+import { saveFareBreakdown, saveOverageBreakdown, loadChargeRates, loadOverageFares, loadBookingReceipts } from "../lib/fareBreakdown.js";
+import { fetchCommissionPct, driverEarningsForBooking } from "../lib/commission.js";
+import { isMissingCustomerError, forgetStaleStripeCustomer } from "../lib/stripeCustomer.js";
 import { driverBlockReason, driverBlockMessage } from "../lib/driverEligibility.js";
 import { getDriverWindows } from "../lib/driverWindows.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
@@ -192,16 +196,82 @@ function getCancellationPolicy(pickupAt: Date, priceQuoted: number, status: stri
   };
 }
 
-async function getCommissionPct(): Promise<number> {
-  const [row] = await db.select().from(settingsTable).where(eq(settingsTable.key, "driver_commission_pct"));
-  // Stored as whole percent (e.g. "70" = 70%); divide by 100 to get multiplier
-  return row ? parseFloat(row.value) / 100 : 0.70;
-}
+/**
+ * Delegates to the shared reader rather than keeping a second copy.
+ *
+ * The copy that used to live here divided by 100 unconditionally, so the moment
+ * `driver_commission_pct` was saved as "0.7" instead of "70" — which the admin
+ * Settings screen happily accepts — every chauffeur in the fleet would have been
+ * quoted 0.7% of the fare. lib/commission.ts normalises both forms.
+ */
+const getCommissionPct = fetchCommissionPct;
 
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("STRIPE_SECRET_KEY is not configured");
   return new Stripe(key, { apiVersion: "2024-06-20" as const });
+}
+
+/**
+ * Bill the extra-time charge to the card the passenger already has on file.
+ *
+ * The original PaymentIntent for this trip was captured for the quoted amount
+ * and cannot be increased after the fact, so overtime is a second, separate
+ * charge — the same shape as a gratuity.
+ *
+ * Never throws. The trip is already complete and the row already says what is
+ * owed; a card that declines is a collections problem for dispatch, not a
+ * reason to fail the chauffeur's "end trip" tap. Returns the PaymentIntent id
+ * on success and null otherwise, and the null is what tells the admin screen
+ * the money is still outstanding.
+ */
+async function chargeExtraTime(
+  booking: { id: number; userId: number | null; passengerEmail: string },
+  amount: number,
+  log?: { warn: (obj: object, msg: string) => void },
+): Promise<string | null> {
+  if (amount <= 0) return null;
+
+  if (booking.userId == null) {
+    log?.warn({ bookingId: booking.id, amount }, "extra_time_uncollected_no_account");
+    return null;
+  }
+
+  try {
+    const [user] = await db
+      .select({ stripeCustomerId: usersTable.stripeCustomerId, defaultPaymentMethodId: usersTable.defaultPaymentMethodId })
+      .from(usersTable)
+      .where(eq(usersTable.id, booking.userId));
+
+    if (!user?.stripeCustomerId || !user.defaultPaymentMethodId) {
+      log?.warn({ bookingId: booking.id, amount }, "extra_time_uncollected_no_saved_card");
+      return null;
+    }
+
+    const stripe = getStripe();
+    const intent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100),
+      currency: "usd",
+      customer: user.stripeCustomerId,
+      payment_method: user.defaultPaymentMethodId,
+      confirm: true,
+      off_session: true,
+      description: `Royal Midnight — Extra time for Booking #RM-${String(booking.id).padStart(4, "0")}`,
+      metadata: { bookingId: String(booking.id), type: "extra_time" },
+    }, { idempotencyKey: `extra-time-${booking.id}` });
+
+    if (intent.status !== "succeeded") {
+      log?.warn({ bookingId: booking.id, amount, status: intent.status }, "extra_time_charge_not_succeeded");
+      return null;
+    }
+    return intent.id;
+  } catch (err) {
+    if (isMissingCustomerError(err) && booking.userId != null) {
+      await forgetStaleStripeCustomer(booking.userId, log);
+    }
+    log?.warn({ bookingId: booking.id, amount, err: (err as Error).message }, "extra_time_charge_failed");
+    return null;
+  }
 }
 
 /** "Maria Gonzalez" -> "Maria G." — enough for a driver to tell one card from
@@ -235,7 +305,7 @@ function maskPassengerName(raw: unknown): string {
 function toDriverView<T extends { priceQuoted: number; fareSubtotal: number }>(
   booking: T,
   commissionPct: number,
-  opts: { driverExtras?: number; extraCharge?: number } = {},
+  opts: { driverExtras?: number; overtimeFare?: number } = {},
 ): Omit<T, "priceQuoted" | "fareSubtotal"> & {
   driverEarnings: number;
   driverFareEarnings: number;
@@ -246,7 +316,9 @@ function toDriverView<T extends { priceQuoted: number; fareSubtotal: number }>(
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
   const driverFareEarnings = round2(fareSubtotal * commissionPct);
-  const driverOvertimeEarnings = round2((opts.extraCharge ?? 0) * commissionPct);
+  // The PRE-TAX overtime charge, not bookings.extra_charge — that now includes
+  // the tax and card fee the customer pays, and the chauffeur earns on neither.
+  const driverOvertimeEarnings = round2((opts.overtimeFare ?? 0) * commissionPct);
   const driverExtrasEarnings = round2(opts.driverExtras ?? 0);
 
   return {
@@ -458,9 +530,14 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     // Extras attached here too. This branch was the one that got missed, which
     // is why the admin list showed no add-ons while the driver portal did.
     const adminExtras = await loadBookingExtras(rows.map(r => r.booking.id));
+    // The recorded money breakdown, so dispatch can see what tax and card fee a
+    // booking actually carried — and, on a completed charter, whether the extra
+    // time was ever collected.
+    const adminReceipts = await loadBookingReceipts(rows.map(r => r.booking.id));
     res.json(rows.map(({ booking, userRole }) => ({
       ...parseBooking(booking),
       extras: adminExtras.get(booking.id) ?? [],
+      receipt: adminReceipts.get(booking.id) ?? null,
       userRole: userRole ?? null,
     })));
     return;
@@ -559,12 +636,15 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     }
 
     const assignedExtras = await loadBookingExtras(driverBookings.map(b => b.id));
+    const overtimeFares = await loadOverageFares(driverBookings.map(b => b.id));
     res.json(
       driverBookings.map(b => {
         const extras = assignedExtras.get(b.id) ?? [];
         const view = toDriverView(b, commissionPct, {
           driverExtras: driverExtrasTotal(extras),
-          extraCharge: parseFloat(String((b as { extraCharge?: unknown }).extraCharge ?? "0")) || 0,
+          // Rows from before the split stored the untaxed figure in extra_charge.
+          overtimeFare: overtimeFares.get(b.id)
+            ?? (parseFloat(String((b as { extraCharge?: unknown }).extraCharge ?? "0")) || 0),
         });
         const uid = (b as any).userId as number | null;
         const passengerPreferences = uid ? (prefsByUserId.get(uid) ?? null) : null;
@@ -630,27 +710,11 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
   // disagrees is logged and ignored, so a tampered request cannot produce a
   // free ride and an honest one is never rejected over rounding.
   const ext = readQuoteExtensions(req.body);
-  const quoteOutcome = await computeQuote({
-    pickupAddress: parsed.data.pickupAddress,
-    dropoffAddress: parsed.data.dropoffAddress,
-    vehicleClass: parsed.data.vehicleClass as string,
-    pickupAt: parsed.data.pickupAt,
-    waypoints: ext.waypoints,
-    charterMode: ext.charterMode,
-    charterHours: ext.charterHours,
-    userId: isCorporate && caller?.role === "corporate" ? caller.userId : (bookingUserId ?? undefined),
-    // Admins take phone bookings for trips that may be imminent, and may agree
-    // a charter block shorter than the published minimum.
-    skipLeadTimeCheck: caller?.role === "admin",
-    skipCharterMinimumCheck: caller?.role === "admin",
-  });
-  if (!quoteOutcome.ok) {
-    res.status(quoteOutcome.status).json(quoteOutcome.body);
-    return;
-  }
-  const quote = quoteOutcome.quote;
 
-  // Extras are priced from extra_services, never from the body.
+  // Extras are priced from extra_services, never from the body — and priced
+  // BEFORE the quote, because they are part of the taxable base. They used to
+  // be added to the total after tax and the card fee had already been computed,
+  // so add-ons were the one line on the invoice that carried neither.
   const requestedExtras = parsed.data.extras ?? [];
   const pricedExtras: Array<{ id: number; quantity: number; price: number }> = [];
   if (requestedExtras.length) {
@@ -669,11 +733,33 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       });
     }
   }
-  const extrasTotal = pricedExtras.reduce((sum, e) => sum + e.price * e.quantity, 0);
+  const extrasTotal = Math.round(pricedExtras.reduce((sum, e) => sum + e.price * e.quantity, 0) * 100) / 100;
+
+  const quoteOutcome = await computeQuote({
+    pickupAddress: parsed.data.pickupAddress,
+    dropoffAddress: parsed.data.dropoffAddress,
+    vehicleClass: parsed.data.vehicleClass as string,
+    pickupAt: parsed.data.pickupAt,
+    waypoints: ext.waypoints,
+    charterMode: ext.charterMode,
+    charterHours: ext.charterHours,
+    extrasTotal,
+    userId: isCorporate && caller?.role === "corporate" ? caller.userId : (bookingUserId ?? undefined),
+    // Admins take phone bookings for trips that may be imminent, and may agree
+    // a charter block shorter than the published minimum.
+    skipLeadTimeCheck: caller?.role === "admin",
+    skipCharterMinimumCheck: caller?.role === "admin",
+  });
+  if (!quoteOutcome.ok) {
+    res.status(quoteOutcome.status).json(quoteOutcome.body);
+    return;
+  }
+  const quote = quoteOutcome.quote;
 
   // Promo discount is re-derived from the promo_codes row. An invalid or
   // exhausted code yields no discount rather than failing the whole booking.
-  const grossTotal = Math.round((quote.totalWithTax + extrasTotal) * 100) / 100;
+  // totalWithTax already contains the add-ons, taxed and fee'd.
+  const grossTotal = quote.totalWithTax;
   let discountAmount = 0;
   let appliedPromoCode: string | null = null;
   if (parsed.data.promoCode) {
@@ -792,6 +878,16 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     void savePickupPoint(booking.id, quote.pickupPoint, req.log);
   }
 
+  // What this booking was actually charged, line by line, frozen at today's
+  // rates. Without it the revenue report can only guess, and it guessed badly:
+  // everything that was not the commission base got counted as Florida tax.
+  void saveFareBreakdown(booking.id, {
+    taxAmount: quote.taxAmount,
+    cardFee: quote.cardProcessingFee,
+    airportFee: quote.airportFee,
+    extrasTotal: quote.extrasTotal,
+  }, req.log).catch(err => console.error("[bookings] fare breakdown save failed:", err));
+
   // trackingToken rides alongside the contract response rather than inside it:
   // it is the one field the creator must receive and nobody else ever should,
   // so it stays out of the shared booking shape that other endpoints return.
@@ -885,7 +981,7 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
       try {
         const parsed2 = parseBooking(booking);
         const commissionPct = await getCommissionPct();
-        const driverEarnings = Math.round(parsed2.fareSubtotal * commissionPct * 100) / 100;
+        const driverEarnings = await driverEarningsForBooking(booking.id, parsed2.fareSubtotal, commissionPct);
         const emailData = {
           ...parsed2,
           vehicleClass: parsed2.vehicleClass ?? "business",
@@ -1115,10 +1211,12 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     }
     const commissionPct = await getCommissionPct();
     const extras = await loadExtrasFor(booking.id);
+    const overtimeFares = await loadOverageFares([booking.id]);
     res.json({
       ...toDriverView(parseBooking(booking), commissionPct, {
         driverExtras: driverExtrasTotal(extras),
-        extraCharge: parseFloat(String(booking.extraCharge ?? "0")) || 0,
+        overtimeFare: overtimeFares.get(booking.id)
+          ?? (parseFloat(String(booking.extraCharge ?? "0")) || 0),
       }),
       extras,
     });
@@ -1148,9 +1246,13 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
       .from(reviewsTable)
       .where(eq(reviewsTable.bookingId, params.data.id));
     const base = parseBooking(booking);
+    // The stored receipt lines, so the passenger's receipt can print what was
+    // actually charged instead of the 80/20 split it used to guess.
+    const receipts = await loadBookingReceipts([booking.id]);
     return res.json({
       ...base,
       extras: await loadExtrasFor(booking.id),
+      receipt: receipts.get(booking.id) ?? null,
       hasRating: existingReview != null,
       existingRating: existingReview?.rating ?? null,
       existingComment: existingReview?.comment ?? null,
@@ -1361,7 +1463,7 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
 
         const commissionPct = await getCommissionPct();
         const parsedBooking = parseBooking(booking);
-        const driverEarnings = Math.round(parsedBooking.fareSubtotal * commissionPct * 100) / 100;
+        const driverEarnings = await driverEarningsForBooking(booking.id, parsedBooking.fareSubtotal, commissionPct);
         const emailData = { ...parsedBooking, vehicleClass: parsedBooking.vehicleClass ?? "business", passengers: parsedBooking.passengers ?? 1, driverEarnings };
 
         const results = await Promise.allSettled([
@@ -1550,7 +1652,12 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
         .from(usersTable)
         .innerJoin(driversTable, eq(driversTable.userId, usersTable.id))
         .where(eq(usersTable.id, caller.userId));
-      const bookingEmailData = { ...parsedUpdated, vehicleClass: parsedUpdated.vehicleClass ?? "business", passengers: parsedUpdated.passengers ?? 1, driverEarnings: Math.round(parsedUpdated.fareSubtotal * commissionPct2 * 100) / 100 };
+      const bookingEmailData = {
+        ...parsedUpdated,
+        vehicleClass: parsedUpdated.vehicleClass ?? "business",
+        passengers: parsedUpdated.passengers ?? 1,
+        driverEarnings: await driverEarningsForBooking(parsedUpdated.id, parsedUpdated.fareSubtotal, commissionPct2),
+      };
       const vehicleDescription = [driverUser?.vehicleColor, driverUser?.vehicleYear, driverUser?.vehicleMake, driverUser?.vehicleModel].filter(Boolean).join(" ") || "Luxury Vehicle";
 
       const emailPromises: Promise<void>[] = [
@@ -1814,10 +1921,16 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
   }
 
   // Hourly overage, computed here rather than by the cron that was planned and
-  // never written. trip/start froze hourly_rate onto the row for exactly this,
-  // and until now extra_charge was read but never set — charters ran long and
-  // nobody was billed. The clock is the passenger's actual pickup
-  // (trip_started_at), so a driver waiting at the kerb does not burn the block.
+  // never written. trip/start froze hourly_rate onto the row for exactly this.
+  // The clock is the passenger's actual pickup (trip_started_at), so a driver
+  // waiting at the kerb does not burn the block.
+  //
+  // Whole hours, never pro-rata. 21 minutes over costs a full hour and so does
+  // 59 — that is the rule the customer is shown at booking and on the receipt.
+  // The check-reservation-status edge function used to write a *pro-rata*
+  // estimate onto extra_charge every minute a charter ran long, and the line
+  // below preferred any existing value, so the estimate always won and the
+  // customer was billed $32.16 where the quoted rule said $75.00.
   const endedAt = new Date();
   const overage = computeHourlyOverage({
     startedAt: booking.tripStartedAt,
@@ -1826,11 +1939,24 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
     hourlyRate: booking.hourlyRate != null ? parseFloat(String(booking.hourlyRate)) : null,
   });
 
-  // An amount already recorded by hand from the admin screen wins: this must
-  // not overwrite a negotiated adjustment on a re-run.
-  const existingExtra = parseFloat(String(booking.extraCharge ?? "0")) || 0;
-  const extraCharge = existingExtra > 0 ? existingExtra : overage.extraCharge;
-  const totalPrice = parseFloat(String(booking.priceQuoted)) + extraCharge;
+  // Extra time is taxed and carries the card fee, exactly like the fare. Only
+  // `charge.fare` earns the chauffeur commission — they are not paid a share of
+  // Florida's sales tax.
+  const rates = await loadChargeRates();
+  const charge = computePostTripCharge({
+    fare: overage.extraCharge,
+    taxRate: rates.taxRate,
+    cardProcessingFeeRate: rates.cardProcessingFeeRate,
+  });
+
+  // A figure an administrator entered by hand from the booking screen is a
+  // negotiated adjustment and still wins — but only when this booking has no
+  // computed overage of its own, so a stale cron estimate can no longer shadow
+  // the real one.
+  const manualExtra = parseFloat(String(booking.extraCharge ?? "0")) || 0;
+  const useManual = charge.total <= 0 && manualExtra > 0;
+  const extraCharge = useManual ? manualExtra : charge.total;
+  const totalPrice = Math.round((parseFloat(String(booking.priceQuoted)) + extraCharge) * 100) / 100;
 
   const [updated] = await db
     .update(bookingsTable)
@@ -1849,15 +1975,31 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
     return;
   }
 
-  res.json({ ...parseBooking(updated), overage });
+  // Actually take the money. The charge was computed, stored and shown on the
+  // receipt from the day the timer shipped, and never once presented to a card:
+  // "extra time $32.16" was a label on a screen, not a transaction. Off-session
+  // against the card the passenger already saved for this trip, and best-effort
+  // — a completed trip must not be blocked by a declined incremental charge,
+  // which dispatch can chase from the booking screen instead.
+  let overagePaymentIntentId: string | null = null;
+  if (!useManual && charge.total > 0) {
+    overagePaymentIntentId = await chargeExtraTime(updated, charge.total, req.log);
+  }
 
-  // overage_minutes arrives with migration 0011 and is not on the drizzle
-  // schema, so it is written separately and best-effort — see the note in
+  res.json({ ...parseBooking(updated), overage, overageCharge: charge, overagePaymentIntentId });
+
+  // overage_* and the breakdown columns are not on the drizzle schema, so they
+  // are written separately and best-effort — see the note in
   // lib/db/src/schema/bookings.ts about why a new column must never be able to
   // break the table's other queries.
-  if (overage.reason === "overage") {
-    db.execute(sql`UPDATE bookings SET overage_minutes = ${overage.overtimeMinutes} WHERE id = ${id}`)
-      .catch(() => { /* column not there yet; the charge itself is already saved */ });
+  if (!useManual && (overage.reason === "overage" || overage.overtimeMinutes > 0)) {
+    void saveOverageBreakdown(id, {
+      overageFare: charge.fare,
+      overageTax: charge.taxAmount,
+      overageCardFee: charge.cardProcessingFee,
+      overageMinutes: overage.overtimeMinutes,
+      paymentIntentId: overagePaymentIntentId,
+    }, req.log).catch(err => console.error("[bookings] overage breakdown save failed:", err));
   }
 
   // Increment driver's completed ride count (fire-and-forget)

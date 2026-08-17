@@ -198,7 +198,11 @@ export default function AdminReports() {
               isDeduction
             />
             <WaterfallRow
-              label={`– Driver Commissions @ ${commissionPctDisplay} of subtotal`}
+              label={
+                (stats?.totalDriverExtras ?? 0) > 0
+                  ? `– Driver Pay (${commissionPctDisplay} of fare + add-ons paid in full)`
+                  : `– Driver Commissions @ ${commissionPctDisplay} of subtotal`
+              }
               value={`($${(stats?.totalDriverCommissions ?? stats?.totalCommissionPaid ?? 0).toFixed(2)})`}
               isDeduction
             />
@@ -207,21 +211,56 @@ export default function AdminReports() {
               value={`$${(stats?.companyNetIncome ?? stats?.totalCompanyRevenue ?? 0).toFixed(2)}`}
               isFinal
             />
+            {/* Gratuities sit outside the calculation on purpose: they are
+                collected and passed to the chauffeur in full, so they belong in
+                neither gross income nor company net. Shown because an operator
+                reconciling a Stripe payout still has to account for them. */}
+            {(stats?.totalTips ?? 0) > 0 && (
+              <div className="flex items-center justify-between px-5 py-3 border-t border-border/50">
+                <span className="text-sm text-muted-foreground">
+                  Gratuities collected and passed to chauffeurs
+                  <span className="block text-xs text-muted-foreground/70">Not part of gross income or net</span>
+                </span>
+                <span className="text-sm tabular-nums text-muted-foreground">${(stats?.totalTips ?? 0).toFixed(2)}</span>
+              </div>
+            )}
           </div>
+
+          {/* Say so when some rows had to be estimated, rather than implying a
+              precision the data does not have. */}
+          {(stats?.estimatedRows ?? 0) > 0 && (
+            <p className="text-xs text-amber-400/80 -mt-4">
+              {stats?.estimatedRows} booking{stats?.estimatedRows === 1 ? " was" : "s were"} taken before the
+              per-line tax and fee breakdown was recorded. Their tax and processing figures above are estimated
+              from the current rates; every later booking is exact.
+            </p>
+          )}
 
           {/* ── Revenue Split Visual ──────────────────────────────────────────── */}
           {(stats?.totalRevenue ?? 0) > 0 && (
             <div className="bg-card border border-border rounded-none p-6">
               <h2 className="font-serif text-lg mb-4">Revenue Split</h2>
+              {/* Percentages of actual gross, not the commission rate. The
+                  legend used to read "Company Net (30%) · Drivers (70%)"
+                  regardless of what the bar underneath it showed — on a charter
+                  where tax and add-ons dominated, the two disagreed completely. */}
               <div className="flex flex-wrap gap-4 text-sm mb-3">
-                <span className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-green-400 inline-block" />
-                  Company Net ({stats?.commissionPct != null ? `${Math.round((1 - stats.commissionPct) * 100)}%` : "—"})
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-amber-400 inline-block" />
-                  Drivers ({commissionPctDisplay})
-                </span>
+                {(() => {
+                  const gross = stats?.totalGrossIncome ?? stats?.totalRevenue ?? 0;
+                  const pct = (n: number) => (gross > 0 ? `${Math.round((n / gross) * 100)}%` : "—");
+                  return (
+                    <>
+                      <span className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-green-400 inline-block" />
+                        Company Net ({pct(stats?.companyNetIncome ?? stats?.totalCompanyRevenue ?? 0)})
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-amber-400 inline-block" />
+                        Drivers ({pct(stats?.totalDriverCommissions ?? stats?.totalCommissionPaid ?? 0)})
+                      </span>
+                    </>
+                  );
+                })()}
                 {(stats?.totalTaxesCollected ?? 0) > 0 && (
                   <span className="flex items-center gap-2">
                     <span className="w-3 h-3 rounded-full bg-blue-400 inline-block" />

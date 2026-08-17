@@ -158,15 +158,26 @@ function BookingDetailPanel({ booking }: { booking: Booking }) {
             </div>
           </div>
         )}
-        {booking.priceQuoted != null && (
-          <div className="flex items-start gap-2">
-            <DollarSign className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60 mb-0.5">Total Charged</p>
-              <p className="text-sm font-medium text-primary">${booking.priceQuoted.toFixed(2)}</p>
+        {booking.priceQuoted != null && (() => {
+          // "Total Charged" showed price_quoted alone, so a charter that ran
+          // long displayed less than the card was actually billed. Extra time is
+          // a real charge on the same card and belongs in this number.
+          const extra = Number(booking.extraCharge ?? 0);
+          return (
+            <div className="flex items-start gap-2">
+              <DollarSign className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground/60 mb-0.5">Total Charged</p>
+                <p className="text-sm font-medium text-primary">${(booking.priceQuoted + extra).toFixed(2)}</p>
+                {extra > 0 && (
+                  <p className="text-[10px] text-amber-300/80 mt-0.5">
+                    includes ${extra.toFixed(2)} extra time
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
         <div className="flex items-start gap-2">
           <Clock className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5" />
           <div>

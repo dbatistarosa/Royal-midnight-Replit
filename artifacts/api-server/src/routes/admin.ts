@@ -5,6 +5,9 @@ import { requireAdmin } from "../middleware/auth.js";
 import { encryptField, safeDecryptField, lastN, isFieldEncryptionConfigError, getFieldEncryptionStatus } from "../lib/encrypt.js";
 import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
 import { serializeBooking } from "../lib/serializeBooking.js";
+import { loadCompletedBookingMoney } from "../lib/fareBreakdown.js";
+import { resolvePayoutWeek, computeWeeklyEarnings, loadApprovedDrivers, emptyWeekEarnings } from "../lib/weeklyPayouts.js";
+import { loadBookingExtras, driverExtrasTotal } from "../lib/bookingExtras.js";
 import { Resend } from "resend";
 import {
   GetAdminStatsResponse,
@@ -19,6 +22,16 @@ const router: IRouter = Router();
 // Was a local copy that never learned to parse fare_subtotal, which is what
 // made GET /admin/recent-bookings answer 500. See lib/serializeBooking.ts.
 const parseBooking = serializeBooking;
+
+/** Decrypt one payout field without letting a bad key fail the whole request. */
+function safeDecrypt<T>(fn: () => T, req: { log: { error: (o: object, m: string) => void } }): T | null {
+  try {
+    return fn();
+  } catch (err) {
+    req.log.error({ err: (err as Error).message }, "payout_field_decrypt_failed");
+    return null;
+  }
+}
 
 function parseDriver(d: typeof driversTable.$inferSelect) {
   return {
@@ -35,8 +48,11 @@ router.get("/admin/stats", requireAdmin, async (_req, res): Promise<void> => {
       total: sql<number>`count(*)::int`,
       active: sql<number>`count(*) filter (where status in ('pending', 'confirmed', 'in_progress'))::int`,
       completedToday: sql<number>`count(*) filter (where status = 'completed' and pickup_at::date = current_date)::int`,
-      totalRevenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
-      revenueThisMonth: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
+      // Includes extra_charge, like the Reports screen: extra time is money
+      // taken from the customer's card, and leaving it out here meant the two
+      // revenue figures in the same portal disagreed.
+      totalRevenue: sql<number>`coalesce(sum((price_quoted + coalesce(extra_charge, 0))::numeric) filter (where status = 'completed'), 0)::float`,
+      revenueThisMonth: sql<number>`coalesce(sum((price_quoted + coalesce(extra_charge, 0))::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
     })
     .from(bookingsTable);
 
@@ -128,11 +144,16 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
   const rawCcFee = parseFloat(settingsMap["cc_fee_pct"] ?? "0");
   const ccFeePct = rawCcFee > 1 ? rawCcFee / 100 : rawCcFee;
 
+  // Revenue is the whole ticket: the quoted price plus any extra-time billed at
+  // the end of a charter. extra_charge used to be left out of every total on
+  // this screen even though it is money taken from the customer's card.
+  const revenueExpr = sql`(price_quoted + coalesce(extra_charge, 0))::numeric`;
+
   // ── Daily chart data (always last 30 days, unaffected by date filter) ────────
   const daily = await db
     .select({
       date: sql<string>`date(pickup_at)::text`,
-      revenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where status = 'completed'), 0)::float`,
+      revenue: sql<number>`coalesce(sum(${revenueExpr}) filter (where status = 'completed'), 0)::float`,
       bookings: sql<number>`count(*)::int`,
     })
     .from(bookingsTable)
@@ -145,37 +166,88 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
   const byVehicleClass = await db
     .select({
       vehicleClass: bookingsTable.vehicleClass,
-      revenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where ${completedFilter}), 0)::float`,
+      revenue: sql<number>`coalesce(sum(${revenueExpr}) filter (where ${completedFilter}), 0)::float`,
       bookings: sql<number>`count(*) filter (where ${completedFilter})::int`,
     })
     .from(bookingsTable)
     .groupBy(bookingsTable.vehicleClass);
 
-  const [totals] = await db
-    .select({
-      totalRevenue: sql<number>`coalesce(sum(price_quoted::numeric) filter (where ${dateFilter}), 0)::float`,
-      totalFareSubtotal: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where ${dateFilter}), 0)::float`,
-      completedCount: sql<number>`count(*) filter (where ${dateFilter})::int`,
-    })
-    .from(bookingsTable);
-
   // ── Financial breakdown ───────────────────────────────────────────────────────
-  // price_quoted = what the passenger actually paid (subtotal + tax + card fee − any
-  // discount). totalSubtotal is the real, stored pre-tax/pre-fee/pre-discount fare base
-  // (fare_subtotal), not a reverse-engineered estimate — this is also the driver
-  // commission base, so it must never be reduced by tax/fee/discount.
-  const totalGrossIncome = totals?.totalRevenue ?? 0;
-  const totalSubtotal = totals?.totalFareSubtotal ?? 0;
-  const totalTaxesCollected = Math.round((totalGrossIncome - totalSubtotal) * 100) / 100;
-  const totalFeesCollected = Math.round(totalGrossIncome * ccFeePct * 100) / 100;
-  const totalDriverCommissions = Math.round(totalSubtotal * commissionPct * 100) / 100;
-  const companyNetIncome = Math.round(
-    (totalGrossIncome - totalTaxesCollected - totalFeesCollected - totalDriverCommissions) * 100,
-  ) / 100;
+  //
+  // This used to be four SQL aggregates and one very wrong subtraction:
+  //
+  //     totalTaxesCollected = totalGrossIncome - totalFareSubtotal
+  //
+  // fare_subtotal is the *chauffeur commission base* — deliberately excluding
+  // the airport fee and add-ons because the chauffeur earns on neither. So that
+  // line did not measure tax. It measured "everything that is not the commission
+  // base", and reported it as Florida tax: on booking #13 that turned a $15.75
+  // tax bill into $896.51, i.e. 80% of a 7% tax. Every figure below it —
+  // company net income, the revenue-split chart, the PDF — inherited the error.
+  //
+  // Bookings are now loaded one row at a time so each can use its own recorded
+  // tax and card fee, at the rate in force on the day it was sold, and only the
+  // rows that predate that recording fall back to an estimate.
+  const rows = await loadCompletedBookingMoney(dateFilter);
+  const extrasByBooking = await loadBookingExtras(rows.map(r => r.id));
+
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  let totalGrossIncome = 0;
+  let totalTaxesCollected = 0;
+  let totalFeesCollected = 0;
+  let totalCommissionBase = 0;
+  let totalDriverExtras = 0;
+  let totalTips = 0;
+  let estimatedRows = 0;
+
+  for (const r of rows) {
+    totalGrossIncome += r.priceQuoted + r.extraCharge;
+    totalTips += r.tipAmount;
+
+    const extras = extrasByBooking.get(r.id) ?? [];
+    totalDriverExtras += driverExtrasTotal(extras);
+
+    // Overtime is time worked and earns commission like the fare; the tax and
+    // card fee charged on top of it do not.
+    totalCommissionBase += r.fareSubtotal + (r.overageFare ?? 0);
+
+    if (r.taxAmount != null) {
+      totalTaxesCollected += r.taxAmount + (r.overageTax ?? 0);
+      totalFeesCollected += (r.cardFee ?? 0) + (r.overageCardFee ?? 0);
+      continue;
+    }
+
+    // Legacy row (sold before the breakdown was recorded). Work backwards from
+    // the total using today's rates — an estimate, and labelled as one, but a
+    // far better one than "everything that isn't the fare is tax".
+    estimatedRows++;
+    const extrasTotal = extras.reduce((sum, e) => sum + e.total, 0);
+    const grossed = (r.priceQuoted + r.discountAmount - extrasTotal) / ((1 + taxRatePct) * (1 + ccFeePct));
+    const taxable = Math.max(0, grossed);
+    const tax = taxable * taxRatePct;
+    totalTaxesCollected += tax;
+    totalFeesCollected += (taxable + tax) * ccFeePct;
+  }
+
+  totalGrossIncome = round2(totalGrossIncome);
+  totalTaxesCollected = round2(totalTaxesCollected);
+  totalFeesCollected = round2(totalFeesCollected);
+  totalTips = round2(totalTips);
+
+  // What leaves the company for the chauffeurs: commission on the fare and any
+  // overtime, plus the add-ons they keep in full (pet, car seat) with no
+  // commission taken. Gratuities are excluded from both sides — they are not in
+  // gross income either, being collected and passed straight through.
+  const totalDriverCommissions = round2(totalCommissionBase * commissionPct + totalDriverExtras);
+
+  const companyNetIncome = round2(
+    totalGrossIncome - totalTaxesCollected - totalFeesCollected - totalDriverCommissions,
+  );
 
   // Legacy fields (kept for backward compat with existing hooks/components)
   const totalCommissionPaid = totalDriverCommissions;
-  const totalCompanyRevenue = Math.round((totalGrossIncome - totalCommissionPaid) * 100) / 100;
+  const totalCompanyRevenue = round2(totalGrossIncome - totalCommissionPaid);
 
   res.json(GetRevenueStatsResponse.parse({
     daily,
@@ -184,7 +256,7 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
     totalCommissionPaid,
     totalCompanyRevenue,
     commissionPct,
-    completedRides: totals?.completedCount ?? 0,
+    completedRides: rows.length,
     // New financial breakdown fields
     totalGrossIncome,
     totalTaxesCollected,
@@ -193,6 +265,11 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
     companyNetIncome,
     taxRatePct,
     ccFeePct,
+    totalTips,
+    totalDriverExtras: round2(totalDriverExtras),
+    /** How many rows in this range had no recorded breakdown and were estimated,
+     *  so the screen can say so instead of implying false precision. */
+    estimatedRows,
   }));
 });
 
@@ -275,63 +352,13 @@ router.post("/admin/bookings/:id/link-user", requireAdmin, async (req, res): Pro
 
 // GET /admin/payouts/weekly — weekly earnings per driver
 router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void> => {
-  // Parse week start (Monday) — default to current week's Monday
-  let weekStart: Date;
-  if (req.query["week"] && typeof req.query["week"] === "string") {
-    weekStart = new Date(req.query["week"]);
-  } else {
-    const now = new Date();
-    const day = now.getDay(); // 0=Sun
-    const diff = day === 0 ? -6 : 1 - day;
-    weekStart = new Date(now);
-    weekStart.setDate(now.getDate() + diff);
-  }
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
+  const week = resolvePayoutWeek(typeof req.query["week"] === "string" ? req.query["week"] : null);
+  const { weekStart, weekEnd } = week;
 
-  // Get commission rate
-  const [commRow] = await db
-    .select({ value: settingsTable.value })
-    .from(settingsTable)
-    .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "70");
-  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
-
-  // Get all approved drivers
-  const drivers = await db
-    .select()
-    .from(driversTable)
-    .where(sql`approval_status = 'approved'`)
-    .orderBy(driversTable.name);
-
-  // Get completed bookings in this week
-  const bookings = await db
-    .select({
-      driverId: bookingsTable.driverId,
-      priceQuoted: bookingsTable.priceQuoted,
-      fareSubtotal: bookingsTable.fareSubtotal,
-      tipAmount: bookingsTable.tipAmount,
-    })
-    .from(bookingsTable)
-    .where(
-      sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`
-    );
-
-  // Aggregate per driver (gross fare + tips tracked separately). Commission base is
-  // fare_subtotal (pre-tax/pre-fee/pre-discount), falling back to price_quoted for
-  // legacy rows.
-  const earningsByDriver = new Map<number, { rides: number; gross: number; tips: number }>();
-  for (const b of bookings) {
-    if (!b.driverId) continue;
-    const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0, tips: 0 };
-    const fareBase = b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : parseFloat(b.priceQuoted ?? "0");
-    earningsByDriver.set(b.driverId, {
-      rides: existing.rides + 1,
-      gross: existing.gross + fareBase,
-      tips: existing.tips + parseFloat(b.tipAmount ?? "0"),
-    });
-  }
+  // Shared with the statement emailed to the chauffeur — see lib/weeklyPayouts.ts
+  // for why these two used to be separate, drifting copies.
+  const { commissionPct, byDriver } = await computeWeeklyEarnings(week);
+  const drivers = await loadApprovedDrivers();
 
   // One driver whose stored value cannot be decrypted must not take down the
   // whole board — that is the screen an operator opens to find out that
@@ -349,20 +376,20 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
   };
 
   const payouts = drivers.map(d => {
-    const earnings = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0, tips: 0 };
-    const commission = Math.round(earnings.gross * commissionPct * 100) / 100;
-    const tipsTotal = Math.round(earnings.tips * 100) / 100;
-    const driverNet = Math.round((commission + tipsTotal) * 100) / 100;
+    const e = byDriver.get(d.id) ?? emptyWeekEarnings(d.id);
     return {
       driverId: d.id,
       driverName: d.name,
       driverEmail: d.email,
       driverPhone: d.phone,
-      rides: earnings.rides,
-      grossEarnings: Math.round(earnings.gross * 100) / 100,
+      rides: e.rides,
+      grossEarnings: e.grossEarnings,
       commissionPct,
-      tipsTotal,
-      driverNet,
+      commission: e.commission,
+      /** Add-ons kept in full — shown separately so the chauffeur can check it. */
+      extrasTotal: e.extrasTotal,
+      tipsTotal: e.tipsTotal,
+      driverNet: e.driverNet,
       bankName: d.payoutBankName ?? null,
       // The routing number identifies a bank, not an account, and the payout
       // emails already carry it in full. The account number does not leave the
@@ -393,64 +420,30 @@ router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void
 router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promise<void> => {
   const { weekStart: weekStartStr } = req.body as { weekStart?: string };
 
-  let weekStart: Date;
-  if (weekStartStr) {
-    weekStart = new Date(weekStartStr);
-  } else {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    weekStart = new Date(now);
-    weekStart.setDate(now.getDate() + diff);
-  }
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
+  const week = resolvePayoutWeek(weekStartStr ?? null);
+  const { weekLabel } = week;
 
-  const [commRow] = await db
-    .select({ value: settingsTable.value })
-    .from(settingsTable)
-    .where(eq(settingsTable.key, "driver_commission_pct"));
-  const rawPct = parseFloat(commRow?.value ?? "70");
-  const commissionPct = rawPct > 1 ? rawPct / 100 : rawPct;
-
-  const drivers = await db
-    .select()
-    .from(driversTable)
-    .where(sql`approval_status = 'approved'`)
-    .orderBy(driversTable.name);
-
-  const bookings = await db
-    .select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted, fareSubtotal: bookingsTable.fareSubtotal, tipAmount: bookingsTable.tipAmount })
-    .from(bookingsTable)
-    .where(sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
-
-  const earningsByDriver = new Map<number, { rides: number; gross: number; tips: number }>();
-  for (const b of bookings) {
-    if (!b.driverId) continue;
-    const existing = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0, tips: 0 };
-    const fareBase = b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : parseFloat(b.priceQuoted ?? "0");
-    earningsByDriver.set(b.driverId, {
-      rides: existing.rides + 1,
-      gross: existing.gross + fareBase,
-      tips: existing.tips + parseFloat(b.tipAmount ?? "0"),
-    });
-  }
+  // Same computation as the board above. It used to be a second copy, and the
+  // two would now disagree about overtime and paid add-ons.
+  const { commissionPct, byDriver } = await computeWeeklyEarnings(week);
+  const drivers = await loadApprovedDrivers();
 
   const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("../lib/mailer.js");
-  const weekLabel = weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " – " + new Date(weekEnd.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   const payouts = drivers.map(d => {
-    const earnings = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0, tips: 0 };
-    const commission = Math.round(earnings.gross * commissionPct * 100) / 100;
-    const tipsTotal = Math.round(earnings.tips * 100) / 100;
-    const driverNet = Math.round((commission + tipsTotal) * 100) / 100;
+    const e = byDriver.get(d.id) ?? emptyWeekEarnings(d.id);
     return {
       driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
-      rides: earnings.rides, grossEarnings: Math.round(earnings.gross * 100) / 100,
-      commissionPct, tipsTotal, driverNet,
-      bankName: d.payoutBankName ?? null, routingNumber: d.payoutRoutingNumber ?? null,
-      accountNumber: d.payoutAccountNumber ?? null, legalName: d.payoutLegalName ?? null,
+      rides: e.rides, grossEarnings: e.grossEarnings,
+      commissionPct, commission: e.commission, extrasTotal: e.extrasTotal,
+      tipsTotal: e.tipsTotal, driverNet: e.driverNet,
+      bankName: d.payoutBankName ?? null,
+      // Decrypted here, as the board does. These used to be passed through raw
+      // from the column — AES-GCM ciphertext — so the "****1234" in the
+      // chauffeur's statement was the last four characters of an encrypted blob.
+      routingNumber: safeDecrypt(() => safeDecryptField(d.payoutRoutingNumber), req),
+      accountLast4: safeDecrypt(() => lastN(d.payoutAccountNumber, 4), req),
+      legalName: d.payoutLegalName ?? null,
     };
   });
 
@@ -931,6 +924,24 @@ router.get("/admin/compliance/pending", requireAdmin, async (_req, res): Promise
 
 // ─── Corporate Accounts (Net-30 billing) ────────────────────────────────────
 
+/**
+ * What a corporate account owes for one trip.
+ *
+ * Both the unbilled preview and the invoice run used to total
+ * `coalesce(fare_subtotal, price_quoted)`. fare_subtotal is the *chauffeur
+ * commission base*: it excludes tax, the card processing fee, the airport
+ * surcharge and every add-on, because the chauffeur earns on none of them. It
+ * is not, and never was, the customer's price.
+ *
+ * So a Net-30 account was invoiced the bare fare. On a charter shaped like
+ * booking #13 — $235 of service, $860 of add-ons, $76.65 tax, $46.87 card fee —
+ * that is an invoice for $225 against $1,218.52 of service delivered.
+ *
+ * price_quoted is what the customer agreed to pay, and extra_charge is any time
+ * billed after the trip. Both belong on the invoice.
+ */
+const CORPORATE_BILLABLE = sql<string>`(${bookingsTable.priceQuoted} + coalesce(${bookingsTable.extraCharge}, 0))`;
+
 // GET /admin/corporate-accounts — company-level billing view with unbilled totals
 router.get("/admin/corporate-accounts", requireAdmin, async (_req, res): Promise<void> => {
   const accounts = await db.select().from(corporateAccountsTable).orderBy(corporateAccountsTable.companyName);
@@ -943,7 +954,7 @@ router.get("/admin/corporate-accounts", requireAdmin, async (_req, res): Promise
     let unbilledRides = 0;
     if (userIds.length > 0) {
       const unbilled = await db
-        .select({ amount: sql<string>`coalesce(${bookingsTable.fareSubtotal}, ${bookingsTable.priceQuoted})` })
+        .select({ amount: CORPORATE_BILLABLE })
         .from(bookingsTable)
         .where(and(
           inArray(bookingsTable.userId, userIds),
@@ -1018,7 +1029,7 @@ router.post("/admin/corporate-accounts/:id/mark-invoiced", requireAdmin, async (
   }
 
   const toInvoice = await db
-    .select({ id: bookingsTable.id, amount: sql<string>`coalesce(${bookingsTable.fareSubtotal}, ${bookingsTable.priceQuoted})` })
+    .select({ id: bookingsTable.id, amount: CORPORATE_BILLABLE })
     .from(bookingsTable)
     .where(and(
       inArray(bookingsTable.userId, userIds),

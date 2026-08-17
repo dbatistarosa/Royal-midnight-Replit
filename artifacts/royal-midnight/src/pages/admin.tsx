@@ -128,7 +128,9 @@ function AdminInner() {
                         <span className="opacity-50">to</span> {booking.dropoffAddress.split(",")[0]}
                       </td>
                       <td className="py-4 text-muted-foreground capitalize whitespace-nowrap">{booking.vehicleClass.replace("_", " ")}</td>
-                      <td className="py-4 text-right font-mono whitespace-nowrap">${booking.priceQuoted}</td>
+                      {/* Interpolated raw, so a round fare printed as "$1100"
+                          next to "$1121.51" in the same column. */}
+                      <td className="py-4 text-right font-mono whitespace-nowrap">${Number(booking.priceQuoted ?? 0).toFixed(2)}</td>
                       <td className="py-4 text-right pr-4 sm:pr-0">
                         <span className={`inline-block px-2 sm:px-3 py-1 text-xs uppercase tracking-widest border ${STATUS_COLORS[booking.status]}`}>
                           {booking.status.replace("_", " ")}

@@ -1238,6 +1238,9 @@ export const GetRevenueStatsResponse = zod.object({
   companyNetIncome: zod.number().optional(),
   taxRatePct: zod.number().optional(),
   ccFeePct: zod.number().optional(),
+  totalTips: zod.number().optional(),
+  totalDriverExtras: zod.number().optional(),
+  estimatedRows: zod.number().optional(),
 });
 
 /**

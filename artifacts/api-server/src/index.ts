@@ -5,6 +5,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { hashPassword, isValidHash } from "./lib/hash.js";
 import { safeDecryptField, encryptField } from "./lib/encrypt.js";
+import { runWeeklyPayoutIfNeeded } from "./lib/cron-jobs.js";
 import { readFileSync, readdirSync, readlinkSync } from "fs";
 
 const rawPort = process.env["PORT"];
@@ -490,86 +491,15 @@ async function retroactiveEmailLink(): Promise<void> {
 // due-based and lives in lib/tripReminders.ts, reached through
 // POST /api/cron/trip-reminders.
 
-// Weekly payout scheduler — fires every Monday at ~8am server time
-async function runWeeklyPayoutIfNeeded(): Promise<void> {
-  try {
-    const now = new Date();
-    if (now.getDay() !== 1) return; // Only Mondays
-    if (now.getHours() < 8 || now.getHours() > 10) return; // 8–10am window
-
-    // Check if we already sent the weekly report today
-    const { emailLogsTable } = await import("@workspace/db");
-    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-    const { gte, and: andOp, eq: eqOp } = await import("drizzle-orm");
-    const recent = await db.select({ id: emailLogsTable.id })
-      .from(emailLogsTable)
-      .where(andOp(eqOp(emailLogsTable.type, "weekly_payout_admin_report"), gte(emailLogsTable.sentAt, todayStart)))
-      .limit(1);
-
-    if (recent.length > 0) {
-      logger.info("Weekly payout already sent today — skipping");
-      return;
-    }
-
-    logger.info("Sending scheduled weekly payout emails...");
-    const { driversTable, bookingsTable: bookTbl } = await import("@workspace/db");
-    const { sql: sqlFn } = await import("drizzle-orm");
-
-    const { fetchCommissionPct: fetchCommPct2 } = await import("./lib/commission.js");
-    const commissionPct = await fetchCommPct2();
-
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - 7); // Previous week
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(now); weekEnd.setHours(0, 0, 0, 0);
-    const weekLabel = weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " – " + new Date(weekEnd.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-
-    const drivers = await db.select().from(driversTable).where(sqlFn`approval_status = 'approved'`).orderBy(driversTable.name);
-    const bookings = await db.select({ driverId: bookTbl.driverId, priceQuoted: bookTbl.priceQuoted, fareSubtotal: bookTbl.fareSubtotal, tipAmount: bookTbl.tipAmount })
-      .from(bookTbl)
-      .where(sqlFn`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
-
-    const earningsByDriver = new Map<number, { rides: number; gross: number; tips: number }>();
-    for (const b of bookings) {
-      if (!b.driverId) continue;
-      const e = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0, tips: 0 };
-      const fareBase = b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : parseFloat(b.priceQuoted ?? "0");
-      const tip = b.tipAmount != null ? parseFloat(String(b.tipAmount)) : 0;
-      earningsByDriver.set(b.driverId, { rides: e.rides + 1, gross: e.gross + fareBase, tips: e.tips + tip });
-    }
-
-    const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("./lib/mailer.js");
-    const payouts = drivers.map(d => {
-      const e = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0, tips: 0 };
-      // Tips are 100% the driver's — commission applies only to the fare base.
-      const driverNet = Math.round((e.gross * commissionPct + e.tips) * 100) / 100;
-      return {
-        driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
-        rides: e.rides, grossEarnings: Math.round(e.gross * 100) / 100,
-        tipsTotal: Math.round(e.tips * 100) / 100,
-        commissionPct, driverNet, weekLabel,
-        bankName: d.payoutBankName ?? null, routingNumber: safeDecryptField(d.payoutRoutingNumber),
-        accountNumber: safeDecryptField(d.payoutAccountNumber), legalName: d.payoutLegalName ?? null,
-      };
-    });
-
-    for (const p of payouts) {
-      try {
-        await sendWeeklyDriverPayout(p);
-      } catch (err) {
-        logger.error({ err, driverId: p.driverId }, "Failed to send weekly payout email to driver");
-      }
-    }
-    await sendWeeklyPayoutAdminReport({
-      weekLabel, payouts, commissionPct,
-      totalGross: Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) / 100,
-      totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
-    });
-    logger.info({ driverCount: drivers.length, weekLabel }, "Weekly payout emails sent");
-  } catch (err) {
-    logger.error({ err }, "Weekly payout scheduler error (non-fatal)");
-  }
-}
+// Weekly payout scheduler — fires every Monday at ~8am server time.
+//
+// The implementation used to be inlined here, a second complete copy of
+// lib/cron-jobs.ts's runWeeklyPayoutIfNeeded(): its own week arithmetic, its own
+// commission lookup, its own aggregation. Two implementations of one payroll
+// run, reached by two different triggers (this interval, and
+// POST /api/cron/weekly-payouts), guaranteed to drift apart. They already had:
+// only one of them was ever going to learn about overtime and paid add-ons.
+// There is one now, and both triggers call it.
 
 // Kill any process currently holding a given TCP port using /proc/net/tcp{,6}.
 // Node commonly binds on IPv6 (::) even for dual-stack sockets, so we check

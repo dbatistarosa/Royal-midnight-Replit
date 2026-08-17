@@ -67,15 +67,63 @@ describe("sendWeeklyDriverPayout — baseHtml regression", () => {
         rides: 5,
         grossEarnings: 500,
         commissionPct: 0.7,
+        commission: 350,
+        extrasTotal: 60,
         tipsTotal: 20,
-        driverNet: 370,
+        driverNet: 430,
         bankName: "Test Bank",
         routingNumber: "123456789",
-        accountNumber: "000011112222",
+        accountLast4: "2222",
         legalName: "Jane Doe",
       }),
     ).resolves.not.toThrow();
 
     expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the caller's figures rather than recomputing them, and totals correctly", async () => {
+    // The statement used to derive commission itself as grossEarnings x
+    // commissionPct, which stopped adding up to driverNet the moment add-ons
+    // entered the payout: the chauffeur would read $350 + $20 = $430 with $60
+    // unaccounted for.
+    await sendWeeklyDriverPayout({
+      driverName: "Jane Doe",
+      driverEmail: "jane@example.com",
+      weekLabel: "Jun 16 - Jun 22, 2026",
+      rides: 5,
+      grossEarnings: 500,
+      commissionPct: 0.7,
+      commission: 350,
+      extrasTotal: 60,
+      tipsTotal: 20,
+      driverNet: 430,
+      bankName: "Test Bank",
+      routingNumber: "123456789",
+      accountLast4: "2222",
+      legalName: "Jane Doe",
+    });
+
+    const html = sendMock.mock.calls[0]![0].html as string;
+    expect(html).toContain("$350.00");   // commission, as supplied
+    expect(html).toContain("+$60.00");   // add-ons paid in full
+    expect(html).toContain("+$20.00");   // tips
+    expect(html).toContain("$430.00");   // total payout
+  });
+
+  it("masks the account with the last four it was given, not four characters of ciphertext", async () => {
+    await sendWeeklyDriverPayout({
+      driverName: "Jane Doe",
+      driverEmail: "jane@example.com",
+      weekLabel: "Jun 16 - Jun 22, 2026",
+      rides: 1, grossEarnings: 100, commissionPct: 0.7,
+      commission: 70, extrasTotal: 0, tipsTotal: 0, driverNet: 70,
+      bankName: "Test Bank",
+      routingNumber: "123456789",
+      accountLast4: "4321",
+      legalName: "Jane Doe",
+    });
+
+    const html = sendMock.mock.calls[0]![0].html as string;
+    expect(html).toContain("****4321");
   });
 });

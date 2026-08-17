@@ -7,6 +7,7 @@ import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders } from "@/lib/authHeaders";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1311,15 +1312,19 @@ export default function DriverDashboard() {
 
   // Load headline stats once driver record is available
   useEffect(() => {
-    if (!driverRecord?.id || !token) return;
-    const header = `Bearer ${token}`;
+    if (!driverRecord?.id) return;
+    // Not gated on `token`: it is memory-only and gone after any reload, and the
+    // HttpOnly session cookie is what actually authenticates. Gating on it here
+    // is why a refreshed dashboard showed no earnings and no rides until the
+    // chauffeur signed out and back in.
+    const header = authHeaders(token);
 
-    fetch(`${API_BASE}/drivers/${driverRecord.id}/earnings`, { headers: { Authorization: header } })
+    fetch(`${API_BASE}/drivers/${driverRecord.id}/earnings`, { headers: header })
       .then(r => r.ok ? r.json() as Promise<EarningsData> : Promise.resolve(null))
       .then(data => setEarnings(data))
       .catch(() => setEarnings(null));
 
-    fetch(`${API_BASE}/bookings?driverId=${driverRecord.id}`, { headers: { Authorization: header } })
+    fetch(`${API_BASE}/bookings?driverId=${driverRecord.id}`, { headers: header })
       .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
       .then(data => {
         const upcoming = Array.isArray(data)
@@ -1330,7 +1335,7 @@ export default function DriverDashboard() {
       .catch(() => setUpcomingCount(0));
 
     // Load compliance doc expiries for the warning banner
-    fetch(`${API_BASE}/drivers/${driverRecord.id}/documents`, { headers: { Authorization: header } })
+    fetch(`${API_BASE}/drivers/${driverRecord.id}/documents`, { headers: header })
       .then(r => r.ok ? r.json() as Promise<ComplianceDocs> : Promise.resolve(null))
       .then(data => setCompliance(data))
       .catch(() => setCompliance(null));

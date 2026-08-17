@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders, jsonAuthHeaders } from "@/lib/authHeaders";
 import { driverNavItems } from "@/config/portalNav";
 
 /**
@@ -69,9 +70,9 @@ export default function DriverPayout() {
   const driverId = driverRecord?.id;
 
   const load = useCallback(() => {
-    if (!driverId || !token) return;
+    if (!driverId) return;
     setLoading(true);
-    fetch(`${API_BASE}/drivers/${driverId}/payout`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/drivers/${driverId}/payout`, { headers: authHeaders(token) })
       .then(async r => {
         if (!r.ok) {
           const body = await r.json().catch(() => null) as { error?: string } | null;
@@ -92,7 +93,7 @@ export default function DriverPayout() {
   useEffect(() => { load(); }, [load]);
 
   const handleSave = async () => {
-    if (!driverId || !token) return;
+    if (!driverId) return;
 
     // Checked here as well as on the server so a mistyped routing number is
     // caught before it costs a round trip — the server remains the authority.
@@ -125,7 +126,7 @@ export default function DriverPayout() {
 
       const res = await fetch(`${API_BASE}/drivers/${driverId}/payout`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: jsonAuthHeaders(token),
         body: JSON.stringify(body),
       });
       if (!res.ok) {

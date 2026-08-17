@@ -3,22 +3,19 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Wallet, Smartphone, Gift, Building2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders, jsonAuthHeaders } from "@/lib/authHeaders";
+import { useAuth } from "@/contexts/auth";
+import { useToast } from "@/hooks/use-toast";
 import { adminNavItems } from "@/config/portalNav";
 
 
 const ANDROID_KEY = "driver_app_android_link";
 const IOS_KEY = "driver_app_ios_link";
 
-function getAuthHeader(): string {
-  try {
-    const raw = localStorage.getItem("rm_auth");
-    if (!raw) return "";
-    const parsed = JSON.parse(raw) as { token?: string };
-    return parsed.token ? `Bearer ${parsed.token}` : "";
-  } catch {
-    return "";
-  }
-}
+// The local getAuthHeader() that used to live here dug a `token` field out of
+// the `rm_auth` localStorage blob — a field nothing has written since CN-014
+// moved the session into an HttpOnly cookie. It returned "" on every call. The
+// screen worked anyway, on the cookie alone, which is why nobody noticed.
 
 function LinkCard({ title, value, onChange, onSave, saving }: {
   title: string; value: string; onChange: (v: string) => void; onSave: () => void; saving: boolean;
@@ -55,6 +52,8 @@ function LinkCard({ title, value, onChange, onSave, saving }: {
 }
 
 export default function AdminDriverApp() {
+  const { token } = useAuth();
+  const { toast } = useToast();
   const [androidUrl, setAndroidUrl] = useState("");
   const [iosUrl, setIosUrl] = useState("");
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -63,7 +62,7 @@ export default function AdminDriverApp() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/settings`, { headers: { Authorization: getAuthHeader() } });
+        const res = await fetch(`${API_BASE}/settings`, { headers: authHeaders(token) });
         if (res.ok) {
           const data = await res.json() as Record<string, string>;
           setAndroidUrl(data[ANDROID_KEY] ?? "");
@@ -73,15 +72,30 @@ export default function AdminDriverApp() {
         setLoading(false);
       }
     })();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   async function saveKey(key: string, value: string) {
     setSavingKey(key);
     try {
-      await fetch(`${API_BASE}/settings/${key}`, {
+      const res = await fetch(`${API_BASE}/settings/${key}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: getAuthHeader() },
+        headers: jsonAuthHeaders(token),
         body: JSON.stringify({ value }),
+      });
+      // The result of this call used to be discarded entirely: a rejected save
+      // stopped the spinner and said nothing, so the admin walked away
+      // believing the install link had been updated when it had not.
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? `Save failed (HTTP ${res.status}).`);
+      }
+      toast({ title: "Link saved" });
+    } catch (err) {
+      toast({
+        title: "Could not save the link",
+        description: err instanceof Error ? err.message : "Unexpected error.",
+        variant: "destructive",
       });
     } finally {
       setSavingKey(null);

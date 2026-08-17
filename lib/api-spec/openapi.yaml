@@ -1923,6 +1923,29 @@ components:
           type: number
         completedRides:
           type: integer
+        # Extended financial breakdown. Optional so an older client keeps working.
+        # These were previously hand-added to the generated zod file only, which
+        # meant the next `codegen` run would have silently deleted them.
+        totalGrossIncome:
+          type: number
+        totalTaxesCollected:
+          type: number
+        totalFeesCollected:
+          type: number
+        totalDriverCommissions:
+          type: number
+        companyNetIncome:
+          type: number
+        taxRatePct:
+          type: number
+        ccFeePct:
+          type: number
+        totalTips:
+          type: number
+        totalDriverExtras:
+          type: number
+        estimatedRows:
+          type: integer
       required: [daily, byVehicleClass, totalRevenue, totalCommissionPaid, totalCompanyRevenue, commissionPct, completedRides]
 
     RevenuePeriod:

@@ -67,13 +67,29 @@ interface QuoteResult {
  *  Fare lines (what the chauffeur service itself costs) are listed first;
  *  taxes, airport fee, and card processing are grouped as "External Fees"
  *  with a (?) explainer, since they are pass-through costs, not our fare. */
-function PriceBreakdownLines({ quote, isHourly }: { quote: QuoteResult; isHourly: boolean }) {
+/** Rounding to cents, in one place — the same operation the server applies. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * `taxAmount` / `cardProcessingFee` come from the quote, which is priced before
+ * add-ons are chosen. On the review step, where they have been, the caller
+ * passes the recomputed figures via `fees` so the disclosure the customer reads
+ * matches the amount their card is about to be charged.
+ */
+function PriceBreakdownLines({ quote, isHourly, fees }: {
+  quote: QuoteResult;
+  isHourly: boolean;
+  fees?: { taxAmount: number; cardProcessingFee: number; extrasTotal: number };
+}) {
   const [showFeeInfo, setShowFeeInfo] = useState(false);
   const isFlat = quote.fixedRoutePrice != null;
   const fareTotal = isFlat
     ? quote.fixedRoutePrice!
-    : Math.round((quote.baseFare + quote.distanceCharge + (quote.surgeAdjustment ?? 0)) * 100) / 100;
-  const externalFees = Math.round((quote.airportFee + quote.taxAmount + quote.cardProcessingFee) * 100) / 100;
+    : round2(quote.baseFare + quote.distanceCharge + (quote.surgeAdjustment ?? 0));
+  const taxAmount = fees?.taxAmount ?? quote.taxAmount;
+  const cardProcessingFee = fees?.cardProcessingFee ?? quote.cardProcessingFee;
+  const extrasTotal = fees?.extrasTotal ?? 0;
+  const externalFees = round2(quote.airportFee + taxAmount + cardProcessingFee);
 
   return (
     <>
@@ -94,6 +110,13 @@ function PriceBreakdownLines({ quote, isHourly }: { quote: QuoteResult; isHourly
         <div className="flex justify-between items-center">
           <span className="text-gray-400">Fare Price</span>
           <span className="text-gray-200 font-medium">${fareTotal.toFixed(2)}</span>
+        </div>
+      )}
+
+      {extrasTotal > 0 && (
+        <div className="flex justify-between items-center">
+          <span className="text-gray-400">Add-ons</span>
+          <span className="text-gray-200 font-medium">${extrasTotal.toFixed(2)}</span>
         </div>
       )}
 
@@ -119,7 +142,7 @@ function PriceBreakdownLines({ quote, isHourly }: { quote: QuoteResult; isHourly
               <span className="block space-y-1">
                 <span className="flex justify-between text-[11px] text-gray-500">
                   <span>Florida tax ({(quote.taxRate * 100).toFixed(0)}%)</span>
-                  <span>${quote.taxAmount.toFixed(2)}</span>
+                  <span>${taxAmount.toFixed(2)}</span>
                 </span>
                 {quote.airportFee > 0 && (
                   <span className="flex justify-between text-[11px] text-gray-500">
@@ -127,10 +150,10 @@ function PriceBreakdownLines({ quote, isHourly }: { quote: QuoteResult; isHourly
                     <span>${quote.airportFee.toFixed(2)}</span>
                   </span>
                 )}
-                {quote.cardProcessingFee > 0 && (
+                {cardProcessingFee > 0 && (
                   <span className="flex justify-between text-[11px] text-gray-500">
                     <span>Card processing ({(quote.cardProcessingFeeRate * 100).toFixed(1)}%)</span>
-                    <span>${quote.cardProcessingFee.toFixed(2)}</span>
+                    <span>${cardProcessingFee.toFixed(2)}</span>
                   </span>
                 )}
               </span>
@@ -833,19 +856,29 @@ export default function Book() {
     setIsConfirming(false);
   };
 
-  const extrasTotal = availableExtras
+  const extrasTotal = round2(availableExtras
     .filter(e => selectedExtras.has(e.id))
-    .reduce((sum, e) => sum + e.price, 0);
+    .reduce((sum, e) => sum + e.price, 0));
 
-  // When a fixed route is detected, quote.ts recalculates the full breakdown
-  // (tax + CC fee) on the flat rate and returns them in the normal totalWithTax
-  // field. So we always use totalWithTax as the base — it's correct for both
-  // computed and flat-rate quotes.
-  const baseTotal = selectedQuote?.totalWithTax ?? 0;
+  // Add-ons are taxed and carry the card fee like the fare.
+  //
+  // This screen used to show `totalWithTax + extrasTotal` — the add-ons simply
+  // appended to a total that had already had tax and the card fee applied — and
+  // POST /bookings charged exactly that. So a $650 champagne order was sold with
+  // no Florida tax and no processing fee on it, and the company absorbed both.
+  //
+  // The steps below mirror computeFareBreakdown() on the server exactly,
+  // including where each rounding happens, so the number shown here and the
+  // number the server derives agree to the cent.
+  const q = selectedQuote;
+  const taxableSubtotal = round2((q?.subtotal ?? 0) + extrasTotal);
+  const taxAmount = round2(taxableSubtotal * (q?.taxRate ?? 0));
+  const cardProcessingFee = round2((taxableSubtotal + taxAmount) * (q?.cardProcessingFeeRate ?? 0));
+  const baseTotal = q ? round2(taxableSubtotal + taxAmount + cardProcessingFee) : 0;
 
-  const effectiveTotal = Math.round(((promoResult?.valid && promoResult.finalAmount != null
-    ? promoResult.finalAmount
-    : baseTotal) + extrasTotal) * 100) / 100;
+  const effectiveTotal = round2(promoResult?.valid && promoResult.discountAmount != null
+    ? Math.max(0, baseTotal - promoResult.discountAmount)
+    : baseTotal);
 
   const handlePromoValidate = async () => {
     if (!promoCode.trim() || !selectedQuote) return;
@@ -854,6 +887,8 @@ export default function Book() {
       const res = await fetch(`${API_BASE}/promos/validate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // The promo is applied to the whole ticket, add-ons included — which is
+        // also what the server does when it re-derives the discount.
         body: JSON.stringify({ code: promoCode.trim(), bookingAmount: baseTotal }),
       });
       if (!res.ok) {
@@ -1549,7 +1584,11 @@ export default function Book() {
                         Handles both computed fares and flat-rate routes. */}
                     <div className="border-t border-white/8 pt-5 space-y-3 text-sm">
                       <p className="text-[10px] uppercase tracking-widest text-gray-600">Price Breakdown</p>
-                      <PriceBreakdownLines quote={selectedQuote} isHourly={charterMode === "hourly"} />
+                      <PriceBreakdownLines
+                        quote={selectedQuote}
+                        isHourly={charterMode === "hourly"}
+                        fees={{ taxAmount, cardProcessingFee, extrasTotal }}
+                      />
                     </div>
 
                     {/* Total */}
@@ -1558,7 +1597,7 @@ export default function Book() {
                         <span className="text-base text-white font-serif">Total Due</span>
                         <div className="text-right">
                           {promoResult?.valid && promoResult.discountAmount != null && (
-                            <div className="text-xs text-green-400 line-through text-right">${selectedQuote.totalWithTax.toFixed(2)}</div>
+                            <div className="text-xs text-green-400 line-through text-right">${baseTotal.toFixed(2)}</div>
                           )}
                           <span className="text-3xl font-serif text-primary">${effectiveTotal.toFixed(2)}</span>
                           {promoResult?.valid && promoResult.discountAmount != null && (
@@ -1605,7 +1644,7 @@ export default function Book() {
                         <div className="bg-primary/5 border border-primary/15 p-5 text-center">
                           <p className="text-[10px] uppercase tracking-[0.3em] text-gray-600 mb-1">You will be charged</p>
                           {promoResult?.valid && promoResult.discountAmount != null && (
-                            <p className="text-sm text-gray-500 line-through">${selectedQuote.totalWithTax.toFixed(2)}</p>
+                            <p className="text-sm text-gray-500 line-through">${baseTotal.toFixed(2)}</p>
                           )}
                           <p className="text-4xl font-serif text-primary">${effectiveTotal.toFixed(2)}</p>
                           {promoResult?.valid && promoResult.discountAmount != null

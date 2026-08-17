@@ -225,7 +225,11 @@ function PassengerSupportInner() {
   };
 
   useEffect(() => {
-    if (userId && token) void fetchTickets();
+    // See addresses.tsx — `token` is memory-only and null after a reload; the
+    // session cookie is what authenticates. Gating on it left this screen
+    // spinning for ever.
+    if (userId) void fetchTickets();
+    else setLoading(false);
   }, [userId, token]);
 
   const handleSubmit = async () => {

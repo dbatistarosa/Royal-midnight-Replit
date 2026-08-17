@@ -5,7 +5,7 @@ import { sql } from "drizzle-orm";
 // sat there looking like this file still opened raw connections.
 import { db } from "@workspace/db";
 import { logger } from "./logger";
-import { safeDecryptField } from "./encrypt.js";
+import { safeDecryptField, lastN } from "./encrypt.js";
 // Reminders and driver-confirmation enforcement live in their own module now:
 // the window-based version that used to sit here matched nothing on a
 // scheduler that runs late. Re-exported so routes/cron.ts keeps its import.
@@ -74,42 +74,37 @@ export async function runWeeklyPayoutIfNeeded(): Promise<void> {
     if (recent.length > 0) { logger.info("Weekly payout already sent today — skipping"); return; }
 
     logger.info("Sending scheduled weekly payout emails...");
-    const { fetchCommissionPct } = await import("./commission.js");
-    const commissionPct = await fetchCommissionPct();
 
-    const weekStart = new Date(now); weekStart.setDate(now.getDate() - 7); weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(now); weekEnd.setHours(0, 0, 0, 0);
-    const weekLabel =
-      weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
-      " – " +
-      new Date(weekEnd.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    // Shared with the admin board and the manual send button. This was a third
+    // hand-written copy of the same arithmetic and had already drifted: it paid
+    // commission on the fare base alone, with no overtime and no add-ons, and
+    // it passed the whole decrypted account number into the statement instead
+    // of its last four.
+    const { resolvePayoutWeek, computeWeeklyEarnings, loadApprovedDrivers, emptyWeekEarnings } =
+      await import("./weeklyPayouts.js");
 
-    const drivers = await db.select().from(driversTable).where(sql`approval_status = 'approved'`).orderBy(driversTable.name);
-    const bookings = await db.select({ driverId: bookingsTable.driverId, priceQuoted: bookingsTable.priceQuoted, fareSubtotal: bookingsTable.fareSubtotal, tipAmount: bookingsTable.tipAmount })
-      .from(bookingsTable)
-      .where(sql`status = 'completed' AND driver_id IS NOT NULL AND pickup_at >= ${weekStart.toISOString()} AND pickup_at < ${weekEnd.toISOString()}`);
+    // The scheduled run covers the seven days ending today, not the current
+    // Monday-anchored week — it fires on a Monday morning for the week just
+    // finished.
+    const weekStartRaw = new Date(now); weekStartRaw.setDate(now.getDate() - 7); weekStartRaw.setHours(0, 0, 0, 0);
+    const week = resolvePayoutWeek(weekStartRaw.toISOString());
+    const { weekLabel } = week;
 
-    const earningsByDriver = new Map<number, { rides: number; gross: number; tips: number }>();
-    for (const b of bookings) {
-      if (!b.driverId) continue;
-      const e = earningsByDriver.get(b.driverId) ?? { rides: 0, gross: 0, tips: 0 };
-      const fareBase = b.fareSubtotal != null ? parseFloat(String(b.fareSubtotal)) : parseFloat(String(b.priceQuoted ?? "0"));
-      const tip = b.tipAmount != null ? parseFloat(String(b.tipAmount)) : 0;
-      earningsByDriver.set(b.driverId, { rides: e.rides + 1, gross: e.gross + fareBase, tips: e.tips + tip });
-    }
+    const { commissionPct, byDriver } = await computeWeeklyEarnings(week);
+    const drivers = await loadApprovedDrivers();
 
     const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("./mailer.js");
     const payouts = drivers.map(d => {
-      const e = earningsByDriver.get(d.id) ?? { rides: 0, gross: 0, tips: 0 };
-      // Tips are 100% the driver's — commission applies only to the fare base.
-      const driverNet = Math.round((e.gross * commissionPct + e.tips) * 100) / 100;
+      const e = byDriver.get(d.id) ?? emptyWeekEarnings(d.id);
       return {
         driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
-        rides: e.rides, grossEarnings: Math.round(e.gross * 100) / 100,
-        tipsTotal: Math.round(e.tips * 100) / 100,
-        commissionPct, driverNet, weekLabel,
-        bankName: d.payoutBankName ?? null, routingNumber: safeDecryptField(d.payoutRoutingNumber),
-        accountNumber: safeDecryptField(d.payoutAccountNumber), legalName: d.payoutLegalName ?? null,
+        rides: e.rides, grossEarnings: e.grossEarnings,
+        commission: e.commission, extrasTotal: e.extrasTotal, tipsTotal: e.tipsTotal,
+        commissionPct, driverNet: e.driverNet, weekLabel,
+        bankName: d.payoutBankName ?? null,
+        routingNumber: safeDecryptField(d.payoutRoutingNumber),
+        accountLast4: lastN(d.payoutAccountNumber, 4),
+        legalName: d.payoutLegalName ?? null,
       };
     });
 

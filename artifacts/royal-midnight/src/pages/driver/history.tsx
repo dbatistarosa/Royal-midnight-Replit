@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { useDriverStatus } from "@/contexts/driverStatus";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders } from "@/lib/authHeaders";
 import { driverNavItems } from "@/config/portalNav";
 
 
@@ -44,10 +45,10 @@ export default function DriverHistory() {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!driverRecord?.id || !token) return;
+    if (!driverRecord?.id) return;
     setIsLoading(true);
     Promise.all([
-      fetch(`${API_BASE}/bookings?driverId=${driverRecord.id}`, { headers: { Authorization: `Bearer ${token}` } })
+      fetch(`${API_BASE}/bookings?driverId=${driverRecord.id}`, { headers: authHeaders(token) })
         .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
         .then(data => Array.isArray(data) ? data : []),
       fetch(`${API_BASE}/reviews?driverId=${driverRecord.id}`)

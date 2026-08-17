@@ -150,8 +150,13 @@ export function computeFareBreakdown(params: {
   airportFee: number;
   zoneMultiplier: number;
   /** 0-100. Corporate-account volume discount, applied after zone surge and
-   *  before tax (so tax is never charged on the discounted-away portion). */
+   *  before tax (so tax is never charged on the discounted-away portion).
+   *  Deliberately not applied to add-ons: it is a volume discount on chauffeur
+   *  service, not on champagne. */
   corporateDiscountPct?: number;
+  /** Add-ons the passenger chose (champagne, car seat, …), at the prices frozen
+   *  from extra_services. Part of the taxable base — see below. */
+  extrasTotal?: number;
   taxRate: number;
   cardProcessingFeeRate: number;
 }): {
@@ -159,11 +164,15 @@ export function computeFareBreakdown(params: {
   subtotal: number;
   surgeAdjustment: number;
   corporateDiscountAmount: number;
+  extrasTotal: number;
+  /** What tax and the card fee are actually charged on: service + add-ons. */
+  taxableSubtotal: number;
   taxAmount: number;
   cardProcessingFee: number;
   totalWithTax: number;
 } {
   const { baseFare, distanceCharge, airportFee, zoneMultiplier, corporateDiscountPct = 0, taxRate, cardProcessingFeeRate } = params;
+  const extrasTotal = Math.round((params.extrasTotal ?? 0) * 100) / 100;
 
   const subtotalBeforeZone = Math.round((baseFare + distanceCharge + airportFee) * 100) / 100;
   const subtotalAfterZone = Math.round(subtotalBeforeZone * zoneMultiplier * 100) / 100;
@@ -174,9 +183,41 @@ export function computeFareBreakdown(params: {
   const corporateDiscountAmount = Math.round(subtotalAfterZone * (corporateDiscountPct / 100) * 100) / 100;
   const subtotal = Math.round((subtotalAfterZone - corporateDiscountAmount) * 100) / 100;
 
-  const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
-  const cardProcessingFee = Math.round((subtotal + taxAmount) * cardProcessingFeeRate * 100) / 100;
-  const totalWithTax = Math.round((subtotal + taxAmount + cardProcessingFee) * 100) / 100;
+  // Add-ons are taxed and carry the card fee like everything else on the
+  // invoice. They used to be bolted onto the total *after* this function had
+  // finished, so a $860 champagne-and-flowers order was billed with no Florida
+  // tax and no processing fee on it at all — the company absorbed both.
+  const taxableSubtotal = Math.round((subtotal + extrasTotal) * 100) / 100;
 
-  return { subtotalBeforeZone, subtotal, surgeAdjustment, corporateDiscountAmount, taxAmount, cardProcessingFee, totalWithTax };
+  const taxAmount = Math.round(taxableSubtotal * taxRate * 100) / 100;
+  const cardProcessingFee = Math.round((taxableSubtotal + taxAmount) * cardProcessingFeeRate * 100) / 100;
+  const totalWithTax = Math.round((taxableSubtotal + taxAmount + cardProcessingFee) * 100) / 100;
+
+  return {
+    subtotalBeforeZone, subtotal, surgeAdjustment, corporateDiscountAmount,
+    extrasTotal, taxableSubtotal, taxAmount, cardProcessingFee, totalWithTax,
+  };
+}
+
+/**
+ * Tax and card fee on a charge raised after the trip — today, the extra-time
+ * charge on an hourly charter that ran long.
+ *
+ * Same rule as the fare: the customer pays tax and processing on it, and the
+ * chauffeur's commission is computed on the pre-tax `fare` only. Split out so
+ * the completion path cannot quietly grow its own, different, arithmetic.
+ */
+export function computePostTripCharge(params: {
+  /** Pre-tax amount owed (e.g. billedHours x hourlyRate). */
+  fare: number;
+  taxRate: number;
+  cardProcessingFeeRate: number;
+}): { fare: number; taxAmount: number; cardProcessingFee: number; total: number } {
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const fare = round2(Math.max(0, params.fare));
+  if (fare <= 0) return { fare: 0, taxAmount: 0, cardProcessingFee: 0, total: 0 };
+
+  const taxAmount = round2(fare * params.taxRate);
+  const cardProcessingFee = round2((fare + taxAmount) * params.cardProcessingFeeRate);
+  return { fare, taxAmount, cardProcessingFee, total: round2(fare + taxAmount + cardProcessingFee) };
 }

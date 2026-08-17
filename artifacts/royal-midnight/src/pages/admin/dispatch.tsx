@@ -3,6 +3,8 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, RefreshCw, Wallet, Gift, Building2 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { API_BASE } from "@/lib/constants";
+import { authHeaders } from "@/lib/authHeaders";
+import { useAuth } from "@/contexts/auth";
 import mapboxgl from "mapbox-gl";
 import { adminNavItems } from "@/config/portalNav";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -85,21 +87,19 @@ export default function AdminDispatch() {
   const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<Record<number, { marker: mapboxgl.Marker; popup: mapboxgl.Popup }>>({});
 
-  const token = (() => {
-    try {
-      const raw = localStorage.getItem("rm_auth");
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { token?: string };
-      return parsed.token ?? null;
-    } catch { return null; }
-  })();
-
-  const authHeader = token ? `Bearer ${token}` : "";
+  // Reads the session the same way every other screen does.
+  //
+  // This used to dig a `token` field out of the `rm_auth` localStorage blob —
+  // a field that has not been written since CN-014 moved the session into an
+  // HttpOnly cookie. So the lookup returned null on every render and the header
+  // was always empty; the board only ever worked because the cookie carried it.
+  // Dead code that looked like authentication.
+  const { token } = useAuth();
 
   const fetchBoard = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/admin/dispatch`, {
-        headers: authHeader ? { Authorization: authHeader } : {},
+        headers: authHeaders(token),
       });
       if (!res.ok) return;
       const data = await res.json() as DispatchBoard;
@@ -110,7 +110,7 @@ export default function AdminDispatch() {
     } finally {
       setLoading(false);
     }
-  }, [authHeader]);
+  }, [token]);
 
   // Configure Mapbox GL
   useEffect(() => {
