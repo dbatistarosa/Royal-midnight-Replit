@@ -1563,6 +1563,12 @@ components:
           type: number
         subtotal:
           type: number
+        # Add-ons folded into this quote, and the base tax and the card fee are
+        # charged on. Optional so an older client is unaffected.
+        extrasTotal:
+          type: number
+        taxableSubtotal:
+          type: number
         taxRate:
           type: number
         taxAmount:

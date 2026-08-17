@@ -360,6 +360,13 @@ export const GetQuoteResponse = zod.object({
   airportFee: zod.number(),
   surgeAdjustment: zod.number(),
   subtotal: zod.number(),
+  // Add-ons folded into the quote, and the base tax and the card fee are
+  // charged on. Optional so an older client is unaffected — and declared here
+  // at all because zod.object() STRIPS unknown keys: without these two lines
+  // the route computes them, res.json(GetQuoteResponse.parse(...)) silently
+  // drops them, and the caller sees undefined.
+  extrasTotal: zod.number().optional(),
+  taxableSubtotal: zod.number().optional(),
   taxRate: zod.number(),
   taxAmount: zod.number(),
   cardProcessingFeeRate: zod.number(),

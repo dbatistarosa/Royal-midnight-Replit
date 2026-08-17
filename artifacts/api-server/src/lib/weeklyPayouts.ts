@@ -29,16 +29,21 @@ export type PayoutWeek = {
   weekLabel: string;
 };
 
-/** Monday-anchored week containing `weekStartStr`, or the current one. */
+/**
+ * The seven-day window starting at `weekStartStr`, or the current Monday-anchored
+ * week when no start is given.
+ *
+ * An explicit start is taken literally — the scheduled run asks for "the seven
+ * days ending today", which is not necessarily a Monday. An unparseable string
+ * is treated as no string at all rather than silently becoming "today", which
+ * would have produced a one-day payroll window.
+ */
 export function resolvePayoutWeek(weekStartStr?: string | null): PayoutWeek {
-  let weekStart: Date;
-  if (weekStartStr) {
-    weekStart = new Date(weekStartStr);
-    if (Number.isNaN(weekStart.getTime())) weekStart = new Date();
-  } else {
-    weekStart = new Date();
-  }
-  if (!weekStartStr) {
+  const explicit = weekStartStr ? new Date(weekStartStr) : null;
+  const hasExplicit = explicit != null && !Number.isNaN(explicit.getTime());
+
+  const weekStart = hasExplicit ? explicit : new Date();
+  if (!hasExplicit) {
     const day = weekStart.getDay(); // 0 = Sunday
     weekStart.setDate(weekStart.getDate() + (day === 0 ? -6 : 1 - day));
   }
