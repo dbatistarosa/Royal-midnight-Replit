@@ -13,25 +13,35 @@ import { Clock, Gauge, PawPrint, Baby, Wine, Flower2, Package } from "lucide-rea
  * One component for all three portals so they cannot drift.
  */
 
+/** Postgres `numeric` reaches the browser as a string whenever a serializer
+ *  forgets to parse it. Coerce at the edge so a display component can never be
+ *  the thing that crashes a page — this exact mistake took the admin bookings
+ *  screen down the first time a real hourly booking existed. */
+const n = (v: number | string | null | undefined): number | null => {
+  if (v == null || v === "") return null;
+  const parsed = typeof v === "number" ? v : parseFloat(v);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 export type TripExtra = {
   id: number;
   name: string;
   category: string;
   quantity: number;
-  price: number;
-  total: number;
+  price: number | string;
+  total: number | string;
   paidToDriver: boolean;
 };
 
 export type CharterInfo = {
   charterMode?: string | null;
-  charterHours?: number | null;
-  maxMilesPerHour?: number | null;
-  hourlyRate?: number | null;
+  charterHours?: number | string | null;
+  maxMilesPerHour?: number | string | null;
+  hourlyRate?: number | string | null;
 };
 
 export function isHourly(b: CharterInfo): boolean {
-  return b.charterMode === "hourly" && (b.charterHours ?? 0) > 0;
+  return b.charterMode === "hourly" && (n(b.charterHours) ?? 0) > 0;
 }
 
 /** Included mileage on an hourly charter: the per-hour allowance times the
@@ -39,8 +49,8 @@ export function isHourly(b: CharterInfo): boolean {
  *  and implying the passenger may not travel. */
 export function includedMiles(b: CharterInfo): number | null {
   if (!isHourly(b)) return null;
-  const perHour = b.maxMilesPerHour ?? 30; // the default frozen at trip start
-  const hours = b.charterHours ?? 0;
+  const perHour = n(b.maxMilesPerHour) ?? 30; // the default frozen at booking
+  const hours = n(b.charterHours) ?? 0;
   const total = perHour * hours;
   return total > 0 ? total : null;
 }
@@ -60,7 +70,7 @@ function iconFor(category: string, name: string) {
  */
 export function CharterBadge({ booking, className = "" }: { booking: CharterInfo; className?: string }) {
   if (!isHourly(booking)) return null;
-  const hours = booking.charterHours!;
+  const hours = n(booking.charterHours)!;
   const miles = includedMiles(booking);
   return (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] uppercase tracking-widest border border-primary/30 bg-primary/10 text-primary ${className}`}>
@@ -83,9 +93,9 @@ export function CharterDetails({
   audience: "driver" | "admin" | "passenger";
 }) {
   if (!isHourly(booking)) return null;
-  const hours = booking.charterHours!;
+  const hours = n(booking.charterHours)!;
   const miles = includedMiles(booking);
-  const rate = booking.hourlyRate ?? null;
+  const rate = n(booking.hourlyRate);
 
   return (
     <div className="mt-3 pt-3 border-t border-primary/20">
@@ -151,12 +161,12 @@ export function TripExtras({
               </span>
               {audience === "driver" ? (
                 e.paidToDriver ? (
-                  <span className="text-xs text-emerald-400">+${e.total.toFixed(2)} to you</span>
+                  <span className="text-xs text-emerald-400">+${(n(e.total) ?? 0).toFixed(2)} to you</span>
                 ) : (
                   <span className="text-[11px] text-gray-600">included</span>
                 )
               ) : (
-                <span className="text-xs text-gray-400">${e.total.toFixed(2)}</span>
+                <span className="text-xs text-gray-400">${(n(e.total) ?? 0).toFixed(2)}</span>
               )}
             </div>
           );

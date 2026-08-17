@@ -29,10 +29,18 @@ export function CharterTimer({
   audience = "driver",
 }: {
   startedAt: string | null | undefined;
-  charterHours: number | null | undefined;
-  hourlyRate?: number | null;
+  charterHours: number | string | null | undefined;
+  hourlyRate?: number | string | null;
   audience?: "driver" | "admin";
 }) {
+  // Same defensive coercion as the charter panels: a `numeric` column can reach
+  // the browser as a string, and arithmetic on one silently yields NaN while
+  // .toFixed() throws outright.
+  const num = (v: number | string | null | undefined): number | null => {
+    if (v == null || v === "") return null;
+    const parsed = typeof v === "number" ? v : parseFloat(v);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -42,14 +50,16 @@ export function CharterTimer({
     return () => clearInterval(t);
   }, []);
 
-  if (!startedAt || !charterHours || charterHours <= 0) return null;
+  const hours = num(charterHours);
+  const rate = num(hourlyRate) ?? 0;
+  if (!startedAt || !hours || hours <= 0) return null;
 
   const started = new Date(startedAt).getTime();
   if (Number.isNaN(started)) return null;
 
   const elapsedMs = Math.max(0, now - started);
   const elapsedMin = Math.floor(elapsedMs / 60_000);
-  const contractedMin = charterHours * 60;
+  const contractedMin = hours * 60;
   const remainingMin = contractedMin - elapsedMin;
   const overtimeMin = Math.max(0, -remainingMin);
 
@@ -60,7 +70,7 @@ export function CharterTimer({
   // Mirrors computeHourlyOverage: the whole overrun rounds up to the next hour
   // once the allowance is passed.
   const billedHours = overtimeMin > GRACE_MINUTES ? Math.ceil(overtimeMin / 60) : 0;
-  const projectedCharge = billedHours * (hourlyRate ?? 0);
+  const projectedCharge = billedHours * rate;
 
   const state: "running" | "grace" | "billing" =
     overtimeMin === 0 ? "running" : overtimeMin <= GRACE_MINUTES ? "grace" : "billing";

@@ -7,6 +7,7 @@ import { Link, useParams, useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { CharterBadge, CharterDetails, TripExtras, type TripExtra } from "@/components/TripExtrasAndCharter";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import mapboxgl from "mapbox-gl";
@@ -36,6 +37,13 @@ type BookingDetail = {
   hasRating?: boolean;
   existingRating?: number | null;
   existingComment?: string | null;
+  extras?: TripExtra[] | null;
+  charterMode?: string | null;
+  charterHours?: number | null;
+  maxMilesPerHour?: number | null;
+  hourlyRate?: number | null;
+  extraCharge?: number | null;
+  overageMinutes?: number | null;
 };
 
 type DriverLocation = {
@@ -639,7 +647,10 @@ function PassengerRideDetailInner() {
 
             {/* Trip Details */}
             <div className="bg-card border border-border p-5 sm:p-6">
-              <h2 className="font-serif text-xl mb-6">Trip Details</h2>
+              <h2 className="font-serif text-xl mb-6 flex flex-wrap items-center gap-3">
+                <span>Trip Details</span>
+                <CharterBadge booking={booking} />
+              </h2>
               <div className="space-y-5 relative before:absolute before:left-[1.1rem] before:top-4 before:bottom-4 before:w-px before:bg-border">
                 <div className="relative flex items-start gap-4">
                   <div className="bg-primary w-4 h-4 rounded-full relative z-10 mt-1 flex-shrink-0 ring-2 ring-primary/20" />
@@ -713,13 +724,38 @@ function PassengerRideDetailInner() {
                 </h2>
                 <div className="space-y-3 text-sm mb-5">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Base Fare</span>
+                    <span className="text-muted-foreground">
+                      {booking.charterMode === "hourly" && booking.charterHours
+                        ? `Hourly charter · ${booking.charterHours} hr${booking.charterHours === 1 ? "" : "s"}`
+                        : "Base Fare"}
+                    </span>
                     <span>${(booking.priceQuoted * 0.8).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Taxes & Fees</span>
                     <span>${(booking.priceQuoted * 0.2).toFixed(2)}</span>
                   </div>
+                  {/* The add-ons the passenger chose. Charged at booking and,
+                      until now, itemised nowhere they could see. */}
+                  {(booking.extras ?? []).map(e => (
+                    <div key={e.id} className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        {e.name}{e.quantity > 1 ? ` × ${e.quantity}` : ""}
+                      </span>
+                      <span>${Number(e.total).toFixed(2)}</span>
+                    </div>
+                  ))}
+                  {booking.extraCharge != null && Number(booking.extraCharge) > 0 && (
+                    <div className="flex justify-between text-amber-300">
+                      <span>
+                        Extra time
+                        {booking.overageMinutes != null && (
+                          <span className="text-amber-300/60 text-xs"> · {booking.overageMinutes} min over</span>
+                        )}
+                      </span>
+                      <span>+${Number(booking.extraCharge).toFixed(2)}</span>
+                    </div>
+                  )}
                   {booking.discountAmount != null && booking.discountAmount > 0 && (
                     <div className="flex justify-between text-green-400">
                       <span>Discount</span>
@@ -735,10 +771,16 @@ function PassengerRideDetailInner() {
                   <div className="flex justify-between font-medium text-base pt-3 border-t border-border">
                     <span>Total</span>
                     <span className="text-primary">
-                      ${(booking.priceQuoted + (booking.tipAmount != null ? Number(booking.tipAmount) : 0)).toFixed(2)}
+                      ${(
+                        booking.priceQuoted
+                        + (booking.tipAmount != null ? Number(booking.tipAmount) : 0)
+                        + (booking.extras ?? []).reduce((sum, e) => sum + Number(e.total), 0)
+                        + Number(booking.extraCharge ?? 0)
+                      ).toFixed(2)}
                     </span>
                   </div>
                 </div>
+                <CharterDetails booking={booking} audience="passenger" />
                 <div className="flex items-center justify-between gap-2 bg-background p-3">
                   <span className="text-xs text-muted-foreground">
                     Billed via {booking.status === "awaiting_payment" ? "pending payment" : "card on file"}

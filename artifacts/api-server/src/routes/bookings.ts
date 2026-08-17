@@ -455,7 +455,14 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(bookingsTable.createdAt));
 
-    res.json(rows.map(({ booking, userRole }) => ({ ...parseBooking(booking), userRole: userRole ?? null })));
+    // Extras attached here too. This branch was the one that got missed, which
+    // is why the admin list showed no add-ons while the driver portal did.
+    const adminExtras = await loadBookingExtras(rows.map(r => r.booking.id));
+    res.json(rows.map(({ booking, userRole }) => ({
+      ...parseBooking(booking),
+      extras: adminExtras.get(booking.id) ?? [],
+      userRole: userRole ?? null,
+    })));
     return;
   }
 

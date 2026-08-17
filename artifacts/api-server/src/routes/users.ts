@@ -4,6 +4,7 @@ import { db, usersTable, bookingsTable, userFavoriteDriversTable, driversTable, 
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { ensureUniqueReferralCode, fetchReferralCreditAmount } from "../lib/referrals.js";
 import { serializeBooking } from "../lib/serializeBooking.js";
+import { loadBookingExtras } from "../lib/bookingExtras.js";
 import {
   ListUsersQueryParams,
   ListUsersResponse,
@@ -199,7 +200,34 @@ router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> =
   // fare_subtotal, so the response schema rejected every booking that had one
   // and the passenger's "My Rides" page — upcoming and past alike — showed
   // nothing at all. See lib/serializeBooking.ts.
-  res.json(GetUserBookingsResponse.parse(bookings.map(serializeBooking)));
+  //
+  // The validated shape is then RE-EXTENDED, because zod object parsing strips
+  // unknown keys: every field not in the generated contract — the charter
+  // terms, the add-ons, the overtime — was being validated away here before it
+  // could reach the browser. That is why the passenger dashboard and My Rides
+  // showed neither "hourly" nor the extras while the driver portal, which does
+  // not go through a generated schema, showed both. Validating the contract and
+  // then adding to it keeps the contract honest without making it the ceiling.
+  const validated = GetUserBookingsResponse.parse(bookings.map(serializeBooking));
+  const extrasByBooking = await loadBookingExtras(bookings.map(b => b.id));
+  const byId = new Map(bookings.map(b => [b.id, serializeBooking(b)]));
+
+  res.json(
+    validated.map(v => {
+      const full = byId.get(v.id);
+      return {
+        ...v,
+        extras: extrasByBooking.get(v.id) ?? [],
+        charterMode: full?.charterMode ?? null,
+        charterHours: full?.charterHours ?? null,
+        maxMilesPerHour: full?.maxMilesPerHour ?? null,
+        hourlyRate: full?.hourlyRate ?? null,
+        extraCharge: full?.extraCharge ?? 0,
+        tripStartedAt: full?.tripStartedAt ?? null,
+        status: full?.status ?? v.status,
+      };
+    }),
+  );
 });
 
 // ─── Referral program ─────────────────────────────────────────────────────────

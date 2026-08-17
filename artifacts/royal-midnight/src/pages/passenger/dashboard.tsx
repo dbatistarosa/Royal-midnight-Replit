@@ -3,6 +3,7 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
+import { CharterBadge, TripExtras, type TripExtra } from "@/components/TripExtrasAndCharter";
 import { LayoutDashboard, Car, MapPin, User, MessageSquare, Plus, BarChart2, Gift, Copy, Check } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
@@ -120,14 +121,21 @@ function PassengerDashboardInner() {
           {upcomingBookings.map((booking) => (
             <div key={booking.id} className="bg-card border border-border rounded-lg p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-sm text-primary font-medium mb-1">
-                  {format(new Date(booking.pickupAt), "PPP 'at' p")}
+                <div className="text-sm text-primary font-medium mb-1 flex flex-wrap items-center gap-2">
+                  <span>{format(new Date(booking.pickupAt), "PPP 'at' p")}</span>
+                  <CharterBadge booking={booking as never} />
                 </div>
                 <div className="font-medium text-base sm:text-lg mb-1 truncate">{booking.pickupAddress}</div>
                 <div className="text-muted-foreground text-sm flex items-center gap-2 min-w-0">
                   <span className="w-1 h-1 rounded-full bg-muted-foreground flex-shrink-0"></span>
                   <span className="truncate">{booking.dropoffAddress}</span>
                 </div>
+                {/* The add-ons the passenger paid for, which appeared on no
+                    passenger-facing screen at all until now. */}
+                <TripExtras
+                  extras={(booking as unknown as { extras?: TripExtra[] | null }).extras}
+                  audience="passenger"
+                />
               </div>
               <div className="flex sm:flex-col items-center sm:items-end gap-3 sm:gap-2 flex-shrink-0">
                 <div className="text-xs px-2 py-1 bg-primary/10 text-primary border border-primary/20 uppercase tracking-widest">

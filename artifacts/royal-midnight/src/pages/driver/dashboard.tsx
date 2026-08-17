@@ -788,7 +788,7 @@ function AvailableRideCard({
             }`}
           >
             {e.name}{e.quantity > 1 ? ` ×${e.quantity}` : ""}
-            {e.paidToDriver && <span className="text-emerald-400/70">+${e.total.toFixed(0)}</span>}
+            {e.paidToDriver && <span className="text-emerald-400/70">+${Number(e.total).toFixed(0)}</span>}
           </span>
         ))}
       </div>

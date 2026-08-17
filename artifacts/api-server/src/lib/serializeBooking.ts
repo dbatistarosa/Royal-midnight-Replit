@@ -22,15 +22,18 @@ import type { bookingsTable } from "@workspace/db";
  * two files would just reset the clock on the next numeric column.
  */
 /**
- * Deliberately converts exactly the fields the routes/bookings.ts copy already
- * converted, and no more. The other numeric columns (extra_charge, total_price,
- * hourly_rate, …) also arrive as strings, but they are consumed as strings by
- * screens that are working today; turning them into numbers here would be a
- * silent shape change across every booking endpoint at once, which is a
- * regression risk with no bug behind it. If one of them ever needs to be a
- * number in a contract, it belongs here — with its callers checked.
+ * Every money column this shape exposes is converted, and the reason is not
+ * tidiness.
+ *
+ * hourly_rate was left as a string here on the grounds that no screen consumed
+ * it. Then the charter panels started rendering it, called `.toFixed(2)` on
+ * what was actually "75.00", and threw — taking the whole admin bookings page
+ * to the error boundary the moment an hourly booking existed. A `numeric`
+ * column that reaches the UI is a number or it is a crash waiting for the first
+ * row that populates it.
  */
 export function serializeBooking(b: typeof bookingsTable.$inferSelect) {
+  const num = (v: string | null | undefined) => (v != null ? parseFloat(v) : null);
   const priceQuoted = parseFloat(b.priceQuoted ?? "0");
   return {
     ...b,
@@ -38,10 +41,19 @@ export function serializeBooking(b: typeof bookingsTable.$inferSelect) {
     // Commission base: falls back to priceQuoted for legacy rows / booking paths
     // that don't supply it (e.g. admin manual bookings).
     fareSubtotal: b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : priceQuoted,
-    discountAmount: b.discountAmount != null ? parseFloat(b.discountAmount) : null,
-    tipAmount: b.tipAmount != null ? parseFloat(b.tipAmount) : null,
+    discountAmount: num(b.discountAmount),
+    tipAmount: num(b.tipAmount),
+    // Hourly charter terms, rendered by the charter panels in all three portals.
+    hourlyRate: num(b.hourlyRate),
+    extraMileRate: num(b.extraMileRate),
+    extraCharge: b.extraCharge != null ? parseFloat(b.extraCharge) : 0,
+    totalPrice: num(b.totalPrice),
+    estimatedDistanceMiles: num(b.estimatedDistanceMiles),
+    refundAmount: num(b.refundAmount),
     pickupAt: b.pickupAt.toISOString(),
     authorizedAt: b.authorizedAt != null ? b.authorizedAt.toISOString() : null,
+    tripStartedAt: b.tripStartedAt != null ? b.tripStartedAt.toISOString() : null,
+    tripEndedAt: b.tripEndedAt != null ? b.tripEndedAt.toISOString() : null,
     createdAt: b.createdAt.toISOString(),
     updatedAt: b.updatedAt.toISOString(),
   };
