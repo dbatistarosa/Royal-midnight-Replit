@@ -1,6 +1,9 @@
 import { eq, and, gt, isNull, gte, or } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { db, pool } from "@workspace/db";
+// `pool` went unused when the reminder body moved out to tripReminders.ts.
+// noUnusedLocals is off, so the build tolerated it — which is exactly why it
+// sat there looking like this file still opened raw connections.
+import { db } from "@workspace/db";
 import { logger } from "./logger";
 import { safeDecryptField } from "./encrypt.js";
 // Reminders and driver-confirmation enforcement live in their own module now:

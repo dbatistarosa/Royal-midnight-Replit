@@ -1,6 +1,7 @@
 import { and, eq, isNull, isNotNull, lte, sql } from "drizzle-orm";
 import { db, bookingsTable, driversTable, bookingDriverBlocksTable, driverWarningsTable, WARNINGS_BEFORE_SUSPENSION } from "@workspace/db";
 import { logger } from "./logger";
+import { getDriverWindows } from "./driverWindows.js";
 
 /**
  * Trip reminders and driver-confirmation enforcement.
@@ -170,15 +171,21 @@ async function sendStageEmails(row: ReminderRow, label: string, stageKey: "24h" 
 }
 
 /**
- * One hour before pickup, a driver who has not confirmed loses the trip.
+ * Shortly before pickup, a driver who has not confirmed loses the trip.
  *
  * The trip returns to the open pool for everyone else, the driver is blocked
  * from seeing it again, and the incident is recorded against their account.
  * Three warnings suspends them.
+ *
+ * The deadline comes from lib/driverWindows.ts rather than being written here,
+ * because it only makes sense relative to when the driver is first *allowed* to
+ * confirm. Those two numbers used to be the same (60 minutes), so a driver
+ * could be released a minute after their confirmation window opened.
  */
 async function releaseUnconfirmedDrivers(): Promise<void> {
   const now = new Date();
-  const deadline = new Date(now.getTime() + 60 * 60 * 1000);
+  const { releaseMinutes, graceMinutes } = await getDriverWindows();
+  const deadline = new Date(now.getTime() + releaseMinutes * 60 * 1000);
 
   const overdue = await db
     .select({
@@ -224,7 +231,9 @@ async function releaseUnconfirmedDrivers(): Promise<void> {
         driverId,
         bookingId: booking.id,
         reason: "no_confirmation",
-        notes: `Did not confirm within one hour of pickup for RM-${String(booking.id).padStart(4, "0")}`,
+        notes:
+          `Did not mark On the Way for RM-${String(booking.id).padStart(4, "0")} ` +
+          `within the ${graceMinutes}-minute confirmation window before pickup`,
       });
 
       const [{ count }] = await db

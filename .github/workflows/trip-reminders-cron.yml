@@ -1,9 +1,14 @@
 name: Trip Reminders Cron
 
-# Vercel's Hobby plan only allows daily cron schedules, but trip reminders need
-# to fire every ~10 minutes to catch bookings 55-65 minutes before pickup.
-# This workflow is the free workaround: GitHub Actions pings the existing
-# /api/cron/trip-reminders endpoint on a tight schedule instead.
+# Vercel's Hobby plan only allows daily cron schedules, so GitHub Actions pings
+# /api/cron/trip-reminders instead. This comment used to describe catching
+# bookings "55-65 minutes before pickup" — that design is gone precisely because
+# this schedule cannot honour it: `*/10` is best-effort, and in practice fires
+# every 40 to 73 minutes, so a ten-minute window matched nothing on most runs.
+#
+# The endpoint is now due-based and idempotent ("is pickup within 24h / 2h, and
+# has that reminder not been sent?"), so it catches up on its own however late
+# this workflow is. The cadence below is therefore a floor, not a contract.
 on:
   schedule:
     - cron: "*/10 * * * *"

@@ -10,6 +10,8 @@ import { hasDriverBlockTable } from "../lib/schemaGuards.js";
 import { loadZoneCoverage, isTripVisibleToDriver, loadPickupPoints, loadPickupPoint, savePickupPoint } from "../lib/serviceZones.js";
 import { serializeBooking } from "../lib/serializeBooking.js";
 import { recordAcceptance, recordAcceptances } from "../lib/legalAcceptance.js";
+import { driverBlockReason, driverBlockMessage } from "../lib/driverEligibility.js";
+import { getDriverWindows } from "../lib/driverWindows.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
 import { HOURLY_RATES, DEFAULT_RATE_PER_MILE, computeQuote, readQuoteExtensions } from "./quote.js";
 import { evaluatePromoCode } from "./promos.js";
@@ -312,12 +314,15 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
         totalRides: driversTable.totalRides,
         approvalStatus: driversTable.approvalStatus,
         complianceHold: driversTable.complianceHold,
+        // Needed by driverBlockReason: the three-warning suspension writes
+        // "paused" here, and nothing used to read it.
+        status: driversTable.status,
       };
       const byUserId = await db.select(driverPoolColumns)
         .from(driversTable)
         .where(eq(driversTable.userId, caller.userId))
         .orderBy(desc(driversTable.totalRides));
-      let driverRow: { id: number; approvalStatus: string; complianceHold: boolean } | undefined = byUserId[0];
+      let driverRow: { id: number; approvalStatus: string; complianceHold: boolean; status: string } | undefined = byUserId[0];
 
       // Fallback: match by email if userId link was never set
       if (!driverRow) {
@@ -350,9 +355,10 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
         // check existed on the write and was missing on the read. Same criteria
         // here, deliberately including complianceHold: a driver with an expired
         // licence may not work, so they have no reason to see the queue either.
-        if (driverRow.approvalStatus !== "approved" || driverRow.complianceHold) {
+        const poolBlockReason = driverBlockReason(driverRow);
+        if (poolBlockReason) {
           req.log.warn(
-            { ip: req.ip, path: req.path, userId: caller.userId, driverId: driverRow.id, approvalStatus: driverRow.approvalStatus },
+            { ip: req.ip, path: req.path, userId: caller.userId, driverId: driverRow.id, reason: poolBlockReason },
             "authorization_failed",
           );
           res.json([]);
@@ -1299,19 +1305,34 @@ router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void>
   }
 
   const byUserId = await db
-    .select({ id: driversTable.id, approvalStatus: driversTable.approvalStatus, complianceHold: driversTable.complianceHold, totalRides: driversTable.totalRides })
+    .select({
+      id: driversTable.id,
+      approvalStatus: driversTable.approvalStatus,
+      complianceHold: driversTable.complianceHold,
+      status: driversTable.status,
+      totalRides: driversTable.totalRides,
+    })
     .from(driversTable)
     .where(eq(driversTable.userId, caller.userId))
     .orderBy(desc(driversTable.totalRides));
   const driverRow = byUserId[0];
 
-  if (!driverRow || driverRow.approvalStatus !== "approved") {
+  if (!driverRow) {
     res.status(403).json({ error: "Driver not approved" });
     return;
   }
 
-  if (driverRow.complianceHold) {
-    res.status(403).json({ error: "compliance_hold", message: "Your account is on a compliance hold due to an expired document. Please upload a renewed document to resume accepting rides." });
+  // One shared test rather than a hand-written pair per gate. The suspension
+  // set by the three-warning rule lives in `status`, which neither this route
+  // nor the pool query used to read — a suspended driver kept full access while
+  // being emailed that they had none.
+  const blockReason = driverBlockReason(driverRow);
+  if (blockReason) {
+    req.log.warn(
+      { ip: req.ip, path: req.path, userId: caller.userId, driverId: driverRow.id, reason: blockReason },
+      "authorization_failed",
+    );
+    res.status(403).json({ error: blockReason, message: driverBlockMessage(blockReason) });
     return;
   }
 
@@ -1564,9 +1585,18 @@ router.post("/bookings/:id/trip/on-way", requireAuth, async (req, res): Promise<
     return;
   }
 
+  // The window a driver may confirm in, and the deadline by which they must
+  // have confirmed, are resolved together — they used to be the same 60 minutes
+  // in two different files, which meant a driver could be stripped of the trip
+  // a minute after becoming able to keep it. See lib/driverWindows.ts.
+  const { confirmWindowMinutes } = await getDriverWindows();
   const minsUntilPickup = (new Date(booking.pickupAt).getTime() - Date.now()) / 60_000;
-  if (minsUntilPickup > 60) {
-    res.status(400).json({ error: "On the Way can only be activated within 60 minutes of pickup", minsUntilPickup: Math.round(minsUntilPickup) });
+  if (minsUntilPickup > confirmWindowMinutes) {
+    res.status(400).json({
+      error: `On the Way can only be activated within ${confirmWindowMinutes} minutes of pickup`,
+      minsUntilPickup: Math.round(minsUntilPickup),
+      confirmWindowMinutes,
+    });
     return;
   }
 

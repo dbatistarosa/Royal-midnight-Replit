@@ -42,6 +42,24 @@ const SETTING_FIELDS: SettingField[] = [
     step: 1,
   },
   {
+    key: "driver_confirm_window_minutes",
+    label: "Chauffeur Confirmation Window",
+    description: "How early a chauffeur may mark themselves On the Way, in minutes before pickup. Must leave them enough time to actually set off — a trip an hour's drive away has to be started well before this.",
+    suffix: "minutes",
+    min: 30,
+    max: 480,
+    step: 15,
+  },
+  {
+    key: "driver_release_minutes",
+    label: "Chauffeur Release Deadline",
+    description: "Minutes before pickup at which a chauffeur who has not marked On the Way loses the trip and receives a warning. Always kept at least 30 minutes inside the confirmation window above, so nobody is penalised for missing a window that had barely opened.",
+    suffix: "minutes",
+    min: 5,
+    max: 240,
+    step: 5,
+  },
+  {
     key: "florida_tax_rate",
     label: "Florida Tax Rate",
     description: "Applied to all bookings as a percentage of the subtotal (base + distance + airport fee).",
@@ -80,6 +98,8 @@ const SETTING_FIELDS: SettingField[] = [
 const SERVER_DEFAULTS: Record<string, string> = {
   min_booking_hours: "2",
   min_charter_hours: "3",
+  driver_confirm_window_minutes: "120",
+  driver_release_minutes: "45",
   florida_tax_rate: "0.07",
   driver_commission_pct: "70",
   cc_fee_pct: "0",
