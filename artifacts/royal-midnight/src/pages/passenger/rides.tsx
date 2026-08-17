@@ -8,6 +8,7 @@ import { Link } from "wouter";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { passengerNavItems } from "@/config/portalNav";
+import { CharterBadge, CharterDetails, TripExtras, type TripExtra } from "@/components/TripExtrasAndCharter";
 
 
 function vehicleLabel(vc?: string | null) {
@@ -32,6 +33,12 @@ type Booking = {
   promoCode?: string | null;
   discountAmount?: number | null;
   driverId?: number | null;
+  extras?: TripExtra[] | null;
+  charterMode?: string | null;
+  charterHours?: number | null;
+  maxMilesPerHour?: number | null;
+  hourlyRate?: number | null;
+  extraCharge?: number | string | null;
 };
 
 type PublicDriver = {
@@ -186,6 +193,8 @@ function BookingDetailPanel({ booking }: { booking: Booking }) {
           </div>
         </div>
       )}
+      <CharterDetails booking={booking} audience="passenger" />
+      <TripExtras extras={booking.extras} audience="passenger" />
       <div className="pt-2">
         <Link href={`/passenger/rides/${booking.id}`} className="text-xs text-primary hover:underline uppercase tracking-widest">
           Full Receipt
@@ -205,8 +214,9 @@ function RideCard({ booking, isPast }: { booking: Booking; isPast?: boolean }) {
       {/* Header row */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
         <div className="flex-1 min-w-0">
-          <div className="text-xs text-primary font-medium mb-1 uppercase tracking-widest">
-            #{booking.id} · {isPast ? format(new Date(booking.pickupAt), "PPP") : format(new Date(booking.pickupAt), "PPP 'at' p")}
+          <div className="text-xs text-primary font-medium mb-1 uppercase tracking-widest flex flex-wrap items-center gap-2">
+            <span>#{booking.id} · {isPast ? format(new Date(booking.pickupAt), "PPP") : format(new Date(booking.pickupAt), "PPP 'at' p")}</span>
+            <CharterBadge booking={booking} />
           </div>
           <div className="font-medium text-base mb-1 truncate">{booking.pickupAddress}</div>
           <div className="text-muted-foreground text-sm flex items-center gap-2">

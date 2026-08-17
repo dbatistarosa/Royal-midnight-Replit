@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, asc } from "drizzle-orm";
 import { db, fixedRoutesTable, extraServicesTable } from "@workspace/db";
+import { hasPgErrorCode, UNDEFINED_COLUMN } from "../lib/pgError.js";
 import type { AirportPriceEntry } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 
@@ -103,17 +104,56 @@ router.delete("/admin/fixed-routes/:id", requireAdmin, async (req, res): Promise
 
 // ── Extra Services (paid add-ons: pets, car seat, champagne, etc.) ─────────────
 
+/**
+ * paid_to_driver arrives with migration 0011, and this project deploys code and
+ * migrations separately. Naming the columns rather than select-star means the
+ * Extras screen keeps working in the window between the two — a select-star
+ * would throw undefined_column and take both endpoints down, which is exactly
+ * how adding a column to bookings took production down previously.
+ */
+const EXTRA_COLUMNS = {
+  id: extraServicesTable.id,
+  name: extraServicesTable.name,
+  description: extraServicesTable.description,
+  category: extraServicesTable.category,
+  price: extraServicesTable.price,
+  icon: extraServicesTable.icon,
+  isActive: extraServicesTable.isActive,
+  sortOrder: extraServicesTable.sortOrder,
+  createdAt: extraServicesTable.createdAt,
+};
+
+type ExtraOut = Record<string, unknown> & { price: unknown; paidToDriver?: boolean };
+const serializeExtra = (e: ExtraOut) => ({
+  ...e,
+  price: parseFloat(String(e.price)),
+  paidToDriver: e.paidToDriver ?? false,
+});
+
+async function listExtras(onlyActive: boolean) {
+  const order = [asc(extraServicesTable.sortOrder), asc(extraServicesTable.name)] as const;
+  try {
+    const q = db.select({ ...EXTRA_COLUMNS, paidToDriver: extraServicesTable.paidToDriver }).from(extraServicesTable);
+    const rows = onlyActive
+      ? await q.where(eq(extraServicesTable.isActive, true)).orderBy(...order)
+      : await q.orderBy(...order);
+    return rows.map(serializeExtra);
+  } catch (err) {
+    if (!hasPgErrorCode(err, UNDEFINED_COLUMN)) throw err;
+    const q = db.select(EXTRA_COLUMNS).from(extraServicesTable);
+    const rows = onlyActive
+      ? await q.where(eq(extraServicesTable.isActive, true)).orderBy(...order)
+      : await q.orderBy(...order);
+    return rows.map(serializeExtra);
+  }
+}
+
 router.get("/extras", async (_req, res): Promise<void> => {
-  const extras = await db.select().from(extraServicesTable)
-    .where(eq(extraServicesTable.isActive, true))
-    .orderBy(asc(extraServicesTable.sortOrder), asc(extraServicesTable.name));
-  res.json(extras.map(e => ({ ...e, price: parseFloat(String(e.price)) })));
+  res.json(await listExtras(true));
 });
 
 router.get("/admin/extras", requireAdmin, async (_req, res): Promise<void> => {
-  const extras = await db.select().from(extraServicesTable)
-    .orderBy(asc(extraServicesTable.sortOrder), asc(extraServicesTable.name));
-  res.json(extras.map(e => ({ ...e, price: parseFloat(String(e.price)) })));
+  res.json(await listExtras(false));
 });
 
 router.post("/admin/extras", requireAdmin, async (req, res): Promise<void> => {
@@ -142,9 +182,23 @@ router.patch("/admin/extras/:id", requireAdmin, async (req, res): Promise<void> 
   if (body.icon !== undefined) updateData.icon = body.icon ?? null;
   if (body.sortOrder !== undefined) updateData.sortOrder = body.sortOrder;
   if (body.isActive !== undefined) updateData.isActive = body.isActive;
-  const [e] = await db.update(extraServicesTable).set(updateData).where(eq(extraServicesTable.id, id)).returning();
-  if (!e) { res.status(404).json({ error: "Extra not found" }); return; }
-  res.json({ ...e, price: parseFloat(String(e.price)) });
+  if (body.paidToDriver !== undefined) updateData.paidToDriver = !!body.paidToDriver;
+  try {
+    const [e] = await db.update(extraServicesTable).set(updateData).where(eq(extraServicesTable.id, id))
+      .returning({ ...EXTRA_COLUMNS, paidToDriver: extraServicesTable.paidToDriver });
+    if (!e) { res.status(404).json({ error: "Extra not found" }); return; }
+    res.json(serializeExtra(e));
+  } catch (err) {
+    if (!hasPgErrorCode(err, UNDEFINED_COLUMN)) throw err;
+    if (body.paidToDriver !== undefined) {
+      res.status(503).json({ error: "Driver payout on extras is not available yet — migration 0011 has not been applied to this database." });
+      return;
+    }
+    delete updateData.paidToDriver;
+    const [e] = await db.update(extraServicesTable).set(updateData).where(eq(extraServicesTable.id, id)).returning(EXTRA_COLUMNS);
+    if (!e) { res.status(404).json({ error: "Extra not found" }); return; }
+    res.json(serializeExtra(e));
+  }
 });
 
 router.delete("/admin/extras/:id", requireAdmin, async (req, res): Promise<void> => {

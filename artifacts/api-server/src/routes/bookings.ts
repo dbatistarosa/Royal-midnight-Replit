@@ -10,6 +10,8 @@ import { hasDriverBlockTable } from "../lib/schemaGuards.js";
 import { loadZoneCoverage, isTripVisibleToDriver, loadPickupPoints, loadPickupPoint, savePickupPoint } from "../lib/serviceZones.js";
 import { serializeBooking } from "../lib/serializeBooking.js";
 import { recordAcceptance, recordAcceptances } from "../lib/legalAcceptance.js";
+import { loadBookingExtras, loadExtrasFor, driverExtrasTotal } from "../lib/bookingExtras.js";
+import { computeHourlyOverage } from "../lib/hourlyOverage.js";
 import { driverBlockReason, driverBlockMessage } from "../lib/driverEligibility.js";
 import { getDriverWindows } from "../lib/driverWindows.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
@@ -214,16 +216,47 @@ function maskPassengerName(raw: unknown): string {
   return `${first} ${parts[parts.length - 1]!.charAt(0).toUpperCase()}.`;
 }
 
+/**
+ * What the chauffeur is shown for a trip, and what they will be paid for it.
+ *
+ * Three components, and they are paid on different terms:
+ *
+ *   fare      — commission on the undiscounted, pre-tax, pre-fee subtotal.
+ *               Company promos and card fees never reduce it.
+ *   overtime  — same commission. It is time worked like any other.
+ *   extras    — the ones flagged paid_to_driver, in FULL with no commission.
+ *               These are the chauffeur's own work or equipment (carrying a
+ *               pet, fitting a car seat), so the company takes no share.
+ *               Champagne and flowers are company goods and are excluded.
+ *
+ * Extras were previously absent from this entirely: they are not part of
+ * fare_subtotal, so a chauffeur who fitted a car seat was paid nothing for it.
+ */
 function toDriverView<T extends { priceQuoted: number; fareSubtotal: number }>(
   booking: T,
-  commissionPct: number
-): Omit<T, "priceQuoted" | "fareSubtotal"> & { driverEarnings: number } {
+  commissionPct: number,
+  opts: { driverExtras?: number; extraCharge?: number } = {},
+): Omit<T, "priceQuoted" | "fareSubtotal"> & {
+  driverEarnings: number;
+  driverFareEarnings: number;
+  driverExtrasEarnings: number;
+  driverOvertimeEarnings: number;
+} {
   const { priceQuoted, fareSubtotal, ...rest } = booking;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  const driverFareEarnings = round2(fareSubtotal * commissionPct);
+  const driverOvertimeEarnings = round2((opts.extraCharge ?? 0) * commissionPct);
+  const driverExtrasEarnings = round2(opts.driverExtras ?? 0);
+
   return {
     ...rest,
-    // Commission is on the undiscounted, pre-tax/pre-fee subtotal — drivers are
-    // unaffected by company promos/coupons and never see priceQuoted/fareSubtotal directly.
-    driverEarnings: Math.round(fareSubtotal * commissionPct * 100) / 100,
+    // Broken out as well as totalled so the driver can see why they are paid
+    // what they are paid, rather than one number they cannot check.
+    driverFareEarnings,
+    driverOvertimeEarnings,
+    driverExtrasEarnings,
+    driverEarnings: round2(driverFareEarnings + driverOvertimeEarnings + driverExtrasEarnings),
   };
 }
 
@@ -465,15 +498,24 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     // GET /bookings/:id. vipNotes in particular is admin-only elsewhere:
     // PATCH /users/:id refuses to let anyone but an admin write it.
     if (isDriverOpenPoolQuery) {
+      // Extras ARE included in the broadcast, unlike contact details: a car
+      // seat or a pet changes whether a driver can take the trip at all, so
+      // withholding it until acceptance would mean accepting blind. They carry
+      // no personal information.
+      const poolExtras = await loadBookingExtras(driverBookings.map(b => b.id));
       res.json(
-        driverBookings.map(b => ({
-          ...toDriverView(b, commissionPct),
-          passengerName: maskPassengerName((b as { passengerName?: unknown }).passengerName),
-          passengerEmail: null,
-          passengerPhone: null,
-          specialRequests: null,
-          passengerPreferences: null,
-        })),
+        driverBookings.map(b => {
+          const extras = poolExtras.get(b.id) ?? [];
+          return {
+            ...toDriverView(b, commissionPct, { driverExtras: driverExtrasTotal(extras) }),
+            extras,
+            passengerName: maskPassengerName((b as { passengerName?: unknown }).passengerName),
+            passengerEmail: null,
+            passengerPhone: null,
+            specialRequests: null,
+            passengerPreferences: null,
+          };
+        }),
       );
       return;
     }
@@ -509,20 +551,28 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       }
     }
 
+    const assignedExtras = await loadBookingExtras(driverBookings.map(b => b.id));
     res.json(
       driverBookings.map(b => {
-        const view = toDriverView(b, commissionPct);
+        const extras = assignedExtras.get(b.id) ?? [];
+        const view = toDriverView(b, commissionPct, {
+          driverExtras: driverExtrasTotal(extras),
+          extraCharge: parseFloat(String((b as { extraCharge?: unknown }).extraCharge ?? "0")) || 0,
+        });
         const uid = (b as any).userId as number | null;
         const passengerPreferences = uid ? (prefsByUserId.get(uid) ?? null) : null;
-        return { ...view, passengerPreferences };
+        return { ...view, extras, passengerPreferences };
       })
     );
     return;
   }
 
   // Return data as-is for passenger/corporate — skip Zod re-validation to avoid
-  // enum mismatches from legacy seeded rows with old vehicleClass values
-  res.json(parsed2);
+  // enum mismatches from legacy seeded rows with old vehicleClass values.
+  // Extras are attached because the passenger paid for them and had no way to
+  // see, on any screen, what they had actually booked.
+  const listExtras = await loadBookingExtras(parsed2.map(b => b.id));
+  res.json(parsed2.map(b => ({ ...b, extras: listExtras.get(b.id) ?? [] })));
 });
 
 router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
@@ -1034,7 +1084,14 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
       return;
     }
     const commissionPct = await getCommissionPct();
-    res.json(toDriverView(parseBooking(booking), commissionPct));
+    const extras = await loadExtrasFor(booking.id);
+    res.json({
+      ...toDriverView(parseBooking(booking), commissionPct, {
+        driverExtras: driverExtrasTotal(extras),
+        extraCharge: parseFloat(String(booking.extraCharge ?? "0")) || 0,
+      }),
+      extras,
+    });
     return;
   }
 
@@ -1063,13 +1120,14 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     const base = parseBooking(booking);
     return res.json({
       ...base,
+      extras: await loadExtrasFor(booking.id),
       hasRating: existingReview != null,
       existingRating: existingReview?.rating ?? null,
       existingComment: existingReview?.comment ?? null,
     });
   }
 
-  res.json(parseBooking(booking));
+  res.json({ ...parseBooking(booking), extras: await loadExtrasFor(booking.id) });
 });
 
 // GET /bookings/:id/flight-status — live flight status for bookings with a flight number.
@@ -1725,16 +1783,33 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
     return;
   }
 
-  const extraCharge = parseFloat(String(booking.extraCharge ?? "0")) || 0;
+  // Hourly overage, computed here rather than by the cron that was planned and
+  // never written. trip/start froze hourly_rate onto the row for exactly this,
+  // and until now extra_charge was read but never set — charters ran long and
+  // nobody was billed. The clock is the passenger's actual pickup
+  // (trip_started_at), so a driver waiting at the kerb does not burn the block.
+  const endedAt = new Date();
+  const overage = computeHourlyOverage({
+    startedAt: booking.tripStartedAt,
+    endedAt,
+    contractedHours: booking.charterHours,
+    hourlyRate: booking.hourlyRate != null ? parseFloat(String(booking.hourlyRate)) : null,
+  });
+
+  // An amount already recorded by hand from the admin screen wins: this must
+  // not overwrite a negotiated adjustment on a re-run.
+  const existingExtra = parseFloat(String(booking.extraCharge ?? "0")) || 0;
+  const extraCharge = existingExtra > 0 ? existingExtra : overage.extraCharge;
   const totalPrice = parseFloat(String(booking.priceQuoted)) + extraCharge;
 
   const [updated] = await db
     .update(bookingsTable)
     .set({
       status: "completed",
-      tripEndedAt: new Date(),
+      tripEndedAt: endedAt,
+      extraCharge: String(extraCharge),
       totalPrice: String(totalPrice),
-      updatedAt: new Date(),
+      updatedAt: endedAt,
     })
     .where(and(eq(bookingsTable.id, id), eq(bookingsTable.status, "in_progress")))
     .returning();
@@ -1744,7 +1819,16 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
     return;
   }
 
-  res.json(parseBooking(updated));
+  res.json({ ...parseBooking(updated), overage });
+
+  // overage_minutes arrives with migration 0011 and is not on the drizzle
+  // schema, so it is written separately and best-effort — see the note in
+  // lib/db/src/schema/bookings.ts about why a new column must never be able to
+  // break the table's other queries.
+  if (overage.reason === "overage") {
+    db.execute(sql`UPDATE bookings SET overage_minutes = ${overage.overtimeMinutes} WHERE id = ${id}`)
+      .catch(() => { /* column not there yet; the charge itself is already saved */ });
+  }
 
   // Increment driver's completed ride count (fire-and-forget)
   if (updated.driverId) {

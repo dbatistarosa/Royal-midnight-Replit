@@ -44,6 +44,8 @@ type ExtraService = {
   price: number;
   icon?: string | null;
   isActive: boolean;
+  /** Paid to the chauffeur in full, with no commission taken. */
+  paidToDriver?: boolean;
   sortOrder: number;
 };
 
@@ -311,6 +313,22 @@ export default function AdminExtras() {
     fetchExtras();
   };
 
+  /** Who keeps this add-on's price. Surfaces the server's error rather than
+   *  letting the toggle silently snap back — a 503 here means migration 0011
+   *  has not been applied yet. */
+  const handleTogglePayout = async (e: ExtraService) => {
+    const res = await fetch(`${API_BASE}/admin/extras/${e.id}`, {
+      method: "PATCH", headers: authHdr,
+      body: JSON.stringify({ paidToDriver: !e.paidToDriver }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { error?: string } | null;
+      toast({ title: "Could not change who is paid", description: body?.error, variant: "destructive" });
+      return;
+    }
+    fetchExtras();
+  };
+
   // ── Helpers for route display ────────────────────────────────────────────────
 
   function getRouteAirportsSummary(r: FixedRoute): string {
@@ -464,15 +482,16 @@ export default function AdminExtras() {
                 <th className="px-5 py-3 text-left font-medium text-muted-foreground">Name</th>
                 <th className="px-5 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Category</th>
                 <th className="px-5 py-3 text-right font-medium text-muted-foreground">Price</th>
+                <th className="px-5 py-3 text-center font-medium text-muted-foreground">Paid To</th>
                 <th className="px-5 py-3 text-center font-medium text-muted-foreground">Active</th>
                 <th className="px-5 py-3 text-right font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {extrasLoading ? (
-                <tr><td colSpan={5} className="px-5 py-6 text-center text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading...</td></tr>
+                <tr><td colSpan={6} className="px-5 py-6 text-center text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin inline mr-2" />Loading...</td></tr>
               ) : !extras.length ? (
-                <tr><td colSpan={5} className="px-5 py-6 text-center text-muted-foreground">No extras yet. Add champagne, car seats, etc.</td></tr>
+                <tr><td colSpan={6} className="px-5 py-6 text-center text-muted-foreground">No extras yet. Add champagne, car seats, etc.</td></tr>
               ) : extras.map(e => (
                 <tr key={e.id} className={`hover:bg-background/50 ${!e.isActive ? "opacity-50" : ""}`}>
                   <td className="px-5 py-3">
@@ -481,6 +500,15 @@ export default function AdminExtras() {
                   </td>
                   <td className="px-5 py-3 hidden md:table-cell capitalize text-muted-foreground">{e.category}</td>
                   <td className="px-5 py-3 text-right font-medium text-primary">+${e.price.toFixed(2)}</td>
+                  <td className="px-5 py-3 text-center">
+                    <button
+                      onClick={() => handleTogglePayout(e)}
+                      title="Add-ons the chauffeur personally provides are paid to them in full, with no commission taken."
+                      className={`text-xs px-2 py-0.5 border rounded-full ${e.paidToDriver ? "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10" : "border-white/20 text-muted-foreground hover:bg-white/5"}`}
+                    >
+                      {e.paidToDriver ? "Chauffeur" : "Company"}
+                    </button>
+                  </td>
                   <td className="px-5 py-3 text-center">
                     <button onClick={() => handleToggleExtra(e)} className={`text-xs px-2 py-0.5 border rounded-full ${e.isActive ? "border-green-500/30 text-green-400 hover:bg-green-500/10" : "border-white/20 text-muted-foreground hover:bg-white/5"}`}>
                       {e.isActive ? "On" : "Off"}

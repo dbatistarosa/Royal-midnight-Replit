@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { driverNavItems } from "@/config/portalNav";
 import { PassengerPreferencesPanel, type PassengerPreferences } from "@/components/PassengerPreferencesPanel";
+import { CharterBadge, CharterDetails, TripExtras, type TripExtra } from "@/components/TripExtrasAndCharter";
+import { CharterTimer } from "@/components/CharterTimer";
 
 const LOCATION_LS_KEY = "rm_driver_location_sharing";
 
@@ -59,6 +61,16 @@ type BookingRow = {
   status: string;
   pickupAt: string;
   driverEarnings?: number;
+  driverFareEarnings?: number;
+  driverExtrasEarnings?: number;
+  driverOvertimeEarnings?: number;
+  extras?: TripExtra[] | null;
+  charterMode?: string | null;
+  charterHours?: number | null;
+  maxMilesPerHour?: number | null;
+  hourlyRate?: number | null;
+  tripStartedAt?: string | null;
+  extraCharge?: number | string | null;
   passengerPreferences?: PassengerPreferences | null;
   checklistCompletedAt?: string | null;
 };
@@ -355,6 +367,18 @@ function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; sh
             <div>
               <p className="text-[10px] uppercase tracking-widest text-gray-600">Your Earnings</p>
               <p className="text-xs text-primary font-semibold">${booking.driverEarnings.toFixed(2)}</p>
+              {/* Broken down when it is more than just the fare, so the driver
+                  can check the number rather than take it on trust. */}
+              {(booking.driverExtrasEarnings ?? 0) > 0 && (
+                <p className="text-[10px] text-emerald-400/80">
+                  incl. ${booking.driverExtrasEarnings!.toFixed(2)} add-ons
+                </p>
+              )}
+              {(booking.driverOvertimeEarnings ?? 0) > 0 && (
+                <p className="text-[10px] text-amber-300/80">
+                  incl. ${booking.driverOvertimeEarnings!.toFixed(2)} extra time
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -371,6 +395,17 @@ function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; sh
       {/* Shared with the admin passenger screen's "as the driver sees it"
           preview — same component, so the two can never drift apart. */}
       <PassengerPreferencesPanel preferences={booking.passengerPreferences} />
+      <CharterDetails booking={booking} audience="driver" />
+      <TripExtras extras={booking.extras} audience="driver" />
+      {/* Only once the passenger is actually aboard: the clock the customer is
+          billed from starts at pickup, not at assignment. */}
+      {booking.status === "in_progress" && (
+        <CharterTimer
+          startedAt={booking.tripStartedAt}
+          charterHours={booking.charterHours}
+          hourlyRate={booking.hourlyRate}
+        />
+      )}
     </div>
   );
 }
@@ -737,6 +772,27 @@ function AvailableRideCard({
         </div>
       )}
 
+      {/* Both are decision information, not detail: an hourly charter is a
+          different job from a transfer, and a car seat or a pet decides whether
+          this driver can take the trip at all. Neither belongs behind
+          "See Details" — and neither was shown anywhere before. */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <CharterBadge booking={booking} />
+        {(booking.extras ?? []).map(e => (
+          <span
+            key={e.id}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] uppercase tracking-widest border ${
+              e.paidToDriver
+                ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                : "border-white/15 bg-white/5 text-gray-400"
+            }`}
+          >
+            {e.name}{e.quantity > 1 ? ` ×${e.quantity}` : ""}
+            {e.paidToDriver && <span className="text-emerald-400/70">+${e.total.toFixed(0)}</span>}
+          </span>
+        ))}
+      </div>
+
       {expanded && <BookingDetailPanel booking={booking} />}
 
       <button
@@ -809,14 +865,21 @@ function TabAvailable({ authHeader, driverId, onRideAccepted }: { authHeader: st
   const [loading, setLoading] = useState(true);
 
   const loadTrips = () => {
-    Promise.all([
-      fetch(`${API_BASE}/bookings?status=pending`, { headers: { Authorization: authHeader } })
-        .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([])),
-      fetch(`${API_BASE}/bookings?status=authorized`, { headers: { Authorization: authHeader } })
-        .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([])),
-    ])
-      .then(([pending, authorized]) => {
-        const combined = [...pending, ...authorized];
+    // ONE request, not two.
+    //
+    // This used to fetch ?status=pending and ?status=authorized and concatenate
+    // the results. But the server treats either value as "the driver wants the
+    // open pool" and deliberately ignores the status filter — the pool has to
+    // include unassigned corporate bookings, which are "confirmed". So both
+    // calls returned the identical full pool and every trip was rendered twice.
+    fetch(`${API_BASE}/bookings?status=pending`, { headers: { Authorization: authHeader } })
+      .then(r => (r.ok ? (r.json() as Promise<BookingRow[]>) : Promise.resolve([])))
+      .then(pool => {
+        // Defensive: dedupe by id so this can never come back if the server
+        // ever does start returning overlapping sets.
+        const byId = new Map<number, BookingRow>();
+        for (const b of pool) byId.set(b.id, b);
+        const combined = [...byId.values()];
         combined.sort((a, b) => new Date(a.pickupAt).getTime() - new Date(b.pickupAt).getTime());
         setTrips(combined);
       })

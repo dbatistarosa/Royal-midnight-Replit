@@ -12,6 +12,8 @@ import { AIRLINES_BY_AIRPORT } from "@/data/airlines";
 import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 import { adminNavItems } from "@/config/portalNav";
 import { EditBookingModal } from "@/components/admin/EditBookingModal";
+import { CharterBadge, CharterDetails, TripExtras, type TripExtra } from "@/components/TripExtrasAndCharter";
+import { CharterTimer } from "@/components/CharterTimer";
 
 type AirportCode = "FLL" | "MIA" | "PBI";
 function detectAirportCode(address: string): AirportCode | null {
@@ -49,6 +51,14 @@ type BookingRow = {
   createdAt?: string | null;
   updatedAt?: string | null;
   existingRating?: number | null;
+  extras?: TripExtra[] | null;
+  charterMode?: string | null;
+  charterHours?: number | null;
+  maxMilesPerHour?: number | null;
+  hourlyRate?: number | null;
+  tripStartedAt?: string | null;
+  extraCharge?: number | string | null;
+  overageMinutes?: number | null;
 };
 
 type DriverOption = { id: number; name: string; status: string };
@@ -625,7 +635,15 @@ export default function AdminBookings() {
                       <div className="text-xs text-muted-foreground">{b.passengerEmail}</div>
                     </td>
                     <td className="px-5 py-4 hidden md:table-cell max-w-[180px] text-muted-foreground text-xs truncate">
-                      {b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}
+                      <div>{b.pickupAddress.split(",")[0]} → {b.dropoffAddress.split(",")[0]}</div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <CharterBadge booking={b} />
+                        {(b.extras ?? []).map(e => (
+                          <span key={e.id} className="inline-block px-1.5 py-0.5 text-[10px] uppercase tracking-widest border border-white/15 bg-white/5 text-gray-400">
+                            {e.name}{e.quantity > 1 ? ` ×${e.quantity}` : ""}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -884,6 +902,27 @@ export default function AdminBookings() {
                                 <div>
                                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><MessageSquare className="w-3 h-3" /> Special Requests</p>
                                   <p className="text-muted-foreground italic">{b.specialRequests}</p>
+                                </div>
+                              )}
+                              <CharterDetails booking={b} audience="admin" />
+                              <TripExtras extras={b.extras} audience="admin" />
+                              {b.status === "in_progress" && (
+                                <CharterTimer
+                                  startedAt={b.tripStartedAt}
+                                  charterHours={b.charterHours}
+                                  hourlyRate={b.hourlyRate}
+                                  audience="admin"
+                                />
+                              )}
+                              {Number(b.extraCharge ?? 0) > 0 && (
+                                <div className="border border-amber-400/30 bg-amber-400/10 px-3 py-2">
+                                  <p className="text-[10px] uppercase tracking-widest text-amber-400">Extra time charged</p>
+                                  <p className="text-amber-200 text-sm">
+                                    ${Number(b.extraCharge).toFixed(2)}
+                                    {b.overageMinutes != null && (
+                                      <span className="text-amber-300/70 text-xs"> · ran {b.overageMinutes} min over</span>
+                                    )}
+                                  </p>
                                 </div>
                               )}
                             </div>
