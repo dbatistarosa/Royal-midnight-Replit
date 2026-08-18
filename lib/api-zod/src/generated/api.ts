@@ -989,6 +989,10 @@ export const ListPromosResponseItem = zod.object({
   discountValue: zod.number(),
   minBookingAmount: zod.number().nullish(),
   maxUses: zod.number().nullish(),
+  // Hand-patched, like the keys above: zod.object() STRIPS anything not
+  // declared, so without this line the per-customer limit is silently
+  // dropped on the way in and on the way out.
+  maxUsesPerUser: zod.number().nullish(),
   usedCount: zod.number(),
   isActive: zod.boolean(),
   expiresAt: zod.coerce.date().nullish(),
@@ -1006,6 +1010,10 @@ export const CreatePromoBody = zod.object({
   discountValue: zod.number(),
   minBookingAmount: zod.number().nullish(),
   maxUses: zod.number().nullish(),
+  // Hand-patched, like the keys above: zod.object() STRIPS anything not
+  // declared, so without this line the per-customer limit is silently
+  // dropped on the way in and on the way out.
+  maxUsesPerUser: zod.number().nullish(),
   expiresAt: zod.string().nullish(),
 });
 
@@ -1021,7 +1029,7 @@ export const UpdatePromoBody = zod.object({
   expiresAt: zod.string().nullish(),
   // Hand-patched (like ErrorEnvelope/cabin prefs): without this key zod strips
   // `description` from the parsed body and promo-description edits silently no-op.
-  description: zod.string().nullish(),
+  description: zod.string().nullish(),  maxUsesPerUser: zod.number().nullish(),
 });
 
 export const UpdatePromoResponse = zod.object({
@@ -1032,6 +1040,10 @@ export const UpdatePromoResponse = zod.object({
   discountValue: zod.number(),
   minBookingAmount: zod.number().nullish(),
   maxUses: zod.number().nullish(),
+  // Hand-patched, like the keys above: zod.object() STRIPS anything not
+  // declared, so without this line the per-customer limit is silently
+  // dropped on the way in and on the way out.
+  maxUsesPerUser: zod.number().nullish(),
   usedCount: zod.number(),
   isActive: zod.boolean(),
   expiresAt: zod.coerce.date().nullish(),

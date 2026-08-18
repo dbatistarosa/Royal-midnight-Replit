@@ -764,7 +764,10 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
   let discountAmount = 0;
   let appliedPromoCode: string | null = null;
   if (parsed.data.promoCode) {
-    const promo = await evaluatePromoCode(parsed.data.promoCode, grossTotal);
+    // bookingUserId, so a per-customer limit is counted against the passenger
+    // this booking is actually for — including an assistant booking on a
+    // traveller's behalf, where the traveller is the one holding the offer.
+    const promo = await evaluatePromoCode(parsed.data.promoCode, grossTotal, bookingUserId);
     if (promo.valid && promo.discountAmount != null) {
       discountAmount = promo.discountAmount;
       appliedPromoCode = promo.code;

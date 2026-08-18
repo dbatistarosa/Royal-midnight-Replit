@@ -1,6 +1,6 @@
-﻿import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback, useRef } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, Pencil, Trash2, X, Loader2, Wallet, Gift, Building2 } from "lucide-react";
+import { LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare, BarChart, Settings, Plus, Pencil, Trash2, X, Loader2, Wallet, Gift, Building2, Upload, Image as ImageIcon } from "lucide-react";
 import { API_BASE } from "@/lib/constants";
 import { useAuth } from "@/contexts/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -9,6 +9,102 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { adminNavItems } from "@/config/portalNav";
 
+
+/**
+ * The vehicle photo shown on /fleet, /pricing and the booking vehicle picker.
+ *
+ * This was a bare text box that expected a path like "/business.webp" — i.e. a
+ * file someone had to add to the repo and redeploy. Everything else about a
+ * vehicle class (name, category, description, capacity) has always been
+ * editable here and updates those pages immediately; the photo was the one
+ * field that could not be changed without a developer.
+ *
+ * Uploads go to the PUBLIC bucket, because /fleet is rendered for visitors who
+ * have never signed in — a private-bucket object with a ten-minute signed URL
+ * would 404 for them. The URL box is kept underneath: existing rules point at
+ * static assets in /public, and those must keep working.
+ */
+function VehiclePhotoField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (file: File) => {
+    setUploading(true);
+    try {
+      const res = await fetch(`${API_BASE}/storage/public/uploads/request-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type || "application/octet-stream" }),
+      });
+      const body = await res.json().catch(() => null) as { uploadURL?: string; objectPath?: string; error?: string } | null;
+      if (!res.ok || !body?.uploadURL || !body.objectPath) {
+        throw new Error(body?.error || `Upload could not be started (HTTP ${res.status}).`);
+      }
+
+      const put = await fetch(body.uploadURL, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+      });
+      if (!put.ok) throw new Error("The image could not be uploaded to storage.");
+
+      onChange(body.objectPath);
+      toast({ title: "Photo uploaded", description: "Save the rule to publish it to the Fleet page." });
+    } catch (err) {
+      toast({
+        title: "Could not upload the photo",
+        description: err instanceof Error ? err.message : "Unexpected error.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start gap-3">
+        <div className="w-24 h-16 flex-shrink-0 border border-white/10 bg-white/5 overflow-hidden flex items-center justify-center">
+          {value ? (
+            <img src={value} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <ImageIcon className="w-5 h-5 text-muted-foreground" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <Button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="bg-white/10 hover:bg-white/20 text-white rounded-none text-xs uppercase tracking-widest h-9 px-4"
+          >
+            {uploading
+              ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Uploading…</>
+              : <><Upload className="w-3.5 h-3.5 mr-2" />{value ? "Replace photo" : "Upload photo"}</>}
+          </Button>
+          <p className="text-[11px] text-muted-foreground mt-1.5">
+            PNG, JPEG, WebP, AVIF or GIF, up to 8 MB. Appears on the Fleet page as soon as you save.
+          </p>
+        </div>
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/avif,image/gif"
+        className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) void handleFile(f); }}
+      />
+      <Input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className={INPUT}
+        placeholder="/business.webp"
+      />
+    </div>
+  );
+}
 
 type PricingRule = {
   id: number;
@@ -313,8 +409,8 @@ export default function AdminPricing() {
                 <Input value={form.category} onChange={e => setField("category", e.target.value)} className={INPUT} placeholder="e.g. Sedan, SUV" />
               </div>
               <div>
-                <label className={LABEL}>Image URL</label>
-                <Input value={form.imageUrl} onChange={e => setField("imageUrl", e.target.value)} className={INPUT} placeholder="/business.webp" />
+                <label className={LABEL}>Vehicle Photo</label>
+                <VehiclePhotoField value={form.imageUrl} onChange={v => setField("imageUrl", v)} />
               </div>
               <div>
                 <label className={LABEL}>Passengers</label>

@@ -1760,6 +1760,10 @@ components:
           type: ["number", "null"]
         maxUses:
           type: ["integer", "null"]
+        # Per-customer cap. Absent/null = unlimited per person, which is how
+        # every code behaved before this existed.
+        maxUsesPerUser:
+          type: ["integer", "null"]
         usedCount:
           type: integer
         isActive:
@@ -1788,6 +1792,10 @@ components:
           type: ["number", "null"]
         maxUses:
           type: ["integer", "null"]
+        # Per-customer cap. Absent/null = unlimited per person, which is how
+        # every code behaved before this existed.
+        maxUsesPerUser:
+          type: ["integer", "null"]
         expiresAt:
           type: ["string", "null"]
       required: [code, description, discountType, discountValue]
@@ -1797,6 +1805,8 @@ components:
       properties:
         isActive:
           type: ["boolean", "null"]
+        maxUsesPerUser:
+          type: ["integer", "null"]
         expiresAt:
           type: ["string", "null"]
 

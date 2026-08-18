@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
-import { db, promoCodesTable } from "@workspace/db";
-import { requireAdmin } from "../middleware/auth.js";
+import { eq, and, sql } from "drizzle-orm";
+import { db, promoCodesTable, bookingsTable } from "@workspace/db";
+import { requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { promoLimiter } from "../lib/rateLimit.js";
 import {
   ListPromosResponse,
@@ -69,10 +69,15 @@ export interface PromoEvaluation {
  *
  *  Extracted from the POST /promos/validate handler so booking creation can
  *  re-derive the discount server-side instead of trusting the amount the client
- *  claims (CN-001). This is read-only — it does not redeem the code. */
+ *  claims (CN-001). This is read-only — it does not redeem the code.
+ *
+ *  `userId` is what makes a per-person limit enforceable. Without it the only
+ *  cap available is the global one, and "one per customer" degrades to "one in
+ *  total, for whoever gets there first". */
 export async function evaluatePromoCode(
   rawCode: string,
   bookingAmount: number,
+  userId?: number | null,
 ): Promise<PromoEvaluation> {
   const invalid = (message: string): PromoEvaluation => ({
     valid: false, code: null, discountAmount: null, finalAmount: null, message,
@@ -86,6 +91,32 @@ export async function evaluatePromoCode(
   if (!promo || !promo.isActive) return invalid("Invalid or expired promo code");
   if (promo.expiresAt && new Date(promo.expiresAt) < new Date()) return invalid("Promo code has expired");
   if (promo.maxUses && promo.usedCount >= promo.maxUses) return invalid("Promo code usage limit reached");
+
+  // Per-person cap. Counted from this passenger's own bookings carrying the
+  // code — the booking row IS the record of a redemption, so a separate
+  // redemptions table would only be a second thing to keep in step.
+  //
+  // A code with this set cannot be honoured anonymously: there is no identity
+  // to count against, and quietly allowing it would mean the limit is bypassed
+  // by simply not signing in.
+  const perUser = promo.maxUsesPerUser ?? null;
+  if (perUser != null && perUser > 0) {
+    if (userId == null) {
+      return invalid("Sign in to use this promo code — it is limited per customer.");
+    }
+    const [row] = await db
+      .select({ used: sql<number>`count(*)::int` })
+      .from(bookingsTable)
+      .where(and(eq(bookingsTable.promoCode, code), eq(bookingsTable.userId, userId)));
+    const usedByThisUser = row?.used ?? 0;
+    if (usedByThisUser >= perUser) {
+      return invalid(
+        perUser === 1
+          ? "You have already used this promo code."
+          : `You have already used this promo code ${perUser} times.`,
+      );
+    }
+  }
 
   const minAmount = promo.minBookingAmount ? parseFloat(promo.minBookingAmount) : 0;
   if (bookingAmount < minAmount) {
@@ -107,7 +138,10 @@ export async function evaluatePromoCode(
 }
 
 // Brute-forcing short promo codes costs the attacker nothing without this.
-router.post("/promos/validate", promoLimiter(), async (req, res): Promise<void> => {
+// optionalAuth so a signed-in passenger is told the truth about a per-person
+// limit here, at the point they type the code, instead of being accepted on the
+// booking form and rejected when the server re-derives the discount.
+router.post("/promos/validate", promoLimiter(), optionalAuth, async (req, res): Promise<void> => {
   const parsed = ValidatePromoBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -115,7 +149,7 @@ router.post("/promos/validate", promoLimiter(), async (req, res): Promise<void> 
   }
 
   const { code, bookingAmount } = parsed.data;
-  const result = await evaluatePromoCode(code, bookingAmount);
+  const result = await evaluatePromoCode(code, bookingAmount, req.currentUser?.userId ?? null);
   res.json({
     valid: result.valid,
     discountAmount: result.discountAmount,
@@ -141,6 +175,9 @@ router.patch("/promos/:id", requireAdmin, async (req, res): Promise<void> => {
   if (parsed.data.isActive != null) updateData.isActive = parsed.data.isActive;
   if (parsed.data.expiresAt !== undefined) updateData.expiresAt = parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null;
   if (parsed.data.description != null) updateData.description = parsed.data.description;
+  // `!== undefined`, not `!= null`: null is a meaningful value here (it clears
+  // the per-customer cap back to unlimited), so it must reach the update.
+  if (parsed.data.maxUsesPerUser !== undefined) updateData.maxUsesPerUser = parsed.data.maxUsesPerUser;
 
   const [promo] = await db
     .update(promoCodesTable)

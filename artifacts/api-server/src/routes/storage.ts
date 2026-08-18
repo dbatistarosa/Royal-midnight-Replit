@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import { db, objectOwnersTable, driversTable, complianceDocumentsTable } from "@workspace/db";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { hasPgErrorCode, UNDEFINED_TABLE } from "../lib/pgError.js";
-import { requireAuth, type AuthUser } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, type AuthUser } from "../middleware/auth.js";
 import { signObjectPath, verifyObjectSignature } from "../lib/signedUrl.js";
 
 const router: IRouter = Router();
@@ -141,11 +141,22 @@ function setSafeDownloadHeaders(res: Response, sourceHeaders: Headers): void {
  *  but only from a whitelist. Echoing the stored blob's own type would let
  *  anything that ever writes an .html or .svg into the public bucket have it
  *  served as active content from this origin, which is stored XSS against an
- *  admin session. Nothing writes to that bucket today; this keeps it that way
- *  if something ever does. */
+ *  admin session. The fleet-image picker is now a writer (admin-only, images
+ *  only), which is exactly why this whitelist has to stay. */
 const SAFE_PUBLIC_TYPES = new Set([
   "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf",
 ]);
+
+/** What may be UPLOADED to the public bucket. A subset of SAFE_PUBLIC_TYPES:
+ *  PDFs are safe to serve but are not fleet photography, and the only writer of
+ *  this bucket is the vehicle-image picker. */
+const PUBLIC_UPLOAD_TYPES = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
+]);
+
+/** 8 MB. Generous for a hero image, small enough that a phone photo dropped in
+ *  by mistake is rejected with an explanation rather than uploaded. */
+const MAX_PUBLIC_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 function setSafePublicHeaders(res: Response, sourceHeaders: Headers): void {
   sourceHeaders.forEach((value, key) => {
@@ -206,6 +217,53 @@ router.post("/storage/uploads/request-url", requireAuth, async (req: Request, re
     );
   } catch (error) {
     req.log.error({ err: error }, "Error generating upload URL");
+    res.status(500).json({ error: "Failed to generate upload URL" });
+  }
+});
+
+/**
+ * POST /storage/public/uploads/request-url
+ *
+ * Same two-step shape as the private upload above — ask for a URL, then PUT the
+ * file to it — but the object lands in the public bucket and the path handed
+ * back is served by anyone without a session.
+ *
+ * Admin-only, and that is the whole security boundary: this writes somewhere
+ * world-readable, so it must not be reachable by every signed-in passenger, or
+ * the site becomes a free file host. Restricted to real image types for the
+ * same reason — the public serving route already refuses to hand anything else
+ * back with its own Content-Type, so a non-image here would be dead weight at
+ * best and a hosted payload at worst.
+ *
+ * The path is deliberately NOT registered in object_owners: these are public
+ * marketing assets with no owner, and the ACL only governs the private bucket.
+ */
+router.post("/storage/public/uploads/request-url", requireAdmin, async (req: Request, res: Response) => {
+  const parsed = RequestUploadUrlBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Missing or invalid required fields" });
+    return;
+  }
+
+  const { name, size, contentType } = parsed.data;
+  const type = contentType.split(";")[0]!.trim().toLowerCase();
+
+  if (!PUBLIC_UPLOAD_TYPES.has(type)) {
+    res.status(400).json({ error: "Only PNG, JPEG, WebP, AVIF or GIF images can be uploaded here." });
+    return;
+  }
+  if (size > MAX_PUBLIC_UPLOAD_BYTES) {
+    res.status(400).json({
+      error: `That image is ${(size / 1_048_576).toFixed(1)} MB. The limit is ${MAX_PUBLIC_UPLOAD_BYTES / 1_048_576} MB — resize it and try again.`,
+    });
+    return;
+  }
+
+  try {
+    const { uploadURL, objectPath } = await objectStorageService.getPublicUploadURL(name, type);
+    res.json({ uploadURL, objectPath, metadata: { name, size, contentType } });
+  } catch (error) {
+    req.log.error({ err: error }, "Error generating public upload URL");
     res.status(500).json({ error: "Failed to generate upload URL" });
   }
 });

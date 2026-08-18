@@ -17,6 +17,7 @@ type Promo = {
   discountType: "percentage" | "fixed";
   discountValue: number;
   maxUses?: number | null;
+  maxUsesPerUser?: number | null;
   usedCount: number;
   isActive: boolean;
   expiresAt?: string | null;
@@ -28,10 +29,11 @@ type FormData = {
   discountType: string;
   discountValue: string;
   maxUses: string;
+  maxUsesPerUser: string;
   expiresAt: string;
 };
 
-const EMPTY: FormData = { code: "", description: "", discountType: "percentage", discountValue: "", maxUses: "", expiresAt: "" };
+const EMPTY: FormData = { code: "", description: "", discountType: "percentage", discountValue: "", maxUses: "", maxUsesPerUser: "", expiresAt: "" };
 const LABEL = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const INPUT = "bg-white/5 border-white/10 text-white rounded-none h-10 text-sm";
 
@@ -90,6 +92,7 @@ export default function AdminPromos() {
       discountType: p.discountType,
       discountValue: String(p.discountValue),
       maxUses: p.maxUses ? String(p.maxUses) : "",
+      maxUsesPerUser: p.maxUsesPerUser ? String(p.maxUsesPerUser) : "",
       expiresAt: p.expiresAt ? p.expiresAt.slice(0, 10) : "",
     });
     setModalOpen(true);
@@ -109,6 +112,7 @@ export default function AdminPromos() {
             body: JSON.stringify({
               description: form.description || undefined,
               expiresAt: form.expiresAt || null,
+              maxUsesPerUser: form.maxUsesPerUser ? parseInt(form.maxUsesPerUser) : null,
             }),
           })
         : await fetch(`${API_BASE}/promos`, {
@@ -120,6 +124,7 @@ export default function AdminPromos() {
               discountType: form.discountType,
               discountValue: parseFloat(form.discountValue),
               maxUses: form.maxUses ? parseInt(form.maxUses) : null,
+              maxUsesPerUser: form.maxUsesPerUser ? parseInt(form.maxUsesPerUser) : null,
               expiresAt: form.expiresAt || null,
             }),
           });
@@ -204,6 +209,11 @@ export default function AdminPromos() {
                   </td>
                   <td className="px-5 py-4 text-muted-foreground">
                     {p.usedCount}{p.maxUses ? ` / ${p.maxUses}` : ""}
+                    {p.maxUsesPerUser ? (
+                      <span className="block text-[11px] text-muted-foreground/70">
+                        max {p.maxUsesPerUser} per customer
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-5 py-4 hidden md:table-cell text-muted-foreground">
                     {p.expiresAt ? format(new Date(p.expiresAt), "MMM d, yyyy") : "Never"}
@@ -281,8 +291,18 @@ export default function AdminPromos() {
                 </div>
               </div>
               <div>
-                <label className={LABEL}>Max Uses</label>
-                <Input type="number" value={form.maxUses} onChange={e => setField("maxUses", e.target.value)} className={INPUT} placeholder="Leave blank for unlimited" />
+                <label className={LABEL}>Max Uses (total)</label>
+                <Input type="number" min="1" value={form.maxUses} onChange={e => setField("maxUses", e.target.value)} className={INPUT} placeholder="Leave blank for unlimited" />
+                <p className="text-[11px] text-muted-foreground mt-1">Across every customer combined.</p>
+              </div>
+              <div>
+                <label className={LABEL}>Max Uses Per Customer</label>
+                <Input type="number" min="1" value={form.maxUsesPerUser} onChange={e => setField("maxUsesPerUser", e.target.value)} className={INPUT} placeholder="Leave blank for unlimited" />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  How many times one person may use it — set 1 for "once per customer".
+                  A code with this set requires the passenger to be signed in, since there is
+                  otherwise no identity to count against.
+                </p>
               </div>
             </>
           )}
