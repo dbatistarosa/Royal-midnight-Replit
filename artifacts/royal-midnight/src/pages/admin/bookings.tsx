@@ -177,8 +177,48 @@ export default function AdminBookings() {
   const [cancelAuthId, setCancelAuthId] = useState<number | null>(null);
   const [linkingUserId, setLinkingUserId] = useState<Record<number, string>>({});
   const [linkingLoading, setLinkingLoading] = useState<number | null>(null);
+  const [collectingId, setCollectingId] = useState<number | null>(null);
 
   const authHdr = token ? `Bearer ${token}` : "";
+
+  /**
+   * Take payment for extra time that was never collected.
+   *
+   * The server recomputes the amount from the trip's own timestamps and frozen
+   * hourly rate rather than charging the figure on screen — charters completed
+   * before whole-hour billing shipped carry the old pro-rata number, and the
+   * point of this button is to collect what the passenger was actually told
+   * they would be charged.
+   */
+  const handleCollectExtraTime = async (bookingId: number) => {
+    setCollectingId(bookingId);
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${bookingId}/collect-extra-time`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+      });
+      const body = await res.json().catch(() => null) as
+        { error?: string; charge?: { fare: number; taxAmount: number; cardProcessingFee: number; total: number } } | null;
+      if (!res.ok) throw new Error(body?.error || `Charge failed (HTTP ${res.status}).`);
+
+      const c = body?.charge;
+      toast({
+        title: "Extra time charged",
+        description: c
+          ? `$${c.total.toFixed(2)} taken from the card on file — $${c.fare.toFixed(2)} fare + $${c.taxAmount.toFixed(2)} tax + $${c.cardProcessingFee.toFixed(2)} card fee.`
+          : "The card on file has been charged.",
+      });
+      refetch();
+    } catch (err) {
+      toast({
+        title: "Could not charge the extra time",
+        description: err instanceof Error ? err.message : "Unexpected error.",
+        variant: "destructive",
+      });
+    } finally {
+      setCollectingId(null);
+    }
+  };
 
   // Handle 3DS redirect return after admin "Charge Card" — Stripe appends
   // payment_intent + redirect_status to the return URL (window.location.href).
@@ -934,9 +974,16 @@ export default function AdminBookings() {
                                 // "Charged" was the label whether or not a card
                                 // had ever been presented — and until now none
                                 // ever had. Say which it is.
+                                //
+                                // A completed charter with no recorded
+                                // PaymentIntent is outstanding whether or not it
+                                // has the newer breakdown: rows from before that
+                                // existed were never charged either, and they
+                                // also hold the old pro-rata amount, which is why
+                                // the button recomputes rather than charging what
+                                // is displayed.
                                 const collected = !!b.receipt?.extraChargePaymentIntentId;
-                                const known = b.receipt?.overageFare != null;
-                                const outstanding = known && !collected;
+                                const outstanding = b.status === "completed" && !collected;
                                 return (
                                   <div className={`border px-3 py-2 ${outstanding
                                     ? "border-red-400/40 bg-red-400/10"
@@ -958,9 +1005,23 @@ export default function AdminBookings() {
                                       )}
                                     </p>
                                     {outstanding && (
-                                      <p className="text-red-300/80 text-xs mt-1">
-                                        The card on file could not be charged. Collect this manually.
-                                      </p>
+                                      <>
+                                        <p className="text-red-300/80 text-xs mt-1">
+                                          This has not been charged to the card on file.
+                                          {b.receipt?.overageFare == null && b.overageMinutes != null && (
+                                            <> The amount shown predates whole-hour billing and will be recalculated.</>
+                                          )}
+                                        </p>
+                                        <button
+                                          onClick={() => void handleCollectExtraTime(b.id)}
+                                          disabled={collectingId === b.id}
+                                          className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-red-500/20 border border-red-400/40 text-red-100 text-[10px] uppercase tracking-widest hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                                        >
+                                          {collectingId === b.id
+                                            ? <><Loader2 className="w-3 h-3 animate-spin" /> Charging…</>
+                                            : <><CreditCard className="w-3 h-3" /> Charge extra time to card on file</>}
+                                        </button>
+                                      </>
                                     )}
                                   </div>
                                 );

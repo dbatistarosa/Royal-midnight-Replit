@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeHourlyOverage, describeOverage, OVERAGE_GRACE_MINUTES } from "./hourlyOverage";
+import { computePostTripCharge } from "./pricing";
 
 /**
  * The operator's rule, worked as the example they were shown:
@@ -102,5 +103,45 @@ describe("computeHourlyOverage", () => {
     expect(describeOverage(run(after(3, 35)))).toMatch(/35 minutes.*1 additional hour/);
     expect(describeOverage(run(after(3, 10)))).toMatch(/no charge/);
     expect(describeOverage(run(after(2, 0)))).toBeNull();
+  });
+});
+
+describe("booking #13 — the charter that was billed pro-rata and never charged", () => {
+  // The real trip: picked up 16:43:16Z, ended 20:09:51Z on a 3-hour block at
+  // $75/h. It was billed $32.16 (26 minutes x $1.25/min) and no card was ever
+  // presented. This locks what /bookings/:id/collect-extra-time recomputes.
+  const pickedUp = new Date("2026-08-17T16:43:16.824Z");
+  const ended = new Date("2026-08-17T20:09:51.332Z");
+
+  const overage = computeHourlyOverage({
+    startedAt: pickedUp,
+    endedAt: ended,
+    contractedHours: 3,
+    hourlyRate: 75,
+  });
+
+  it("ran 26 minutes over, which is past the allowance", () => {
+    expect(overage.overtimeMinutes).toBe(26);
+    expect(overage.overtimeMinutes).toBeGreaterThan(OVERAGE_GRACE_MINUTES);
+    expect(overage.reason).toBe("overage");
+  });
+
+  it("bills one whole hour, not 26 minutes of it", () => {
+    expect(overage.billedHours).toBe(1);
+    expect(overage.extraCharge).toBe(75);
+    // What the pro-rata meter produced, for contrast.
+    expect(Math.round(26 * (75 / 60) * 100) / 100).toBe(32.5);
+  });
+
+  it("comes to $83.46 on the card once tax and the card fee are added", () => {
+    const charge = computePostTripCharge({
+      fare: overage.extraCharge,
+      taxRate: 0.07,
+      cardProcessingFeeRate: 0.04,
+    });
+    expect(charge.fare).toBe(75);
+    expect(charge.taxAmount).toBeCloseTo(5.25, 2);
+    expect(charge.cardProcessingFee).toBeCloseTo(3.21, 2);
+    expect(charge.total).toBeCloseTo(83.46, 2);
   });
 });

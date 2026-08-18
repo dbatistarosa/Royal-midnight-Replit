@@ -11,7 +11,7 @@ import { loadZoneCoverage, isTripVisibleToDriver, loadPickupPoints, loadPickupPo
 import { serializeBooking } from "../lib/serializeBooking.js";
 import { recordAcceptance, recordAcceptances } from "../lib/legalAcceptance.js";
 import { loadBookingExtras, loadExtrasFor, driverExtrasTotal } from "../lib/bookingExtras.js";
-import { computeHourlyOverage } from "../lib/hourlyOverage.js";
+import { computeHourlyOverage, OVERAGE_GRACE_MINUTES } from "../lib/hourlyOverage.js";
 import { computePostTripCharge } from "../lib/pricing.js";
 import { saveFareBreakdown, saveOverageBreakdown, loadChargeRates, loadOverageFares, loadBookingReceipts } from "../lib/fareBreakdown.js";
 import { fetchCommissionPct, driverEarningsForBooking } from "../lib/commission.js";
@@ -2034,6 +2034,110 @@ router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promis
       console.error("[bookings] referral reward error:", err),
     );
   }
+});
+
+/**
+ * POST /bookings/:id/collect-extra-time — take payment for extra time that was
+ * never collected.
+ *
+ * Two things need this. Trip completion charges the card off-session and does
+ * not fail the chauffeur's "end trip" tap if the card declines, which leaves an
+ * amount owed and, until now, no way at all to chase it. And every charter
+ * completed before this shipped has an extra_charge that was computed, shown on
+ * the receipt, and never presented to a card — booking #13 among them.
+ *
+ * The amount is RECOMPUTED here from the booking's own frozen inputs
+ * (trip_started_at, trip_ended_at, charter_hours, hourly_rate) rather than read
+ * from extra_charge, because on exactly those older rows extra_charge holds the
+ * pro-rata figure the edge function used to write: $32.16 where the published
+ * rule, the booking form and the passenger's own receipt all say the next whole
+ * hour. Recomputing is what makes the stored row correct everywhere at once —
+ * receipt, admin screen, chauffeur's earnings and the revenue report all read
+ * these columns.
+ *
+ * Idempotent two ways: it refuses once a PaymentIntent is recorded, and the
+ * Stripe call carries a fixed idempotency key per booking.
+ */
+router.post("/bookings/:id/collect-extra-time", requireAdmin, async (req, res): Promise<void> => {
+  // String(...) because Express 5 types params as string | string[]. Most of
+  // this file predates that and carries the resulting type error; no reason to
+  // add another.
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
+
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
+  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+  if (booking.status !== "completed") {
+    res.status(400).json({ error: `Extra time can only be collected on a completed trip (this one is ${booking.status}).` });
+    return;
+  }
+
+  const receipts = await loadBookingReceipts([id]);
+  const existing = receipts.get(id);
+  if (existing?.extraChargePaymentIntentId) {
+    res.status(409).json({
+      error: "The extra time on this booking has already been charged.",
+      paymentIntentId: existing.extraChargePaymentIntentId,
+    });
+    return;
+  }
+
+  const overage = computeHourlyOverage({
+    startedAt: booking.tripStartedAt,
+    endedAt: booking.tripEndedAt,
+    contractedHours: booking.charterHours,
+    hourlyRate: booking.hourlyRate != null ? parseFloat(String(booking.hourlyRate)) : null,
+  });
+
+  const rates = await loadChargeRates();
+  const charge = computePostTripCharge({
+    fare: overage.extraCharge,
+    taxRate: rates.taxRate,
+    cardProcessingFeeRate: rates.cardProcessingFeeRate,
+  });
+
+  if (charge.total <= 0) {
+    res.status(400).json({
+      error: overage.reason === "within_grace"
+        ? `This charter ran ${overage.overtimeMinutes} minutes over, inside the ${OVERAGE_GRACE_MINUTES}-minute allowance. There is nothing to charge.`
+        : "This charter has no billable extra time.",
+      overage,
+    });
+    return;
+  }
+
+  const paymentIntentId = await chargeExtraTime(booking, charge.total, req.log);
+  if (!paymentIntentId) {
+    res.status(402).json({
+      error: "The card on file could not be charged. Check the passenger's saved payment method in Stripe, then try again.",
+      amount: charge.total,
+    });
+    return;
+  }
+
+  // Only now is the row rewritten. A failed charge must not leave the booking
+  // claiming a different amount than the one the customer was originally shown.
+  const totalPrice = Math.round((parseFloat(String(booking.priceQuoted)) + charge.total) * 100) / 100;
+  await db
+    .update(bookingsTable)
+    .set({ extraCharge: String(charge.total), totalPrice: String(totalPrice), updatedAt: new Date() })
+    .where(eq(bookingsTable.id, id));
+
+  await saveOverageBreakdown(id, {
+    overageFare: charge.fare,
+    overageTax: charge.taxAmount,
+    overageCardFee: charge.cardProcessingFee,
+    overageMinutes: overage.overtimeMinutes,
+    paymentIntentId,
+  }, req.log);
+
+  req.log?.warn(
+    { bookingId: id, amount: charge.total, paymentIntentId },
+    "extra_time_collected_manually",
+  );
+
+  res.json({ ok: true, paymentIntentId, charge, overage, totalPrice });
 });
 
 // Admin: unassign driver from a booking (puts it back in the open pool)
