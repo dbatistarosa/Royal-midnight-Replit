@@ -1253,7 +1253,7 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     // The stored receipt lines, so the passenger's receipt can print what was
     // actually charged instead of the 80/20 split it used to guess.
     const receipts = await loadBookingReceipts([booking.id]);
-    return res.json({
+    res.json({
       ...base,
       extras: await loadExtrasFor(booking.id),
       receipt: receipts.get(booking.id) ?? null,
@@ -1261,6 +1261,7 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
       existingRating: existingReview?.rating ?? null,
       existingComment: existingReview?.comment ?? null,
     });
+    return;
   }
 
   res.json({ ...parseBooking(booking), extras: await loadExtrasFor(booking.id) });
@@ -1269,7 +1270,7 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
 // GET /bookings/:id/flight-status — live flight status for bookings with a flight number.
 // Accessible by the passenger (own booking), their assigned driver, and admins.
 router.get("/bookings/:id/flight-status", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const caller = req.currentUser!;
@@ -1317,7 +1318,7 @@ router.get("/bookings/:id/flight-status", requireAuth, async (req, res): Promise
 // GET /bookings/:id/driver-location — passenger-accessible live driver position.
 // Only returns data when booking status is on_way or on_location and driver has shared coords.
 router.get("/bookings/:id/driver-location", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const caller = req.currentUser!;
@@ -1486,7 +1487,7 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
 
 // Driver self-assigns a pending booking
 router.post("/bookings/:id/accept", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) {
     res.status(400).json({ error: "Invalid booking id" });
     return;
@@ -1710,7 +1711,7 @@ async function resolveAssignedDriver(
   req: import("express").Request,
   res: import("express").Response,
   bookingId: number,
-): Promise<{ booking: typeof bookingsTable.$inferSelect; driverRow: { id: number; userId: number } } | null> {
+): Promise<{ booking: typeof bookingsTable.$inferSelect; driverRow: { id: number } } | null> {
   const caller = req.currentUser!;
   if (caller.role !== "driver") {
     res.status(403).json({ error: "Only drivers can update trip status" });
@@ -1720,7 +1721,7 @@ async function resolveAssignedDriver(
   // ORDER BY total_rides DESC so we always get the canonical (most-active) record
   // when a driver has multiple records linked to the same userId.
   const driverRows = await db
-    .select({ id: driversTable.id, userId: driversTable.userId })
+    .select({ id: driversTable.id })
     .from(driversTable)
     .where(eq(driversTable.userId, caller.userId))
     .orderBy(desc(driversTable.totalRides));
@@ -1748,7 +1749,7 @@ async function resolveAssignedDriver(
 // POST /bookings/:id/trip/checklist
 // Driver marks pre-ride checklist complete — required before En Route can activate
 router.post("/bookings/:id/trip/checklist", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const resolved = await resolveAssignedDriver(req, res, id);
@@ -1772,7 +1773,7 @@ router.post("/bookings/:id/trip/checklist", requireAuth, async (req, res): Promi
 // POST /bookings/:id/trip/on-way
 // Requires: caller = assigned driver, booking status = confirmed, pickup within 60 min
 router.post("/bookings/:id/trip/on-way", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const resolved = await resolveAssignedDriver(req, res, id);
@@ -1831,7 +1832,7 @@ router.post("/bookings/:id/trip/on-way", requireAuth, async (req, res): Promise<
 // POST /bookings/:id/trip/on-location
 // Requires: caller = assigned driver, booking status = on_way
 router.post("/bookings/:id/trip/on-location", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const resolved = await resolveAssignedDriver(req, res, id);
@@ -1872,7 +1873,7 @@ router.post("/bookings/:id/trip/on-location", requireAuth, async (req, res): Pro
 // POST /bookings/:id/trip/start
 // Requires: caller = assigned driver, booking status = on_location
 router.post("/bookings/:id/trip/start", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const resolved = await resolveAssignedDriver(req, res, id);
@@ -1912,7 +1913,7 @@ router.post("/bookings/:id/trip/start", requireAuth, async (req, res): Promise<v
 // POST /bookings/:id/trip/complete
 // Requires: caller = assigned driver, booking status = in_progress
 router.post("/bookings/:id/trip/complete", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const resolved = await resolveAssignedDriver(req, res, id);
@@ -2161,7 +2162,7 @@ router.post("/bookings/:id/collect-extra-time", requireAdmin, async (req, res): 
 
 // Admin: unassign driver from a booking (puts it back in the open pool)
 router.post("/bookings/:id/unassign", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) {
     res.status(400).json({ error: "Invalid booking id" });
     return;
@@ -2206,7 +2207,7 @@ router.post("/bookings/:id/unassign", requireAdmin, async (req, res): Promise<vo
 // ─── Cancel preview — returns fee info without cancelling ─────────────────────
 
 router.get("/bookings/:id/cancel-preview", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!id) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
@@ -2304,7 +2305,7 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
 // ─── Passenger: rate a driver after trip completion ──────────────────────────
 
 router.post("/bookings/:id/rate", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const { rating, comment } = req.body as { rating?: number; comment?: string };

@@ -54,7 +54,7 @@ router.post("/addresses", requireAuth, async (req, res): Promise<void> => {
 });
 
 router.patch("/addresses/:id", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
     return;

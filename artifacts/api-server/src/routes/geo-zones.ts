@@ -121,7 +121,7 @@ router.post("/admin/geo-zones", requireAdmin, async (req, res): Promise<void> =>
 
 // Toggle active / update multiplier / mark as a service area
 router.patch("/admin/geo-zones/:id", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"]!, 10);
+  const id = parseInt(String(req.params["id"]!), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const { isActive, rateMultiplier, name, description, isServiceArea, geometry, type } = req.body as Partial<{
@@ -171,7 +171,7 @@ router.patch("/admin/geo-zones/:id", requireAdmin, async (req, res): Promise<voi
 
 // Delete a zone
 router.delete("/admin/geo-zones/:id", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"]!, 10);
+  const id = parseInt(String(req.params["id"]!), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
 
   // driver_service_zones cascades on delete, so any chauffeur assignments to

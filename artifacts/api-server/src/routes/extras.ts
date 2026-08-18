@@ -78,7 +78,7 @@ router.post("/admin/fixed-routes", requireAdmin, async (req, res): Promise<void>
 });
 
 router.patch("/admin/fixed-routes/:id", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
   const body = req.body as Record<string, unknown>;
   const updateData: Record<string, unknown> = { updatedAt: new Date() };
@@ -96,7 +96,7 @@ router.patch("/admin/fixed-routes/:id", requireAdmin, async (req, res): Promise<
 });
 
 router.delete("/admin/fixed-routes/:id", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
   await db.delete(fixedRoutesTable).where(eq(fixedRoutesTable.id, id));
   res.sendStatus(204);
@@ -171,7 +171,7 @@ router.post("/admin/extras", requireAdmin, async (req, res): Promise<void> => {
 });
 
 router.patch("/admin/extras/:id", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
   const body = req.body as Record<string, unknown>;
   const updateData: Record<string, unknown> = {};
@@ -202,7 +202,7 @@ router.patch("/admin/extras/:id", requireAdmin, async (req, res): Promise<void> 
 });
 
 router.delete("/admin/extras/:id", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
   await db.delete(extraServicesTable).where(eq(extraServicesTable.id, id));
   res.sendStatus(204);

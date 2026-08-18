@@ -117,7 +117,7 @@ router.patch("/support/:id", requireAdmin, async (req, res): Promise<void> => {
 
 // GET /support/:id/messages — fetch thread for a ticket
 router.get("/support/:id/messages", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid ticket id" });
     return;
@@ -146,7 +146,7 @@ router.get("/support/:id/messages", requireAuth, async (req, res): Promise<void>
 
 // POST /support/:id/messages — post a reply to a ticket
 router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid ticket id" });
     return;

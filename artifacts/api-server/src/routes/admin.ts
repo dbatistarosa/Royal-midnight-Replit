@@ -330,7 +330,7 @@ router.get("/admin/dispatch", requireAdmin, async (_req, res): Promise<void> => 
 
 // POST /admin/bookings/:id/link-user — manually link a booking to a user account
 router.post("/admin/bookings/:id/link-user", requireAdmin, async (req, res): Promise<void> => {
-  const bookingId = parseInt(req.params["id"] ?? "", 10);
+  const bookingId = parseInt(String(req.params["id"] ?? ""), 10);
   const { userId } = req.body as { userId?: number };
   if (isNaN(bookingId) || !userId) {
     res.status(400).json({ error: "bookingId and userId are required" });
@@ -566,7 +566,7 @@ router.post("/admin/vehicle-catalog", requireAdmin, async (req, res): Promise<vo
 
 // PATCH /admin/vehicle-catalog/:id/toggle
 router.patch("/admin/vehicle-catalog/:id/toggle", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [entry] = await db.select().from(vehicleCatalogTable).where(eq(vehicleCatalogTable.id, id));
   if (!entry) { res.status(404).json({ error: "Not found" }); return; }
@@ -576,7 +576,7 @@ router.patch("/admin/vehicle-catalog/:id/toggle", requireAdmin, async (req, res)
 
 // DELETE /admin/vehicle-catalog/:id
 router.delete("/admin/vehicle-catalog/:id", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   await db.delete(vehicleCatalogTable).where(eq(vehicleCatalogTable.id, id));
   res.json({ ok: true });
@@ -584,7 +584,7 @@ router.delete("/admin/vehicle-catalog/:id", requireAdmin, async (req, res): Prom
 
 // PATCH /admin/vehicle-catalog/:id/approve — approve a driver-submitted pending entry
 router.patch("/admin/vehicle-catalog/:id/approve", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const { vehicleTypes, minYear } = req.body as { vehicleTypes?: string[]; minYear?: number };
   if (!vehicleTypes?.length) { res.status(400).json({ error: "vehicleTypes are required" }); return; }
@@ -774,7 +774,7 @@ router.post("/admin/compliance/remind", requireAdmin, async (req, res): Promise<
  * Also clears compliance_hold if all docs are now valid.
  */
 router.post("/admin/compliance/documents/:id/approve", requireAdmin, async (req, res): Promise<void> => {
-  const docId = parseInt(req.params["id"] ?? "", 10);
+  const docId = parseInt(String(req.params["id"] ?? ""), 10);
   const { newExpiry, adminNotes } = req.body as { newExpiry?: string; adminNotes?: string };
 
   if (isNaN(docId)) {
@@ -835,7 +835,7 @@ router.post("/admin/compliance/documents/:id/approve", requireAdmin, async (req,
  * the driver to re-upload. Does NOT update driver expiry fields.
  */
 router.post("/admin/compliance/documents/:id/reject", requireAdmin, async (req, res): Promise<void> => {
-  const docId = parseInt(req.params["id"] ?? "", 10);
+  const docId = parseInt(String(req.params["id"] ?? ""), 10);
   const { reason } = req.body as { reason?: string };
 
   if (isNaN(docId)) { res.status(400).json({ error: "Invalid document id" }); return; }

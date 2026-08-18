@@ -379,7 +379,7 @@ router.get("/payments/find-booking", async (req, res): Promise<void> => {
 // admin "Charge Card" to reuse a PI created in a previous attempt instead of
 // creating a duplicate.
 router.get("/payments/intent/:piId/client-secret", requireAdmin, async (req, res): Promise<void> => {
-  const piId = req.params["piId"];
+  const piId = String(req.params["piId"] ?? "");
   if (!piId) { res.status(400).json({ error: "piId is required" }); return; }
   try {
     const stripe = getStripe();
@@ -490,7 +490,7 @@ router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
 // ─── Admin: manual payment confirmation for stuck awaiting_payment bookings ──
 
 router.post("/admin/payments/check/:bookingId", requireAdmin, async (req, res): Promise<void> => {
-  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
@@ -729,7 +729,7 @@ router.post("/admin/stripe/ensure-webhook-events", requireAdmin, async (req, res
 // ─── Admin: cancel a Stripe authorization (manual-capture PI) and release the hold
 
 router.post("/admin/payments/cancel-auth/:bookingId", requireAdmin, async (req, res): Promise<void> => {
-  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
@@ -1001,7 +1001,12 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       const invoice = event.data.object as Stripe.Invoice;
       const bookingId = parseInt(invoice.metadata?.bookingId || "0");
       if (bookingId) {
-        const piId = typeof invoice.payment_intent === "string" ? invoice.payment_intent : (invoice.payment_intent as any)?.id ?? null;
+        // The SDK's types describe the API version we're pinned to
+        // ("2024-06-20" above), which still returns payment_intent directly on
+        // the invoice — the field was only dropped from the *types* because the
+        // npm package always types the latest API shape, not the pinned one.
+        const invoiceWithPI = invoice as Stripe.Invoice & { payment_intent?: string | Stripe.PaymentIntent | null };
+        const piId = typeof invoiceWithPI.payment_intent === "string" ? invoiceWithPI.payment_intent : invoiceWithPI.payment_intent?.id ?? null;
         const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
         if (current && current.status === "awaiting_payment") {
           await db.update(bookings)
@@ -1130,7 +1135,7 @@ router.get("/payments/saved-cards", requireAuth, async (req, res): Promise<void>
 // ─── Passenger: delete a saved payment method ────────────────────────────────
 
 router.delete("/payments/saved-cards/:pmId", requireAuth, async (req, res): Promise<void> => {
-  const { pmId } = req.params;
+  const pmId = String(req.params["pmId"] ?? "");
   const caller = req.currentUser!;
 
   const [user] = await db
@@ -1169,7 +1174,7 @@ router.delete("/payments/saved-cards/:pmId", requireAuth, async (req, res): Prom
 // ─── Passenger: charge a tip off-session ─────────────────────────────────────
 
 router.post("/payments/tip/:bookingId", requireAuth, async (req, res): Promise<void> => {
-  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const { tipAmount } = req.body as { tipAmount?: number };
@@ -1251,7 +1256,7 @@ router.post("/payments/tip/:bookingId", requireAuth, async (req, res): Promise<v
 // ─── Passenger: create an on-session tip PaymentIntent (no saved card required) ──
 
 router.post("/payments/tip-checkout/:bookingId", requireAuth, async (req, res): Promise<void> => {
-  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const { tipAmount } = req.body as { tipAmount?: number };
@@ -1288,7 +1293,7 @@ router.post("/payments/tip-checkout/:bookingId", requireAuth, async (req, res): 
 // ─── Passenger: confirm a tip paid via on-session PaymentIntent ───────────────
 
 router.post("/payments/tip-confirm/:bookingId", requireAuth, async (req, res): Promise<void> => {
-  const bId = parseInt(req.params["bookingId"] ?? "", 10);
+  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
   if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
   const { paymentIntentId } = req.body as { paymentIntentId?: string };

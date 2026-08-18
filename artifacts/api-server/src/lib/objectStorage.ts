@@ -21,6 +21,23 @@ const PUBLIC_IMAGE_EXTENSIONS: Record<string, string> = {
   "image/gif": "gif",
 };
 
+/**
+ * NOTE FOR WHOEVER MOVES THE SUPABASE PROJECT:
+ *
+ * Every upload in this app is a direct browser -> Supabase Storage PUT to a
+ * signed URL. That request leaves our own origin, so the storage host must be
+ * listed in `connect-src` of the Content-Security-Policy in vercel.json —
+ * which is strict JSON and cannot carry this comment itself.
+ *
+ * It was missing until 2026-08-18, and the symptom is deceptive: the browser
+ * reports a bare "Failed to fetch" with no CSP wording, and a curl test of the
+ * same flow passes because curl does not enforce CSP. That is why an earlier
+ * end-to-end verification of uploads reported success while every upload from
+ * a real browser — driver licences, registrations, insurance, profile photos —
+ * was silently blocked.
+ *
+ * If SUPABASE_URL ever points at a different project, update vercel.json too.
+ */
 function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

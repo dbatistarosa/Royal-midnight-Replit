@@ -234,7 +234,7 @@ router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> =
 
 // GET /users/:id/referral — this user's own shareable referral code/link (self or admin)
 router.get("/users/:id/referral", requireAuth, async (req, res): Promise<void> => {
-  const userId = parseInt(req.params["id"] ?? "", 10);
+  const userId = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(userId)) { res.status(400).json({ error: "Invalid user id" }); return; }
 
   const caller = req.currentUser!;
@@ -345,7 +345,7 @@ router.get("/admin/affiliates", requireAdmin, async (_req, res): Promise<void> =
 
 // GET /users/:id/favorite-drivers — list saved drivers (self or admin)
 router.get("/users/:id/favorite-drivers", requireAuth, async (req, res): Promise<void> => {
-  const userId = parseInt(req.params["id"] ?? "", 10);
+  const userId = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(userId)) { res.status(400).json({ error: "Invalid user id" }); return; }
 
   const caller = req.currentUser!;
@@ -373,8 +373,8 @@ router.get("/users/:id/favorite-drivers", requireAuth, async (req, res): Promise
 
 // POST /users/:id/favorite-drivers/:driverId — save a driver as favourite
 router.post("/users/:id/favorite-drivers/:driverId", requireAuth, async (req, res): Promise<void> => {
-  const userId = parseInt(req.params["id"] ?? "", 10);
-  const driverId = parseInt(req.params["driverId"] ?? "", 10);
+  const userId = parseInt(String(req.params["id"] ?? ""), 10);
+  const driverId = parseInt(String(req.params["driverId"] ?? ""), 10);
   if (isNaN(userId) || isNaN(driverId)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const caller = req.currentUser!;
@@ -393,8 +393,8 @@ router.post("/users/:id/favorite-drivers/:driverId", requireAuth, async (req, re
 
 // DELETE /users/:id/favorite-drivers/:driverId — remove a saved driver
 router.delete("/users/:id/favorite-drivers/:driverId", requireAuth, async (req, res): Promise<void> => {
-  const userId = parseInt(req.params["id"] ?? "", 10);
-  const driverId = parseInt(req.params["driverId"] ?? "", 10);
+  const userId = parseInt(String(req.params["id"] ?? ""), 10);
+  const driverId = parseInt(String(req.params["driverId"] ?? ""), 10);
   if (isNaN(userId) || isNaN(driverId)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const caller = req.currentUser!;

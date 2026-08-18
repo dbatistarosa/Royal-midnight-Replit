@@ -42,12 +42,26 @@ function VehiclePhotoField({ value, onChange }: { value: string; onChange: (v: s
         throw new Error(body?.error || `Upload could not be started (HTTP ${res.status}).`);
       }
 
-      const put = await fetch(body.uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-      });
-      if (!put.ok) throw new Error("The image could not be uploaded to storage.");
+      // The browser uploads straight to Supabase, so this request leaves our
+      // origin — and a Content-Security-Policy that does not list the storage
+      // host makes it fail as a bare "Failed to fetch", with nothing to go on.
+      // That is exactly what happened the first time this shipped. Name the
+      // likely cause rather than making the next person guess.
+      let put: Response;
+      try {
+        put = await fetch(body.uploadURL, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+        });
+      } catch {
+        const host = (() => { try { return new URL(body.uploadURL!).host; } catch { return "the storage host"; } })();
+        throw new Error(
+          `The browser could not reach ${host}. This is usually the Content-Security-Policy: ` +
+          `add that host to connect-src in vercel.json.`,
+        );
+      }
+      if (!put.ok) throw new Error(`Storage rejected the image (HTTP ${put.status}).`);
 
       onChange(body.objectPath);
       toast({ title: "Photo uploaded", description: "Save the rule to publish it to the Fleet page." });

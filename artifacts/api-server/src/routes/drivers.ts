@@ -344,7 +344,7 @@ router.patch("/drivers/:id/toggle-availability", requireAuth, async (req, res): 
 });
 
 router.get("/drivers/by-user/:userId", requireAuth, async (req, res): Promise<void> => {
-  const userId = parseInt(req.params["userId"] || "0", 10);
+  const userId = parseInt(String(req.params["userId"] || "0"), 10);
   if (!userId) {
     res.status(400).json({ error: "Invalid userId" });
     return;
@@ -391,7 +391,7 @@ router.get("/drivers/by-user/:userId", requireAuth, async (req, res): Promise<vo
 
 // Driver self-service contact info update (phone only)
 router.patch("/drivers/:id/contact", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
     return;
@@ -446,7 +446,7 @@ router.patch("/drivers/:id/contact", requireAuth, async (req, res): Promise<void
 
 // Driver payout (banking) info — driver self-service
 router.get("/drivers/:id/payout", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
@@ -462,7 +462,7 @@ router.get("/drivers/:id/payout", requireAuth, async (req, res): Promise<void> =
 });
 
 router.patch("/drivers/:id/payout", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const [driver] = await db.select().from(driversTable).where(eq(driversTable.id, id));
@@ -533,7 +533,7 @@ const LIVE_TRACKING_STATUSES = ["on_way", "on_location", "in_progress"] as const
 
 // Driver location update — driver sends GPS coords every 30 seconds when sharing is enabled
 router.patch("/drivers/:id/location", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
     return;
@@ -584,7 +584,7 @@ router.patch("/drivers/:id/location", requireAuth, async (req, res): Promise<voi
 
 // Driver mobile app registers/refreshes its Expo push token here on every login/foreground.
 router.patch("/drivers/:id/push-token", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
     return;
@@ -619,7 +619,7 @@ router.patch("/drivers/:id/push-token", requireAuth, async (req, res): Promise<v
 
 // Driver self-service status update (available / on_break / unavailable)
 router.patch("/drivers/:id/status", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
     return;
@@ -659,7 +659,7 @@ router.patch("/drivers/:id/status", requireAuth, async (req, res): Promise<void>
 });
 
 router.patch("/drivers/:id/approve", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
     return;
@@ -680,7 +680,7 @@ router.patch("/drivers/:id/approve", requireAdmin, async (req, res): Promise<voi
 });
 
 router.patch("/drivers/:id/reject", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] || "0", 10);
+  const id = parseInt(String(req.params["id"] || "0"), 10);
   if (!id) {
     res.status(400).json({ error: "Invalid id" });
     return;
@@ -896,7 +896,7 @@ router.get("/drivers/:id/earnings", requireAuth, async (req, res): Promise<void>
  * Returns the driver's compliance document submissions and current expiry dates.
  */
 router.get("/drivers/:id/documents", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const [driver] = await db.select({
@@ -946,7 +946,7 @@ router.get("/drivers/:id/documents", requireAuth, async (req, res): Promise<void
  * Driver submits a new compliance document for review.
  */
 router.post("/drivers/:id/documents", requireAuth, async (req, res): Promise<void> => {
-  const id = parseInt(req.params["id"] ?? "", 10);
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!id) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const [driver] = await db.select({
@@ -1003,7 +1003,7 @@ function canAccessDriver(caller: { role: string; userId: number }, driverUserId:
 }
 
 router.get("/drivers/:id/vehicles", requireAuth, async (req, res): Promise<void> => {
-  const driverId = parseInt(req.params["id"] ?? "", 10);
+  const driverId = parseInt(String(req.params["id"] ?? ""), 10);
   if (!driverId) { res.status(400).json({ error: "Invalid id" }); return; }
   const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
   if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
@@ -1013,7 +1013,7 @@ router.get("/drivers/:id/vehicles", requireAuth, async (req, res): Promise<void>
 });
 
 router.post("/drivers/:id/vehicles", requireAuth, async (req, res): Promise<void> => {
-  const driverId = parseInt(req.params["id"] ?? "", 10);
+  const driverId = parseInt(String(req.params["id"] ?? ""), 10);
   if (!driverId) { res.status(400).json({ error: "Invalid id" }); return; }
   const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
   if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
@@ -1090,8 +1090,8 @@ router.post("/drivers/:id/vehicles", requireAuth, async (req, res): Promise<void
 });
 
 router.patch("/drivers/:id/vehicles/:vehicleId", requireAuth, async (req, res): Promise<void> => {
-  const driverId = parseInt(req.params["id"] ?? "", 10);
-  const vehicleId = parseInt(req.params["vehicleId"] ?? "", 10);
+  const driverId = parseInt(String(req.params["id"] ?? ""), 10);
+  const vehicleId = parseInt(String(req.params["vehicleId"] ?? ""), 10);
   if (!driverId || !vehicleId) { res.status(400).json({ error: "Invalid id" }); return; }
   const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
   if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
@@ -1117,8 +1117,8 @@ router.patch("/drivers/:id/vehicles/:vehicleId", requireAuth, async (req, res): 
 });
 
 router.delete("/drivers/:id/vehicles/:vehicleId", requireAuth, async (req, res): Promise<void> => {
-  const driverId = parseInt(req.params["id"] ?? "", 10);
-  const vehicleId = parseInt(req.params["vehicleId"] ?? "", 10);
+  const driverId = parseInt(String(req.params["id"] ?? ""), 10);
+  const vehicleId = parseInt(String(req.params["vehicleId"] ?? ""), 10);
   if (!driverId || !vehicleId) { res.status(400).json({ error: "Invalid id" }); return; }
   const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, driverId));
   if (!driver) { res.status(404).json({ error: "Driver not found" }); return; }
