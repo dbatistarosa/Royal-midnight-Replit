@@ -36,6 +36,7 @@ import {
   sendAccountInvitation,
   sendTripCompletionEmail,
   sendBookingAssignedDriver,
+  sendExtraTimeChargedEmail,
 } from "../lib/mailer.js";
 import { sendDriverOnWaySms, sendDriverArrivedSms, sendCancellationSms } from "../lib/sms.js";
 import { sendNewRideOfferPush, sendDriverAssignedPush } from "../lib/push.js";
@@ -2138,6 +2139,21 @@ router.post("/bookings/:id/collect-extra-time", requireAdmin, async (req, res): 
   );
 
   res.json({ ok: true, paymentIntentId, charge, overage, totalPrice });
+
+  // Tell the passenger. The completion email went out when the chauffeur ended
+  // the trip, before this money was known to be collectable — and on older
+  // bookings it is being taken days afterwards. Fire-and-forget: the charge has
+  // already succeeded and a failed email must not suggest otherwise.
+  void sendExtraTimeChargedEmail({
+    bookingId: id,
+    passengerName: booking.passengerName,
+    passengerEmail: booking.passengerEmail,
+    overtimeMinutes: overage.overtimeMinutes,
+    fare: charge.fare,
+    taxAmount: charge.taxAmount,
+    cardProcessingFee: charge.cardProcessingFee,
+    total: charge.total,
+  }).catch(err => console.error("[bookings] extra-time receipt email failed:", err));
 });
 
 // Admin: unassign driver from a booking (puts it back in the open pool)

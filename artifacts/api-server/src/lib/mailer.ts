@@ -1104,3 +1104,44 @@ ${body}
 ${body}`);
   await send(ADMIN_EMAIL, `Support ${ref}: customer replied`, html, "support_reply_admin");
 }
+
+/**
+ * Receipt for extra time collected after the trip.
+ *
+ * The completion email goes out the moment the chauffeur ends the trip, which
+ * is before the extra-time charge is known to have succeeded — and for every
+ * charter completed before that charge existed, the money is taken days later
+ * from the admin screen. Taking money off someone's card with no message is not
+ * something to leave to a screen they may never open.
+ */
+export async function sendExtraTimeChargedEmail(p: {
+  bookingId: number;
+  passengerName: string;
+  passengerEmail: string;
+  overtimeMinutes: number;
+  fare: number;
+  taxAmount: number;
+  cardProcessingFee: number;
+  total: number;
+}) {
+  const bookingRef = `RM-${String(p.bookingId).padStart(4, "0")}`;
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Additional time — ${bookingRef}</h2>
+<p style="color:#e8e0d0">Hello ${escapeHtml(String(p.passengerName ?? "").split(" ")[0] ?? "")},</p>
+<p style="color:#9ca3af;line-height:1.6">
+  Your chauffeur service ran ${p.overtimeMinutes} minutes past the time included in your booking.
+  Past the first 20 minutes, additional time is charged by the whole hour, as set out when you booked.
+  We have charged the card on file:
+</p>
+<table style="width:100%;border-collapse:collapse;margin:20px 0">
+  ${row("Additional time", `$${p.fare.toFixed(2)}`)}
+  ${p.taxAmount > 0 ? row("Florida tax", `$${p.taxAmount.toFixed(2)}`) : ""}
+  ${p.cardProcessingFee > 0 ? row("Card processing", `$${p.cardProcessingFee.toFixed(2)}`) : ""}
+  ${row("Total charged", `<strong style="color:#c9a84c;font-size:16px">$${p.total.toFixed(2)}</strong>`)}
+</table>
+<p style="color:#6b7280;font-size:12px">
+  The full receipt is on your trip page. If anything here looks wrong, reply to this message or contact
+  <a href="mailto:${ADMIN_EMAIL}" style="color:#c9a84c">${ADMIN_EMAIL}</a> and we will look into it.
+</p>`);
+  await send(p.passengerEmail, `Royal Midnight — additional time charged (${bookingRef})`, html, "extra_time_charged");
+}
