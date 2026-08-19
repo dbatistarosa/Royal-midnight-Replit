@@ -18,7 +18,10 @@ import rateLimit, { type RateLimitRequestHandler } from "express-rate-limit";
  * of memory.
  */
 
-const shared = { standardHeaders: true as const, legacyHeaders: false as const };
+const shared = {
+  standardHeaders: true as const,
+  legacyHeaders: false as const,
+};
 
 /**
  * Baseline for the whole API. Generous enough that a normal page load — which
@@ -34,7 +37,7 @@ export function globalLimiter(): RateLimitRequestHandler {
     ...shared,
     windowMs: 60 * 1000,
     limit: 240,
-    skip: req =>
+    skip: (req) =>
       req.originalUrl.startsWith("/api/webhook/") ||
       req.originalUrl.startsWith("/api/cron/"),
     message: { error: "Too many requests. Please slow down." },
@@ -78,5 +81,25 @@ export function promoLimiter(): RateLimitRequestHandler {
     windowMs: 15 * 60 * 1000,
     limit: 20,
     message: { error: "Too many promo code attempts. Please try again later." },
+  });
+}
+
+/** Stripe-facing payment endpoints (create-intent, tips, saved cards). Every
+ *  other sensitive endpoint (auth, OTP, quote, promo) already has a limiter;
+ *  these fell back to globalLimiter() alone, and create-intent is reachable
+ *  with only optionalAuth. Keyed by session where available so a shared-NAT
+ *  caller doesn't throttle out other guests, falling back to IP for
+ *  unauthenticated callers. Defense-in-depth alongside Stripe Radar, not a
+ *  replacement for it. */
+export function paymentLimiter(): RateLimitRequestHandler {
+  return rateLimit({
+    ...shared,
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    keyGenerator: (req) =>
+      req.currentUser?.userId?.toString() ?? req.ip ?? "unknown",
+    message: {
+      error: "Too many payment requests. Please wait a moment and try again.",
+    },
   });
 }

@@ -2,7 +2,12 @@ import { Router, type IRouter } from "express";
 import crypto from "node:crypto";
 import Stripe from "stripe";
 import { db } from "@workspace/db";
-import { bookingsTable as bookings, driversTable, settingsTable, usersTable } from "@workspace/db/schema";
+import {
+  bookingsTable as bookings,
+  driversTable,
+  settingsTable,
+  usersTable,
+} from "@workspace/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
   sendBookingConfirmationPassenger,
@@ -16,18 +21,32 @@ import { sendNewRideOfferPush } from "../lib/push.js";
 import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
 import { encryptField, safeDecryptField } from "../lib/encrypt.js";
 import { sendStripeError } from "../lib/stripeError.js";
-import { isMissingCustomerError, forgetStaleStripeCustomer } from "../lib/stripeCustomer.js";
-import { fetchCommissionPct, driverEarningsForBooking } from "../lib/commission.js";
+import {
+  isMissingCustomerError,
+  forgetStaleStripeCustomer,
+} from "../lib/stripeCustomer.js";
+import {
+  fetchCommissionPct,
+  driverEarningsForBooking,
+} from "../lib/commission.js";
+import { paymentLimiter } from "../lib/rateLimit.js";
 
 const router: IRouter = Router();
 
 /** Constant-time comparison of a caller-supplied tracking token against the one
  *  stored on the booking. */
-function matchesTrackingToken(stored: string | null | undefined, provided: unknown): boolean {
+function matchesTrackingToken(
+  stored: string | null | undefined,
+  provided: unknown,
+): boolean {
   if (typeof stored !== "string" || !stored) return false;
-  if (typeof provided !== "string" || provided.length !== stored.length) return false;
+  if (typeof provided !== "string" || provided.length !== stored.length)
+    return false;
   try {
-    return crypto.timingSafeEqual(Buffer.from(provided, "utf8"), Buffer.from(stored, "utf8"));
+    return crypto.timingSafeEqual(
+      Buffer.from(provided, "utf8"),
+      Buffer.from(stored, "utf8"),
+    );
   } catch {
     return false;
   }
@@ -48,7 +67,9 @@ const APP_URL = process.env.APP_URL ?? "https://royalmidnight.com";
  * APP_URL is shared with the links in outgoing email, where a redirect costs
  * nothing, so it stays as it is; only this one needs the canonical host.
  */
-const WEBHOOK_URL = process.env.STRIPE_WEBHOOK_URL ?? "https://www.royalmidnight.com/api/webhook/stripe";
+const WEBHOOK_URL =
+  process.env.STRIPE_WEBHOOK_URL ??
+  "https://www.royalmidnight.com/api/webhook/stripe";
 
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -58,7 +79,8 @@ function getStripe(): Stripe {
 
 async function getWebhookSecret(): Promise<string | null> {
   // Prefer explicit env var (most secure)
-  if (process.env.STRIPE_WEBHOOK_SECRET) return process.env.STRIPE_WEBHOOK_SECRET;
+  if (process.env.STRIPE_WEBHOOK_SECRET)
+    return process.env.STRIPE_WEBHOOK_SECRET;
   // Fall back to DB-persisted secret (set during auto-registration). Stored
   // encrypted since it authenticates Stripe's callbacks; safeDecryptField also
   // passes through rows written before that change.
@@ -74,14 +96,20 @@ async function getWebhookSecret(): Promise<string | null> {
 const getCommissionPct = fetchCommissionPct;
 
 async function firePostPaymentEmails(bookingId: number): Promise<void> {
-  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bookingId));
+  const [booking] = await db
+    .select()
+    .from(bookings)
+    .where(eq(bookings.id, bookingId));
   if (!booking) return;
 
   const commissionPct = await getCommissionPct();
   const priceQuoted = parseFloat(String(booking.priceQuoted));
   // Commission base: pre-tax/pre-fee/pre-discount subtotal, falls back to priceQuoted
   // for legacy rows — see fareSubtotal column comment in lib/db/src/schema/bookings.ts.
-  const fareSubtotal = booking.fareSubtotal != null ? parseFloat(String(booking.fareSubtotal)) : priceQuoted;
+  const fareSubtotal =
+    booking.fareSubtotal != null
+      ? parseFloat(String(booking.fareSubtotal))
+      : priceQuoted;
   const emailData = {
     id: booking.id,
     passengerName: booking.passengerName,
@@ -94,7 +122,11 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
     priceQuoted,
     // Commission plus the add-ons the chauffeur keeps in full, so the offer
     // email and push match the figure their app shows for the same trip.
-    driverEarnings: await driverEarningsForBooking(booking.id, fareSubtotal, commissionPct),
+    driverEarnings: await driverEarningsForBooking(
+      booking.id,
+      fareSubtotal,
+      commissionPct,
+    ),
     flightNumber: booking.flightNumber ?? null,
     specialRequests: booking.specialRequests ?? null,
   };
@@ -104,14 +136,24 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
     .from(driversTable)
     .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
     .where(eq(driversTable.approvalStatus, "approved"));
-  const driverEmails = approvedDrivers.map(d => d.email).filter(Boolean) as string[];
+  const driverEmails = approvedDrivers
+    .map((d) => d.email)
+    .filter(Boolean) as string[];
 
   // Narrower than the email fan-out above: only drivers who can actually act
   // on the offer right now get a push (online, available, not on hold).
   const pushableDrivers = await db
-    .select({ pushToken: driversTable.pushToken, pushPlatform: driversTable.pushPlatform })
+    .select({
+      pushToken: driversTable.pushToken,
+      pushPlatform: driversTable.pushPlatform,
+    })
     .from(driversTable)
-    .where(and(eq(driversTable.status, "available"), eq(driversTable.complianceHold, false)));
+    .where(
+      and(
+        eq(driversTable.status, "available"),
+        eq(driversTable.complianceHold, false),
+      ),
+    );
 
   const bookingRef = `RM-${String(bookingId).padStart(4, "0")}`;
 
@@ -119,14 +161,20 @@ async function firePostPaymentEmails(bookingId: number): Promise<void> {
     sendBookingConfirmationPassenger(emailData),
     sendNewBookingAdmin(emailData),
     sendNewBookingAvailableToDrivers(emailData, driverEmails),
-    sendNewRideOfferPush(pushableDrivers, { id: booking.id, pickupAddress: booking.pickupAddress, driverEarnings: emailData.driverEarnings }),
+    sendNewRideOfferPush(pushableDrivers, {
+      id: booking.id,
+      pickupAddress: booking.pickupAddress,
+      driverEarnings: emailData.driverEarnings,
+    }),
     // SMS confirmation — non-fatal; passenger phone may be absent
     sendBookingConfirmationSms(
       booking.passengerPhone,
       bookingRef,
       booking.pickupAt.toISOString(),
       booking.pickupAddress,
-    ).catch(err => console.error("[payments] booking confirmation SMS failed:", err)),
+    ).catch((err) =>
+      console.error("[payments] booking confirmation SMS failed:", err),
+    ),
   ]);
 }
 
@@ -142,8 +190,15 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
     return;
   }
   if (!/^pk_(test|live)_[A-Za-z0-9]+$/.test(publishableKey)) {
-    console.error("[payments] STRIPE_PUBLISHABLE_KEY is malformed — Elements will not mount");
-    res.status(503).json({ error: "Stripe publishable key is malformed. Check STRIPE_PUBLISHABLE_KEY." });
+    console.error(
+      "[payments] STRIPE_PUBLISHABLE_KEY is malformed — Elements will not mount",
+    );
+    res
+      .status(503)
+      .json({
+        error:
+          "Stripe publishable key is malformed. Check STRIPE_PUBLISHABLE_KEY.",
+      });
     return;
   }
 
@@ -155,12 +210,17 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
   // the code rather than at the configuration that actually caused it. Failing
   // here instead names the real problem before the customer ever sees a form.
   const secretKey = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
-  const publishableMode = publishableKey.startsWith("pk_live_") ? "live" : "test";
-  const secretMode = secretKey.startsWith("sk_live_") || secretKey.startsWith("rk_live_") ? "live" : "test";
+  const publishableMode = publishableKey.startsWith("pk_live_")
+    ? "live"
+    : "test";
+  const secretMode =
+    secretKey.startsWith("sk_live_") || secretKey.startsWith("rk_live_")
+      ? "live"
+      : "test";
   if (secretKey && publishableMode !== secretMode) {
     console.error(
       `[payments] Stripe key mode mismatch: publishable is ${publishableMode}, secret is ${secretMode}. ` +
-      `Payments cannot complete until both come from the same Stripe account and mode.`,
+        `Payments cannot complete until both come from the same Stripe account and mode.`,
     );
     res.status(503).json({
       error: `Stripe is misconfigured: the publishable key is ${publishableMode} mode but the secret key is ${secretMode} mode. Both must come from the same Stripe account.`,
@@ -171,164 +231,224 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
   res.json({ publishableKey });
 });
 
-router.post("/payments/create-intent", optionalAuth, async (req, res): Promise<void> => {
-  // A PaymentIntent is always tied to a booking, and the amount always comes
-  // from that booking's stored price — never from the request body (CN-002).
-  // Accepting a body-supplied amount let a caller pay an arbitrary sum and then
-  // apply the resulting PI to someone else's reservation.
-  const { bookingId, trackingToken } = req.body as { bookingId?: number; trackingToken?: string };
-  const bId = Number(bookingId);
-  if (!Number.isFinite(bId) || bId <= 0) {
-    res.status(400).json({ error: "bookingId is required" });
-    return;
-  }
-  try {
-    const stripe = getStripe();
-    const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
-    if (!booking) {
-      res.status(404).json({ error: "Booking not found" });
-      return;
-    }
-
-    // Authorisation. Booking without an account is a legitimate flow, so this
-    // cannot simply require a session — but it had no check at all, and booking
-    // ids are serial. Anyone could walk them to learn which exist, mint Stripe
-    // customers and PaymentIntents on this account without limit, and (the part
-    // that actually costs money) repoint an already-authorised booking's
-    // stripePaymentIntentId at a PI of their own. "Release authorisation" in
-    // the admin panel would then cancel the attacker's PI, report success, and
-    // leave the real hold sitting on the customer's card.
-    //
-    // The trackingToken issued at booking time is the same bearer credential
-    // GET /bookings/track/:token already trusts for exactly this situation.
-    const caller = req.currentUser;
-    const isAdmin = caller?.role === "admin";
-    let authorised = isAdmin
-      || (caller != null && booking.userId != null && booking.userId === caller.userId)
-      || matchesTrackingToken(booking.trackingToken, trackingToken);
-
-    // A booking created by an admin is linked to the passenger by email only.
-    if (!authorised && caller != null && booking.passengerEmail) {
-      const [callerUser] = await db.select({ email: usersTable.email }).from(usersTable).where(eq(usersTable.id, caller.userId));
-      authorised = !!callerUser?.email && callerUser.email.toLowerCase() === booking.passengerEmail.toLowerCase();
-    }
-
-    if (!authorised) {
-      req.log.warn({ ip: req.ip, path: req.path, userId: caller?.userId ?? null, bookingId: bId }, "authorization_failed");
-      res.status(403).json({ error: "Access denied" });
-      return;
-    }
-
-    // Never repoint the PI of a booking that already moved past payment. Admin
-    // is exempt: the "Charge Card" path deliberately mints a replacement, and
-    // only after confirming with Stripe that the previous PI is dead.
-    if (!isAdmin && booking.status !== "awaiting_payment") {
-      res.status(409).json({ error: "This booking is not awaiting payment." });
-      return;
-    }
-
-    const amountCents = Math.round(parseFloat(String(booking.priceQuoted)) * 100);
-    if (!Number.isFinite(amountCents) || amountCents <= 0) {
-      res.status(400).json({ error: "This booking has no payable amount." });
-      return;
-    }
-
-    const metadata: Record<string, string> = {
-      bookingId: String(bId),
-      passengerName: booking.passengerName,
-      pickupAddress: booking.pickupAddress,
-      dropoffAddress: booking.dropoffAddress,
+router.post(
+  "/payments/create-intent",
+  paymentLimiter(),
+  optionalAuth,
+  async (req, res): Promise<void> => {
+    // A PaymentIntent is always tied to a booking, and the amount always comes
+    // from that booking's stored price — never from the request body (CN-002).
+    // Accepting a body-supplied amount let a caller pay an arbitrary sum and then
+    // apply the resulting PI to someone else's reservation.
+    const { bookingId, trackingToken } = req.body as {
+      bookingId?: number;
+      trackingToken?: string;
     };
-    const description = `Royal Midnight — Booking #RM-${String(bId).padStart(4, "0")}`;
-    let customerId: string | undefined;
-
-    // Find or create a Stripe customer so the card can be saved for future use.
-    // Wrapped in its own try-catch: if the DB column is missing or Stripe fails,
-    // we degrade gracefully and skip setup_future_usage rather than blocking payment.
-    if (booking.userId) {
-      try {
-        const [user] = await db
-          .select({ id: usersTable.id, email: usersTable.email, name: usersTable.name, stripeCustomerId: usersTable.stripeCustomerId })
-          .from(usersTable)
-          .where(eq(usersTable.id, booking.userId));
-        if (user) {
-          if (user.stripeCustomerId) {
-            customerId = user.stripeCustomerId;
-          } else {
-            // Create a new Stripe customer and persist it
-            const customer = await stripe.customers.create({
-              email: user.email,
-              name: user.name,
-              metadata: { userId: String(user.id) },
-            });
-            customerId = customer.id;
-            await db.update(usersTable)
-              .set({ stripeCustomerId: customer.id })
-              .where(eq(usersTable.id, user.id));
-          }
-        }
-      } catch (customerErr: any) {
-        // Non-fatal: log and continue without customer/setup_future_usage.
-        // The payment still works; saved-card feature is unavailable for this booking.
-        console.warn("[payments] customer setup skipped:", customerErr?.message);
-        customerId = undefined;
+    const bId = Number(bookingId);
+    if (!Number.isFinite(bId) || bId <= 0) {
+      res.status(400).json({ error: "bookingId is required" });
+      return;
+    }
+    try {
+      const stripe = getStripe();
+      const [booking] = await db
+        .select()
+        .from(bookings)
+        .where(eq(bookings.id, bId));
+      if (!booking) {
+        res.status(404).json({ error: "Booking not found" });
+        return;
       }
-    }
 
-    // Always use automatic capture — charge the card immediately when the passenger pays.
-    // Do NOT use setup_future_usage on the PaymentIntent: it triggers stronger 3DS
-    // requirements on real cards and can break the payment flow. Cards are saved to the
-    // customer record via the webhook after payment succeeds instead.
-    const piParams = {
-      amount: amountCents,
-      currency: "usd" as const,
-      capture_method: "automatic" as const,
-      payment_method_types: ["card"],
-      metadata,
-      description,
-    };
+      // Authorisation. Booking without an account is a legitimate flow, so this
+      // cannot simply require a session — but it had no check at all, and booking
+      // ids are serial. Anyone could walk them to learn which exist, mint Stripe
+      // customers and PaymentIntents on this account without limit, and (the part
+      // that actually costs money) repoint an already-authorised booking's
+      // stripePaymentIntentId at a PI of their own. "Release authorisation" in
+      // the admin panel would then cancel the attacker's PI, report success, and
+      // leave the real hold sitting on the customer's card.
+      //
+      // The trackingToken issued at booking time is the same bearer credential
+      // GET /bookings/track/:token already trusts for exactly this situation.
+      const caller = req.currentUser;
+      const isAdmin = caller?.role === "admin";
+      let authorised =
+        isAdmin ||
+        (caller != null &&
+          booking.userId != null &&
+          booking.userId === caller.userId) ||
+        matchesTrackingToken(booking.trackingToken, trackingToken);
 
-    let paymentIntent;
-    try {
-      paymentIntent = await stripe.paymentIntents.create({
-        ...piParams,
-        ...(customerId ? { customer: customerId } : {}),
+      // A booking created by an admin is linked to the passenger by email only.
+      if (!authorised && caller != null && booking.passengerEmail) {
+        const [callerUser] = await db
+          .select({ email: usersTable.email })
+          .from(usersTable)
+          .where(eq(usersTable.id, caller.userId));
+        authorised =
+          !!callerUser?.email &&
+          callerUser.email.toLowerCase() ===
+            booking.passengerEmail.toLowerCase();
+      }
+
+      if (!authorised) {
+        req.log.warn(
+          {
+            ip: req.ip,
+            path: req.path,
+            userId: caller?.userId ?? null,
+            bookingId: bId,
+          },
+          "authorization_failed",
+        );
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
+
+      // Never repoint the PI of a booking that already moved past payment. Admin
+      // is exempt: the "Charge Card" path deliberately mints a replacement, and
+      // only after confirming with Stripe that the previous PI is dead.
+      if (!isAdmin && booking.status !== "awaiting_payment") {
+        res
+          .status(409)
+          .json({ error: "This booking is not awaiting payment." });
+        return;
+      }
+
+      const amountCents = Math.round(
+        parseFloat(String(booking.priceQuoted)) * 100,
+      );
+      if (!Number.isFinite(amountCents) || amountCents <= 0) {
+        res.status(400).json({ error: "This booking has no payable amount." });
+        return;
+      }
+
+      const metadata: Record<string, string> = {
+        bookingId: String(bId),
+        passengerName: booking.passengerName,
+        pickupAddress: booking.pickupAddress,
+        dropoffAddress: booking.dropoffAddress,
+      };
+      const description = `Royal Midnight — Booking #RM-${String(bId).padStart(4, "0")}`;
+      let customerId: string | undefined;
+
+      // Find or create a Stripe customer so the card can be saved for future use.
+      // Wrapped in its own try-catch: if the DB column is missing or Stripe fails,
+      // we degrade gracefully and skip setup_future_usage rather than blocking payment.
+      if (booking.userId) {
+        try {
+          const [user] = await db
+            .select({
+              id: usersTable.id,
+              email: usersTable.email,
+              name: usersTable.name,
+              stripeCustomerId: usersTable.stripeCustomerId,
+            })
+            .from(usersTable)
+            .where(eq(usersTable.id, booking.userId));
+          if (user) {
+            if (user.stripeCustomerId) {
+              customerId = user.stripeCustomerId;
+            } else {
+              // Create a new Stripe customer and persist it
+              const customer = await stripe.customers.create({
+                email: user.email,
+                name: user.name,
+                metadata: { userId: String(user.id) },
+              });
+              customerId = customer.id;
+              await db
+                .update(usersTable)
+                .set({ stripeCustomerId: customer.id })
+                .where(eq(usersTable.id, user.id));
+            }
+          }
+        } catch (customerErr: any) {
+          // Non-fatal: log and continue without customer/setup_future_usage.
+          // The payment still works; saved-card feature is unavailable for this booking.
+          console.warn(
+            "[payments] customer setup skipped:",
+            customerErr?.message,
+          );
+          customerId = undefined;
+        }
+      }
+
+      // Always use automatic capture — charge the card immediately when the passenger pays.
+      // Do NOT use setup_future_usage on the PaymentIntent: it triggers stronger 3DS
+      // requirements on real cards and can break the payment flow. Cards are saved to the
+      // customer record via the webhook after payment succeeds instead.
+      const piParams = {
+        amount: amountCents,
+        currency: "usd" as const,
+        capture_method: "automatic" as const,
+        payment_method_types: ["card"],
+        metadata,
+        description,
+      };
+
+      let paymentIntent;
+      try {
+        paymentIntent = await stripe.paymentIntents.create({
+          ...piParams,
+          ...(customerId ? { customer: customerId } : {}),
+        });
+      } catch (err) {
+        // A stored customer id from a previous Stripe account (or the other mode)
+        // still looks valid but resolves to nothing, and it took the entire
+        // payment down with it. The customer record is only a convenience for
+        // saved cards — drop the dead id and let the payment through.
+        if (!customerId || !isMissingCustomerError(err)) throw err;
+        req.log.warn(
+          { bookingId: bId, customerId, userId: booking.userId },
+          "stripe_customer_missing_retrying",
+        );
+        if (booking.userId)
+          await forgetStaleStripeCustomer(booking.userId, req.log);
+        paymentIntent = await stripe.paymentIntents.create(piParams);
+      }
+
+      // Persist the PI ID on the booking immediately so that:
+      //  1. "Sync Payment" can locate it even before confirm is called
+      //  2. "Charge Card" reuses the same PI on retry instead of creating duplicates
+      // The status is repeated in the WHERE clause so a booking that got paid
+      // between the read above and this write keeps pointing at the PI that
+      // actually holds the money.
+      try {
+        await db
+          .update(bookings)
+          .set({
+            stripePaymentIntentId: paymentIntent.id,
+            updatedAt: new Date(),
+          })
+          .where(
+            isAdmin
+              ? eq(bookings.id, bId)
+              : and(
+                  eq(bookings.id, bId),
+                  eq(bookings.status, "awaiting_payment"),
+                ),
+          );
+      } catch (err: any) {
+        // Non-fatal: the PI carries bookingId in its metadata, so the webhook can
+        // still reconcile. Payment must not be blocked on a bookkeeping write.
+        req.log.error(
+          { err, bookingId: bId },
+          "could not pre-save PaymentIntent id",
+        );
+      }
+
+      res.json({
+        clientSecret: paymentIntent.client_secret,
+        paymentIntentId: paymentIntent.id,
       });
-    } catch (err) {
-      // A stored customer id from a previous Stripe account (or the other mode)
-      // still looks valid but resolves to nothing, and it took the entire
-      // payment down with it. The customer record is only a convenience for
-      // saved cards — drop the dead id and let the payment through.
-      if (!customerId || !isMissingCustomerError(err)) throw err;
-      req.log.warn({ bookingId: bId, customerId, userId: booking.userId }, "stripe_customer_missing_retrying");
-      if (booking.userId) await forgetStaleStripeCustomer(booking.userId, req.log);
-      paymentIntent = await stripe.paymentIntents.create(piParams);
-    }
-
-    // Persist the PI ID on the booking immediately so that:
-    //  1. "Sync Payment" can locate it even before confirm is called
-    //  2. "Charge Card" reuses the same PI on retry instead of creating duplicates
-    // The status is repeated in the WHERE clause so a booking that got paid
-    // between the read above and this write keeps pointing at the PI that
-    // actually holds the money.
-    try {
-      await db.update(bookings)
-        .set({ stripePaymentIntentId: paymentIntent.id, updatedAt: new Date() })
-        .where(isAdmin
-          ? eq(bookings.id, bId)
-          : and(eq(bookings.id, bId), eq(bookings.status, "awaiting_payment")));
     } catch (err: any) {
-      // Non-fatal: the PI carries bookingId in its metadata, so the webhook can
-      // still reconcile. Payment must not be blocked on a bookkeeping write.
-      req.log.error({ err, bookingId: bId }, "could not pre-save PaymentIntent id");
+      // Surface the real Stripe error message so the frontend can show it to the user.
+      sendStripeError(req, res, err, "Stripe error — please try again.");
     }
-
-    res.json({ clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id });
-  } catch (err: any) {
-    // Surface the real Stripe error message so the frontend can show it to the user.
-    sendStripeError(req, res, err, "Stripe error — please try again.");
-  }
-});
+  },
+);
 
 // Lookup which booking a PaymentIntent belongs to (via PI metadata) — used by
 // the frontend 3DS recovery path when sessionStorage is unavailable.
@@ -343,7 +463,9 @@ router.get("/payments/find-booking", async (req, res): Promise<void> => {
     const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
     const bId = parseInt(intent.metadata.bookingId || "0", 10);
     if (!bId) {
-      res.status(404).json({ error: "No booking linked to this PaymentIntent" });
+      res
+        .status(404)
+        .json({ error: "No booking linked to this PaymentIntent" });
       return;
     }
     // Hand back the tracking token too, so a 3DS return whose sessionStorage was
@@ -363,7 +485,10 @@ router.get("/payments/find-booking", async (req, res): Promise<void> => {
       let cur: unknown = lookupErr;
       let undefinedColumn = false;
       for (let d = 0; cur && d < 5; d++) {
-        if ((cur as { code?: string }).code === "42703") { undefinedColumn = true; break; }
+        if ((cur as { code?: string }).code === "42703") {
+          undefinedColumn = true;
+          break;
+        }
         cur = (cur as { cause?: unknown }).cause;
       }
       if (!undefinedColumn) throw lookupErr;
@@ -378,240 +503,473 @@ router.get("/payments/find-booking", async (req, res): Promise<void> => {
 // Retrieve the client_secret and status for an existing PaymentIntent — used by
 // admin "Charge Card" to reuse a PI created in a previous attempt instead of
 // creating a duplicate.
-router.get("/payments/intent/:piId/client-secret", requireAdmin, async (req, res): Promise<void> => {
-  const piId = String(req.params["piId"] ?? "");
-  if (!piId) { res.status(400).json({ error: "piId is required" }); return; }
-  try {
-    const stripe = getStripe();
-    const intent = await stripe.paymentIntents.retrieve(piId);
-    if (!intent.client_secret) {
-      res.status(404).json({ error: "No client secret available for this intent" });
+router.get(
+  "/payments/intent/:piId/client-secret",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const piId = String(req.params["piId"] ?? "");
+    if (!piId) {
+      res.status(400).json({ error: "piId is required" });
       return;
     }
-    res.json({ clientSecret: intent.client_secret, status: intent.status });
-  } catch (err: any) {
-    const isNotFound = err?.statusCode === 404 || err?.code === "resource_missing";
-    if (isNotFound) {
-      res.status(404).json({ error: "PaymentIntent not found in Stripe" });
-    } else {
+    try {
+      const stripe = getStripe();
+      const intent = await stripe.paymentIntents.retrieve(piId);
+      if (!intent.client_secret) {
+        res
+          .status(404)
+          .json({ error: "No client secret available for this intent" });
+        return;
+      }
+      res.json({ clientSecret: intent.client_secret, status: intent.status });
+    } catch (err: any) {
+      const isNotFound =
+        err?.statusCode === 404 || err?.code === "resource_missing";
+      if (isNotFound) {
+        res.status(404).json({ error: "PaymentIntent not found in Stripe" });
+      } else {
+        sendStripeError(req, res, err);
+      }
+    }
+  },
+);
+
+router.post(
+  "/payments/confirm/:bookingId",
+  paymentLimiter(),
+  async (req, res): Promise<void> => {
+    const { bookingId } = req.params;
+    const { paymentIntentId } = req.body as { paymentIntentId: string };
+    const bId = parseInt(String(bookingId ?? ""), 10);
+    if (!bId || !paymentIntentId) {
+      res.status(400).json({ error: "bookingId and paymentIntentId required" });
+      return;
+    }
+    try {
+      const stripe = getStripe();
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+      const [current] = await db
+        .select({
+          status: bookings.status,
+          stripePaymentIntentId: bookings.stripePaymentIntentId,
+          priceQuoted: bookings.priceQuoted,
+        })
+        .from(bookings)
+        .where(eq(bookings.id, bId));
+      if (!current) {
+        res.status(404).json({ error: "Booking not found" });
+        return;
+      }
+
+      // Enforce PI-to-booking binding (CN-002). Previously a PI with no metadata
+      // skipped this check entirely, which let anyone pay a token amount on an
+      // unbound PI and then apply it to someone else's reservation. A PI is now
+      // accepted only when its metadata names this booking, or when this booking
+      // already holds that PI id — which only our own create-intent can arrange.
+      const metaId = intent.metadata.bookingId;
+      const boundByMetadata = metaId === String(bId);
+      const boundByBooking = current.stripePaymentIntentId === paymentIntentId;
+      if (!boundByMetadata && !boundByBooking) {
+        res
+          .status(403)
+          .json({ error: "PaymentIntent does not belong to this booking" });
+        return;
+      }
+
+      // Reject underpayment — the PI must cover the booking's stored price.
+      const expectedCents = Math.round(
+        parseFloat(String(current.priceQuoted)) * 100,
+      );
+      const paidCents = intent.amount_received || intent.amount || 0;
+      if (
+        Number.isFinite(expectedCents) &&
+        expectedCents > 0 &&
+        paidCents < expectedCents
+      ) {
+        res
+          .status(402)
+          .json({ error: "Payment does not cover the booking total." });
+        return;
+      }
+
+      if (
+        intent.status === "succeeded" ||
+        intent.status === "requires_capture" ||
+        intent.status === "processing"
+      ) {
+        if (
+          intent.status === "requires_capture" &&
+          current.status === "awaiting_payment"
+        ) {
+          // Manual-capture flow — card authorized, hold placed. Do NOT charge yet.
+          // Charge happens when a driver accepts the booking.
+          await db
+            .update(bookings)
+            .set({
+              status: "authorized",
+              stripePaymentIntentId: paymentIntentId,
+              authorizedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(bookings.id, bId));
+          // No post-payment emails here — they fire after capture (driver accept).
+          res.json({
+            success: true,
+            status: "authorized",
+            paymentIntentId,
+            paymentStatus: intent.status,
+          });
+        } else if (
+          intent.status === "succeeded" &&
+          current.status === "awaiting_payment"
+        ) {
+          // Direct success (legacy / non-manual-capture path) — promote to pending immediately.
+          await db
+            .update(bookings)
+            .set({
+              status: "pending",
+              stripePaymentIntentId: paymentIntentId,
+              updatedAt: new Date(),
+            })
+            .where(eq(bookings.id, bId));
+          firePostPaymentEmails(bId).catch((err) =>
+            console.error("[payments] post-confirm email error:", err),
+          );
+          res.json({
+            success: true,
+            status: "pending",
+            paymentIntentId,
+            paymentStatus: intent.status,
+          });
+        } else if (
+          intent.status === "processing" &&
+          current.status === "awaiting_payment"
+        ) {
+          // Async payment method (e.g. ACH/bank transfer) — store the PI ID now.
+          // The booking stays awaiting_payment; the payment_intent.succeeded webhook
+          // will promote it once the charge settles.
+          await db
+            .update(bookings)
+            .set({
+              stripePaymentIntentId: paymentIntentId,
+              updatedAt: new Date(),
+            })
+            .where(eq(bookings.id, bId));
+          res.json({
+            success: true,
+            status: "awaiting_payment",
+            paymentIntentId,
+            paymentStatus: "processing",
+          });
+        } else if (!current.stripePaymentIntentId) {
+          // Store PI ID even if booking was already moved past awaiting_payment (e.g. by webhook)
+          await db
+            .update(bookings)
+            .set({
+              stripePaymentIntentId: paymentIntentId,
+              updatedAt: new Date(),
+            })
+            .where(eq(bookings.id, bId));
+          res.json({
+            success: true,
+            status: current.status,
+            paymentIntentId,
+            paymentStatus: intent.status,
+          });
+        } else {
+          res.json({
+            success: true,
+            status: current.status,
+            paymentIntentId,
+            paymentStatus: intent.status,
+          });
+        }
+      } else {
+        // Definitive failure statuses (canceled, requires_payment_method, etc.)
+        res
+          .status(400)
+          .json({ error: "Payment not completed", status: intent.status });
+      }
+    } catch (err: any) {
       sendStripeError(req, res, err);
     }
-  }
-});
+  },
+);
 
-router.post("/payments/confirm/:bookingId", async (req, res): Promise<void> => {
-  const { bookingId } = req.params;
-  const { paymentIntentId } = req.body as { paymentIntentId: string };
-  const bId = parseInt(bookingId ?? "", 10);
-  if (!bId || !paymentIntentId) {
-    res.status(400).json({ error: "bookingId and paymentIntentId required" });
-    return;
-  }
-  try {
-    const stripe = getStripe();
-    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+// ─── Admin: manual payment confirmation for stuck awaiting_payment bookings ──
 
-    const [current] = await db
-      .select({
-        status: bookings.status,
-        stripePaymentIntentId: bookings.stripePaymentIntentId,
-        priceQuoted: bookings.priceQuoted,
-      })
+router.post(
+  "/admin/payments/check/:bookingId",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
+    if (!bId) {
+      res.status(400).json({ error: "Invalid booking id" });
+      return;
+    }
+
+    const [booking] = await db
+      .select()
       .from(bookings)
       .where(eq(bookings.id, bId));
-    if (!current) {
+    if (!booking) {
       res.status(404).json({ error: "Booking not found" });
       return;
     }
 
-    // Enforce PI-to-booking binding (CN-002). Previously a PI with no metadata
-    // skipped this check entirely, which let anyone pay a token amount on an
-    // unbound PI and then apply it to someone else's reservation. A PI is now
-    // accepted only when its metadata names this booking, or when this booking
-    // already holds that PI id — which only our own create-intent can arrange.
-    const metaId = intent.metadata.bookingId;
-    const boundByMetadata = metaId === String(bId);
-    const boundByBooking = current.stripePaymentIntentId === paymentIntentId;
-    if (!boundByMetadata && !boundByBooking) {
-      res.status(403).json({ error: "PaymentIntent does not belong to this booking" });
+    // If already paid/confirmed, return success immediately
+    if (booking.status !== "awaiting_payment") {
+      res.json({
+        confirmed: true,
+        alreadyPaid: true,
+        message: `Booking is already confirmed (status: ${booking.status}).`,
+        paymentIntentId: booking.stripePaymentIntentId ?? undefined,
+      });
       return;
     }
 
-    // Reject underpayment — the PI must cover the booking's stored price.
-    const expectedCents = Math.round(parseFloat(String(current.priceQuoted)) * 100);
-    const paidCents = intent.amount_received || intent.amount || 0;
-    if (Number.isFinite(expectedCents) && expectedCents > 0 && paidCents < expectedCents) {
-      res.status(402).json({ error: "Payment does not cover the booking total." });
-      return;
-    }
+    try {
+      const stripe = getStripe();
 
-    if (intent.status === "succeeded" || intent.status === "requires_capture" || intent.status === "processing") {
-      if (intent.status === "requires_capture" && current.status === "awaiting_payment") {
-        // Manual-capture flow — card authorized, hold placed. Do NOT charge yet.
-        // Charge happens when a driver accepts the booking.
-        await db.update(bookings)
-          .set({ status: "authorized", stripePaymentIntentId: paymentIntentId, authorizedAt: new Date(), updatedAt: new Date() })
+      // 1. Check PaymentIntents with bookingId metadata (card payment flow)
+      const intents = await stripe.paymentIntents.search({
+        query: `metadata["bookingId"]:"${bId}"`,
+        limit: 5,
+      });
+      const succeededIntent = intents.data.find(
+        (pi) => pi.status === "succeeded",
+      );
+      if (succeededIntent) {
+        await db
+          .update(bookings)
+          .set({
+            status: "pending",
+            stripePaymentIntentId: succeededIntent.id,
+            updatedAt: new Date(),
+          })
           .where(eq(bookings.id, bId));
-        // No post-payment emails here — they fire after capture (driver accept).
-        res.json({ success: true, status: "authorized", paymentIntentId, paymentStatus: intent.status });
-      } else if (intent.status === "succeeded" && current.status === "awaiting_payment") {
-        // Direct success (legacy / non-manual-capture path) — promote to pending immediately.
-        await db.update(bookings)
-          .set({ status: "pending", stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
-          .where(eq(bookings.id, bId));
-        firePostPaymentEmails(bId).catch(err => console.error("[payments] post-confirm email error:", err));
-        res.json({ success: true, status: "pending", paymentIntentId, paymentStatus: intent.status });
-      } else if (intent.status === "processing" && current.status === "awaiting_payment") {
-        // Async payment method (e.g. ACH/bank transfer) — store the PI ID now.
-        // The booking stays awaiting_payment; the payment_intent.succeeded webhook
-        // will promote it once the charge settles.
-        await db.update(bookings)
-          .set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
-          .where(eq(bookings.id, bId));
-        res.json({ success: true, status: "awaiting_payment", paymentIntentId, paymentStatus: "processing" });
-      } else if (!current.stripePaymentIntentId) {
-        // Store PI ID even if booking was already moved past awaiting_payment (e.g. by webhook)
-        await db.update(bookings)
-          .set({ stripePaymentIntentId: paymentIntentId, updatedAt: new Date() })
-          .where(eq(bookings.id, bId));
-        res.json({ success: true, status: current.status, paymentIntentId, paymentStatus: intent.status });
-      } else {
-        res.json({ success: true, status: current.status, paymentIntentId, paymentStatus: intent.status });
+        firePostPaymentEmails(bId).catch(() => {});
+        res.json({
+          confirmed: true,
+          source: "payment_intent",
+          paymentIntentId: succeededIntent.id,
+          message: "Payment confirmed — booking moved to pending.",
+        });
+        return;
       }
-    } else {
-      // Definitive failure statuses (canceled, requires_payment_method, etc.)
-      res.status(400).json({ error: "Payment not completed", status: intent.status });
+
+      // 2. Check Stripe invoices with bookingId metadata (send-invoice flow)
+      const invoiceSearch = await stripe.invoices.search({
+        query: `metadata["bookingId"]:"${bId}"`,
+        limit: 5,
+      });
+      const paidInvoice = invoiceSearch.data.find(
+        (inv) => inv.status === "paid",
+      );
+      if (paidInvoice) {
+        await db
+          .update(bookings)
+          .set({ status: "pending", updatedAt: new Date() })
+          .where(eq(bookings.id, bId));
+        firePostPaymentEmails(bId).catch(() => {});
+        res.json({
+          confirmed: true,
+          source: "invoice",
+          invoiceId: paidInvoice.id,
+          message: "Invoice payment confirmed — booking moved to pending.",
+        });
+        return;
+      }
+
+      const intentStatuses =
+        intents.data.map((pi) => pi.status).join(", ") || "none";
+      const invoiceStatuses =
+        invoiceSearch.data.map((inv) => inv.status).join(", ") || "none";
+      res.json({
+        confirmed: false,
+        message: `No successful payment found. PaymentIntents: ${intentStatuses}. Invoices: ${invoiceStatuses}.`,
+      });
+    } catch (err: any) {
+      sendStripeError(req, res, err);
     }
-  } catch (err: any) {
-    sendStripeError(req, res, err);
-  }
-});
-
-// ─── Admin: manual payment confirmation for stuck awaiting_payment bookings ──
-
-router.post("/admin/payments/check/:bookingId", requireAdmin, async (req, res): Promise<void> => {
-  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
-  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
-
-  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
-  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
-
-  // If already paid/confirmed, return success immediately
-  if (booking.status !== "awaiting_payment") {
-    res.json({
-      confirmed: true,
-      alreadyPaid: true,
-      message: `Booking is already confirmed (status: ${booking.status}).`,
-      paymentIntentId: booking.stripePaymentIntentId ?? undefined,
-    });
-    return;
-  }
-
-  try {
-    const stripe = getStripe();
-
-    // 1. Check PaymentIntents with bookingId metadata (card payment flow)
-    const intents = await stripe.paymentIntents.search({
-      query: `metadata["bookingId"]:"${bId}"`,
-      limit: 5,
-    });
-    const succeededIntent = intents.data.find(pi => pi.status === "succeeded");
-    if (succeededIntent) {
-      await db.update(bookings)
-        .set({ status: "pending", stripePaymentIntentId: succeededIntent.id, updatedAt: new Date() })
-        .where(eq(bookings.id, bId));
-      firePostPaymentEmails(bId).catch(() => {});
-      res.json({ confirmed: true, source: "payment_intent", paymentIntentId: succeededIntent.id, message: "Payment confirmed — booking moved to pending." });
-      return;
-    }
-
-    // 2. Check Stripe invoices with bookingId metadata (send-invoice flow)
-    const invoiceSearch = await stripe.invoices.search({
-      query: `metadata["bookingId"]:"${bId}"`,
-      limit: 5,
-    });
-    const paidInvoice = invoiceSearch.data.find(inv => inv.status === "paid");
-    if (paidInvoice) {
-      await db.update(bookings)
-        .set({ status: "pending", updatedAt: new Date() })
-        .where(eq(bookings.id, bId));
-      firePostPaymentEmails(bId).catch(() => {});
-      res.json({ confirmed: true, source: "invoice", invoiceId: paidInvoice.id, message: "Invoice payment confirmed — booking moved to pending." });
-      return;
-    }
-
-    const intentStatuses = intents.data.map(pi => pi.status).join(", ") || "none";
-    const invoiceStatuses = invoiceSearch.data.map(inv => inv.status).join(", ") || "none";
-    res.json({ confirmed: false, message: `No successful payment found. PaymentIntents: ${intentStatuses}. Invoices: ${invoiceStatuses}.` });
-  } catch (err: any) {
-    sendStripeError(req, res, err);
-  }
-});
+  },
+);
 
 // ─── Admin: Stripe webhook management ───────────────────────────────────────
 
-router.get("/admin/stripe/webhook-status", requireAdmin, async (req, res): Promise<void> => {
-  const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
-  const webhookSecretInEnv = !!process.env.STRIPE_WEBHOOK_SECRET;
-  const mailerStatus = getMailerStatus();
+router.get(
+  "/admin/stripe/webhook-status",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
+    const webhookSecretInEnv = !!process.env.STRIPE_WEBHOOK_SECRET;
+    const mailerStatus = getMailerStatus();
 
-  // Check DB fallback for webhook secret
-  const dbSecret = await db
-    .select({ value: settingsTable.value })
-    .from(settingsTable)
-    .where(eq(settingsTable.key, "stripe_webhook_secret"))
-    .limit(1)
-    .then(rows => rows[0]?.value ?? null);
+    // Check DB fallback for webhook secret
+    const dbSecret = await db
+      .select({ value: settingsTable.value })
+      .from(settingsTable)
+      .where(eq(settingsTable.key, "stripe_webhook_secret"))
+      .limit(1)
+      .then((rows) => rows[0]?.value ?? null);
 
-  const webhookSecretSet = webhookSecretInEnv || !!dbSecret;
-  const webhookSecretSource = webhookSecretInEnv ? "env" : (dbSecret ? "db" : "none");
+    const webhookSecretSet = webhookSecretInEnv || !!dbSecret;
+    const webhookSecretSource = webhookSecretInEnv
+      ? "env"
+      : dbSecret
+        ? "db"
+        : "none";
 
-  if (!stripeConfigured) {
-    res.json({
-      stripeConfigured: false,
-      webhookSecretSet: false,
-      webhookSecretSource,
-      webhooks: [],
-      expectedUrl: WEBHOOK_URL,
-      mailer: mailerStatus,
-    });
-    return;
-  }
+    if (!stripeConfigured) {
+      res.json({
+        stripeConfigured: false,
+        webhookSecretSet: false,
+        webhookSecretSource,
+        webhooks: [],
+        expectedUrl: WEBHOOK_URL,
+        mailer: mailerStatus,
+      });
+      return;
+    }
 
-  try {
-    const stripe = getStripe();
-    const webhookList = await stripe.webhookEndpoints.list({ limit: 20 });
-    const webhooks = webhookList.data.map(w => ({
-      id: w.id,
-      url: w.url,
-      status: w.status,
-      enabledEvents: w.enabled_events,
-      isOurs: w.url === WEBHOOK_URL,
-    }));
-    const isRegistered = webhooks.some(w => w.isOurs && w.status === "enabled");
-    res.json({
-      stripeConfigured: true,
-      webhookSecretSet,
-      webhookSecretSource,
-      webhooks,
-      expectedUrl: WEBHOOK_URL,
-      isRegistered,
-      mailer: mailerStatus,
-    });
-  } catch (err: any) {
-    sendStripeError(req, res, err);
-  }
-});
+    try {
+      const stripe = getStripe();
+      const webhookList = await stripe.webhookEndpoints.list({ limit: 20 });
+      const webhooks = webhookList.data.map((w) => ({
+        id: w.id,
+        url: w.url,
+        status: w.status,
+        enabledEvents: w.enabled_events,
+        isOurs: w.url === WEBHOOK_URL,
+      }));
+      const isRegistered = webhooks.some(
+        (w) => w.isOurs && w.status === "enabled",
+      );
+      res.json({
+        stripeConfigured: true,
+        webhookSecretSet,
+        webhookSecretSource,
+        webhooks,
+        expectedUrl: WEBHOOK_URL,
+        isRegistered,
+        mailer: mailerStatus,
+      });
+    } catch (err: any) {
+      sendStripeError(req, res, err);
+    }
+  },
+);
 
-router.post("/admin/stripe/register-webhook", requireAdmin, async (req, res): Promise<void> => {
-  if (!process.env.STRIPE_SECRET_KEY) {
-    res.status(503).json({ error: "STRIPE_SECRET_KEY is not configured" });
-    return;
-  }
-  try {
-    const stripe = getStripe();
+router.post(
+  "/admin/stripe/register-webhook",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      res.status(503).json({ error: "STRIPE_SECRET_KEY is not configured" });
+      return;
+    }
+    try {
+      const stripe = getStripe();
 
-    const REQUIRED_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
+      const REQUIRED_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] =
+        [
+          "payment_intent.created",
+          "payment_intent.amount_capturable_updated",
+          "payment_intent.succeeded",
+          "payment_intent.payment_failed",
+          "charge.succeeded",
+          "charge.updated",
+          "charge.refunded",
+          "charge.dispute.created",
+          "invoice.paid",
+        ];
+      const existing = await stripe.webhookEndpoints.list({ limit: 20 });
+      const alreadyExists = existing.data.find((w) => w.url === WEBHOOK_URL);
+      if (alreadyExists) {
+        // Ensure the existing webhook has all required events
+        const currentEvents = alreadyExists.enabled_events ?? [];
+        const missingEvents = REQUIRED_EVENTS.filter(
+          (e) => !currentEvents.includes(e),
+        );
+        if (missingEvents.length > 0) {
+          const mergedEvents = Array.from(
+            new Set([...currentEvents, ...REQUIRED_EVENTS]),
+          ) as Stripe.WebhookEndpointUpdateParams.EnabledEvent[];
+          await stripe.webhookEndpoints.update(alreadyExists.id, {
+            enabled_events: mergedEvents,
+          });
+        }
+        res.json({
+          alreadyExists: true,
+          webhookId: alreadyExists.id,
+          url: alreadyExists.url,
+          eventsUpdated: missingEvents.length > 0,
+          addedEvents: missingEvents,
+          message:
+            missingEvents.length > 0
+              ? `Webhook events updated to include: ${missingEvents.join(", ")}. The signing secret was set when it was first created.`
+              : "Webhook already registered with all required events. The signing secret was set when it was first created — update STRIPE_WEBHOOK_SECRET if needed.",
+        });
+        return;
+      }
+
+      const webhook = await stripe.webhookEndpoints.create({
+        url: WEBHOOK_URL,
+        enabled_events: [
+          "payment_intent.created",
+          "payment_intent.amount_capturable_updated",
+          "payment_intent.succeeded",
+          "payment_intent.payment_failed",
+          "charge.succeeded",
+          "charge.updated",
+          "charge.refunded",
+          "charge.dispute.created",
+          "invoice.paid",
+        ],
+        description: "Royal Midnight payment confirmation webhook",
+      });
+
+      // Persist signing secret to DB so webhook handler works immediately (even
+      // before env var is set). Encrypted at rest: the settings table is read
+      // whole by the admin panel, and this value is what authenticates Stripe's
+      // callbacks. GET /admin/settings redacts it; this stops it being readable
+      // from a database dump too.
+      if (webhook.secret) {
+        const stored = encryptField(webhook.secret);
+        await db
+          .insert(settingsTable)
+          .values({ key: "stripe_webhook_secret", value: stored })
+          .onConflictDoUpdate({
+            target: settingsTable.key,
+            set: { value: stored },
+          });
+      }
+
+      res.json({
+        alreadyExists: false,
+        webhookId: webhook.id,
+        url: webhook.url,
+        signingSecret: webhook.secret,
+        message:
+          "Webhook registered successfully. The signing secret has been saved and is active. Optionally set it as STRIPE_WEBHOOK_SECRET in your environment for extra security.",
+      });
+    } catch (err: any) {
+      sendStripeError(req, res, err);
+    }
+  },
+);
+
+// ─── Admin: ensure existing webhook has required events subscribed
+router.post(
+  "/admin/stripe/ensure-webhook-events",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      res.status(503).json({ error: "STRIPE_SECRET_KEY is not configured" });
+      return;
+    }
+    const REQUIRED_EVENTS: Stripe.WebhookEndpointUpdateParams.EnabledEvent[] = [
       "payment_intent.created",
       "payment_intent.amount_capturable_updated",
       "payment_intent.succeeded",
@@ -622,297 +980,319 @@ router.post("/admin/stripe/register-webhook", requireAdmin, async (req, res): Pr
       "charge.dispute.created",
       "invoice.paid",
     ];
-    const existing = await stripe.webhookEndpoints.list({ limit: 20 });
-    const alreadyExists = existing.data.find(w => w.url === WEBHOOK_URL);
-    if (alreadyExists) {
-      // Ensure the existing webhook has all required events
-      const currentEvents = alreadyExists.enabled_events ?? [];
-      const missingEvents = REQUIRED_EVENTS.filter(e => !currentEvents.includes(e));
-      if (missingEvents.length > 0) {
-        const mergedEvents = Array.from(new Set([...currentEvents, ...REQUIRED_EVENTS])) as Stripe.WebhookEndpointUpdateParams.EnabledEvent[];
-        await stripe.webhookEndpoints.update(alreadyExists.id, { enabled_events: mergedEvents });
+    try {
+      const stripe = getStripe();
+      const existing = await stripe.webhookEndpoints.list({ limit: 20 });
+      const ours = existing.data.find((w) => w.url === WEBHOOK_URL);
+      if (!ours) {
+        res.json({
+          updated: false,
+          message: "No webhook registered yet. Use register-webhook first.",
+        });
+        return;
       }
-      res.json({
-        alreadyExists: true,
-        webhookId: alreadyExists.id,
-        url: alreadyExists.url,
-        eventsUpdated: missingEvents.length > 0,
-        addedEvents: missingEvents,
-        message: missingEvents.length > 0
-          ? `Webhook events updated to include: ${missingEvents.join(", ")}. The signing secret was set when it was first created.`
-          : "Webhook already registered with all required events. The signing secret was set when it was first created — update STRIPE_WEBHOOK_SECRET if needed.",
+      const currentEvents = ours.enabled_events ?? [];
+      const missingEvents = REQUIRED_EVENTS.filter(
+        (e) => !currentEvents.includes(e),
+      );
+      if (missingEvents.length === 0) {
+        res.json({
+          updated: false,
+          webhookId: ours.id,
+          enabledEvents: currentEvents,
+          message: "All required events already subscribed.",
+        });
+        return;
+      }
+      // Merge existing events with required ones
+      const mergedEvents = Array.from(
+        new Set([...currentEvents, ...REQUIRED_EVENTS]),
+      ) as Stripe.WebhookEndpointUpdateParams.EnabledEvent[];
+      const updated = await stripe.webhookEndpoints.update(ours.id, {
+        enabled_events: mergedEvents,
       });
-      return;
+      res.json({
+        updated: true,
+        webhookId: updated.id,
+        enabledEvents: updated.enabled_events,
+        addedEvents: missingEvents,
+        message: "Webhook events updated to include all required events.",
+      });
+    } catch (err: any) {
+      sendStripeError(req, res, err);
     }
-
-    const webhook = await stripe.webhookEndpoints.create({
-      url: WEBHOOK_URL,
-      enabled_events: [
-        "payment_intent.created",
-        "payment_intent.amount_capturable_updated",
-        "payment_intent.succeeded",
-        "payment_intent.payment_failed",
-        "charge.succeeded",
-        "charge.updated",
-        "charge.refunded",
-        "charge.dispute.created",
-        "invoice.paid",
-      ],
-      description: "Royal Midnight payment confirmation webhook",
-    });
-
-    // Persist signing secret to DB so webhook handler works immediately (even
-    // before env var is set). Encrypted at rest: the settings table is read
-    // whole by the admin panel, and this value is what authenticates Stripe's
-    // callbacks. GET /admin/settings redacts it; this stops it being readable
-    // from a database dump too.
-    if (webhook.secret) {
-      const stored = encryptField(webhook.secret);
-      await db
-        .insert(settingsTable)
-        .values({ key: "stripe_webhook_secret", value: stored })
-        .onConflictDoUpdate({ target: settingsTable.key, set: { value: stored } });
-    }
-
-    res.json({
-      alreadyExists: false,
-      webhookId: webhook.id,
-      url: webhook.url,
-      signingSecret: webhook.secret,
-      message: "Webhook registered successfully. The signing secret has been saved and is active. Optionally set it as STRIPE_WEBHOOK_SECRET in your environment for extra security.",
-    });
-  } catch (err: any) {
-    sendStripeError(req, res, err);
-  }
-});
-
-// ─── Admin: ensure existing webhook has required events subscribed
-router.post("/admin/stripe/ensure-webhook-events", requireAdmin, async (req, res): Promise<void> => {
-  if (!process.env.STRIPE_SECRET_KEY) {
-    res.status(503).json({ error: "STRIPE_SECRET_KEY is not configured" });
-    return;
-  }
-  const REQUIRED_EVENTS: Stripe.WebhookEndpointUpdateParams.EnabledEvent[] = [
-    "payment_intent.created",
-    "payment_intent.amount_capturable_updated",
-    "payment_intent.succeeded",
-    "payment_intent.payment_failed",
-    "charge.succeeded",
-    "charge.updated",
-    "charge.refunded",
-    "charge.dispute.created",
-    "invoice.paid",
-  ];
-  try {
-    const stripe = getStripe();
-    const existing = await stripe.webhookEndpoints.list({ limit: 20 });
-    const ours = existing.data.find(w => w.url === WEBHOOK_URL);
-    if (!ours) {
-      res.json({ updated: false, message: "No webhook registered yet. Use register-webhook first." });
-      return;
-    }
-    const currentEvents = ours.enabled_events ?? [];
-    const missingEvents = REQUIRED_EVENTS.filter(e => !currentEvents.includes(e));
-    if (missingEvents.length === 0) {
-      res.json({ updated: false, webhookId: ours.id, enabledEvents: currentEvents, message: "All required events already subscribed." });
-      return;
-    }
-    // Merge existing events with required ones
-    const mergedEvents = Array.from(new Set([...currentEvents, ...REQUIRED_EVENTS])) as Stripe.WebhookEndpointUpdateParams.EnabledEvent[];
-    const updated = await stripe.webhookEndpoints.update(ours.id, { enabled_events: mergedEvents });
-    res.json({ updated: true, webhookId: updated.id, enabledEvents: updated.enabled_events, addedEvents: missingEvents, message: "Webhook events updated to include all required events." });
-  } catch (err: any) {
-    sendStripeError(req, res, err);
-  }
-});
+  },
+);
 
 // ─── Admin: cancel a Stripe authorization (manual-capture PI) and release the hold
 
-router.post("/admin/payments/cancel-auth/:bookingId", requireAdmin, async (req, res): Promise<void> => {
-  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
-  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
+router.post(
+  "/admin/payments/cancel-auth/:bookingId",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
+    if (!bId) {
+      res.status(400).json({ error: "Invalid booking id" });
+      return;
+    }
 
-  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
-  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
-
-  if (booking.status !== "authorized") {
-    res.status(400).json({ error: `Booking is not in authorized status (current: ${booking.status})` });
-    return;
-  }
-
-  if (!booking.stripePaymentIntentId) {
-    res.status(400).json({ error: "Booking has no associated payment intent to cancel" });
-    return;
-  }
-
-  try {
-    const stripe = getStripe();
-    await stripe.paymentIntents.cancel(booking.stripePaymentIntentId);
-    await db.update(bookings)
-      .set({ status: "cancelled", updatedAt: new Date() })
+    const [booking] = await db
+      .select()
+      .from(bookings)
       .where(eq(bookings.id, bId));
-    console.log(`[payments] Admin cancelled PI authorization for booking #${bId} (PI: ${booking.stripePaymentIntentId})`);
-    res.json({ success: true, message: "Authorization cancelled and card hold released." });
-  } catch (err: any) {
-    sendStripeError(req, res, err);
-  }
-});
+    if (!booking) {
+      res.status(404).json({ error: "Booking not found" });
+      return;
+    }
+
+    if (booking.status !== "authorized") {
+      res
+        .status(400)
+        .json({
+          error: `Booking is not in authorized status (current: ${booking.status})`,
+        });
+      return;
+    }
+
+    if (!booking.stripePaymentIntentId) {
+      res
+        .status(400)
+        .json({ error: "Booking has no associated payment intent to cancel" });
+      return;
+    }
+
+    try {
+      const stripe = getStripe();
+      await stripe.paymentIntents.cancel(booking.stripePaymentIntentId);
+      await db
+        .update(bookings)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(eq(bookings.id, bId));
+      console.log(
+        `[payments] Admin cancelled PI authorization for booking #${bId} (PI: ${booking.stripePaymentIntentId})`,
+      );
+      res.json({
+        success: true,
+        message: "Authorization cancelled and card hold released.",
+      });
+    } catch (err: any) {
+      sendStripeError(req, res, err);
+    }
+  },
+);
 
 // ─── Admin: send a Stripe Invoice to the passenger's email for manual bookings
 
-router.post("/payments/create-invoice/:bookingId", requireAdmin, async (req, res): Promise<void> => {
-  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
-  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
-
-  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
-  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
-  if (booking.status !== "awaiting_payment") {
-    res.status(400).json({ error: "Booking is not awaiting payment" }); return;
-  }
-
-  try {
-    const stripe = getStripe();
-    const amount = Math.round(parseFloat(String(booking.priceQuoted)) * 100);
-    if (!amount || amount <= 0) {
-      res.status(400).json({ error: "Booking has no valid price to invoice." });
+router.post(
+  "/payments/create-invoice/:bookingId",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
+    if (!bId) {
+      res.status(400).json({ error: "Invalid booking id" });
       return;
     }
 
-    const bookingRef = `RM-${String(bId).padStart(4, "0")}`;
+    const [booking] = await db
+      .select()
+      .from(bookings)
+      .where(eq(bookings.id, bId));
+    if (!booking) {
+      res.status(404).json({ error: "Booking not found" });
+      return;
+    }
+    if (booking.status !== "awaiting_payment") {
+      res.status(400).json({ error: "Booking is not awaiting payment" });
+      return;
+    }
 
-    // Find or create the Stripe customer
-    const existingCustomers = await stripe.customers.list({ email: booking.passengerEmail, limit: 1 });
-    const customer = existingCustomers.data.length > 0
-      ? existingCustomers.data[0]
-      : await stripe.customers.create({
-          email: booking.passengerEmail,
-          name: booking.passengerName,
-          metadata: { bookingId: String(bId) },
-        });
-
-    // Void any pre-existing open invoices for this booking to avoid stale state
-    const openInvoices = await stripe.invoices.list({
-      customer: customer.id,
-      status: "open",
-      limit: 10,
-    });
-    for (const inv of openInvoices.data) {
-      if (inv.metadata?.bookingId === String(bId)) {
-        await stripe.invoices.voidInvoice(inv.id);
+    try {
+      const stripe = getStripe();
+      const amount = Math.round(parseFloat(String(booking.priceQuoted)) * 100);
+      if (!amount || amount <= 0) {
+        res
+          .status(400)
+          .json({ error: "Booking has no valid price to invoice." });
+        return;
       }
+
+      const bookingRef = `RM-${String(bId).padStart(4, "0")}`;
+
+      // Find or create the Stripe customer
+      const existingCustomers = await stripe.customers.list({
+        email: booking.passengerEmail,
+        limit: 1,
+      });
+      const customer =
+        existingCustomers.data.length > 0
+          ? existingCustomers.data[0]
+          : await stripe.customers.create({
+              email: booking.passengerEmail,
+              name: booking.passengerName,
+              metadata: { bookingId: String(bId) },
+            });
+
+      // Void any pre-existing open invoices for this booking to avoid stale state
+      const openInvoices = await stripe.invoices.list({
+        customer: customer.id,
+        status: "open",
+        limit: 10,
+      });
+      for (const inv of openInvoices.data) {
+        if (inv.metadata?.bookingId === String(bId)) {
+          await stripe.invoices.voidInvoice(inv.id);
+        }
+      }
+
+      // Also remove any dangling pending invoice items for this customer so they
+      // don't contaminate the new invoice total
+      const pendingItems = await stripe.invoiceItems.list({
+        customer: customer.id,
+        pending: true,
+        limit: 100,
+      });
+      for (const item of pendingItems.data) {
+        await stripe.invoiceItems.del(item.id);
+      }
+
+      // Create the draft invoice FIRST so we can attach the line item directly to
+      // it — this bypasses Stripe's "pending items" pool entirely and guarantees
+      // the invoice total is exactly what we expect.
+      const invoice = await stripe.invoices.create({
+        customer: customer.id,
+        collection_method: "send_invoice",
+        days_until_due: 7,
+        metadata: { bookingId: String(bId) },
+        description: `Royal Midnight — Reservation ${bookingRef}`,
+      });
+
+      // Attach the line item directly to the draft invoice
+      await stripe.invoiceItems.create({
+        customer: customer.id,
+        invoice: invoice.id,
+        amount,
+        currency: "usd",
+        description: `Royal Midnight Chauffeur — Booking ${bookingRef} · ${booking.pickupAddress} → ${booking.dropoffAddress}`,
+      });
+
+      // Retrieve the draft to confirm the total before finalising
+      const draft = await stripe.invoices.retrieve(invoice.id);
+      if ((draft.amount_due ?? 0) !== amount) {
+        await stripe.invoices.del(invoice.id);
+        res
+          .status(500)
+          .json({
+            error: `Invoice total mismatch: expected $${(amount / 100).toFixed(2)}, got $${((draft.amount_due ?? 0) / 100).toFixed(2)}. Please try again.`,
+          });
+        return;
+      }
+
+      const finalised = await stripe.invoices.finalizeInvoice(invoice.id);
+
+      const invoiceUrl = finalised.hosted_invoice_url ?? "";
+      const invoicePdfUrl = finalised.invoice_pdf ?? null;
+
+      if (!invoiceUrl) {
+        res
+          .status(500)
+          .json({
+            error:
+              "Invoice finalised but no payment URL was generated. Please try again.",
+          });
+        return;
+      }
+
+      await sendInvoiceToPassenger(
+        {
+          id: bId,
+          passengerName: booking.passengerName,
+          passengerEmail: booking.passengerEmail,
+          pickupAddress: booking.pickupAddress,
+          dropoffAddress: booking.dropoffAddress,
+          pickupAt: String(booking.pickupAt),
+          vehicleClass: booking.vehicleClass,
+          passengers: booking.passengers,
+          priceQuoted: parseFloat(String(booking.priceQuoted)),
+        },
+        invoiceUrl,
+        invoicePdfUrl,
+      );
+
+      res.json({ success: true, invoiceId: finalised.id, invoiceUrl });
+    } catch (err: any) {
+      sendStripeError(req, res, err);
     }
-
-    // Also remove any dangling pending invoice items for this customer so they
-    // don't contaminate the new invoice total
-    const pendingItems = await stripe.invoiceItems.list({
-      customer: customer.id,
-      pending: true,
-      limit: 100,
-    });
-    for (const item of pendingItems.data) {
-      await stripe.invoiceItems.del(item.id);
-    }
-
-    // Create the draft invoice FIRST so we can attach the line item directly to
-    // it — this bypasses Stripe's "pending items" pool entirely and guarantees
-    // the invoice total is exactly what we expect.
-    const invoice = await stripe.invoices.create({
-      customer: customer.id,
-      collection_method: "send_invoice",
-      days_until_due: 7,
-      metadata: { bookingId: String(bId) },
-      description: `Royal Midnight — Reservation ${bookingRef}`,
-    });
-
-    // Attach the line item directly to the draft invoice
-    await stripe.invoiceItems.create({
-      customer: customer.id,
-      invoice: invoice.id,
-      amount,
-      currency: "usd",
-      description: `Royal Midnight Chauffeur — Booking ${bookingRef} · ${booking.pickupAddress} → ${booking.dropoffAddress}`,
-    });
-
-    // Retrieve the draft to confirm the total before finalising
-    const draft = await stripe.invoices.retrieve(invoice.id);
-    if ((draft.amount_due ?? 0) !== amount) {
-      await stripe.invoices.del(invoice.id);
-      res.status(500).json({ error: `Invoice total mismatch: expected $${(amount / 100).toFixed(2)}, got $${((draft.amount_due ?? 0) / 100).toFixed(2)}. Please try again.` });
-      return;
-    }
-
-    const finalised = await stripe.invoices.finalizeInvoice(invoice.id);
-
-    const invoiceUrl = finalised.hosted_invoice_url ?? "";
-    const invoicePdfUrl = finalised.invoice_pdf ?? null;
-
-    if (!invoiceUrl) {
-      res.status(500).json({ error: "Invoice finalised but no payment URL was generated. Please try again." });
-      return;
-    }
-
-    await sendInvoiceToPassenger(
-      {
-        id: bId,
-        passengerName: booking.passengerName,
-        passengerEmail: booking.passengerEmail,
-        pickupAddress: booking.pickupAddress,
-        dropoffAddress: booking.dropoffAddress,
-        pickupAt: String(booking.pickupAt),
-        vehicleClass: booking.vehicleClass,
-        passengers: booking.passengers,
-        priceQuoted: parseFloat(String(booking.priceQuoted)),
-      },
-      invoiceUrl,
-      invoicePdfUrl,
-    );
-
-    res.json({ success: true, invoiceId: finalised.id, invoiceUrl });
-  } catch (err: any) {
-    sendStripeError(req, res, err);
-  }
-});
+  },
+);
 
 // ─── Stripe webhook ──────────────────────────────────────────────────────────
 
-async function confirmBookingFromPaymentIntent(bookingId: number, intentId: string, maxAttempts = 4): Promise<void> {
+async function confirmBookingFromPaymentIntent(
+  bookingId: number,
+  intentId: string,
+  maxAttempts = 4,
+): Promise<void> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const [current] = await db
-      .select({ status: bookings.status, stripePaymentIntentId: bookings.stripePaymentIntentId })
+      .select({
+        status: bookings.status,
+        stripePaymentIntentId: bookings.stripePaymentIntentId,
+      })
       .from(bookings)
       .where(eq(bookings.id, bookingId));
     if (!current) {
       if (attempt < maxAttempts) {
-        console.warn(`[payments] webhook: booking #${bookingId} not found yet — retrying in ${2 * attempt}s (attempt ${attempt}/${maxAttempts})`);
-        await new Promise(r => setTimeout(r, 2000 * attempt));
+        console.warn(
+          `[payments] webhook: booking #${bookingId} not found yet — retrying in ${2 * attempt}s (attempt ${attempt}/${maxAttempts})`,
+        );
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
         continue;
       }
-      console.error(`[payments] Booking #${bookingId} not found after ${maxAttempts} attempts`);
+      console.error(
+        `[payments] Booking #${bookingId} not found after ${maxAttempts} attempts`,
+      );
       return;
     }
     // payment_intent.succeeded fires after capture — move authorized → confirmed
     // (the driver accept flow already moves it, but webhook is a safety net)
     if (current.status === "awaiting_payment") {
-      await db.update(bookings)
-        .set({ status: "pending", stripePaymentIntentId: intentId, updatedAt: new Date() })
+      await db
+        .update(bookings)
+        .set({
+          status: "pending",
+          stripePaymentIntentId: intentId,
+          updatedAt: new Date(),
+        })
         .where(eq(bookings.id, bookingId));
-      console.log(`[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intentId})`);
+      console.log(
+        `[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intentId})`,
+      );
       // Awaited: this runs from the Stripe webhook, and Vercel can freeze the
       // function the moment the response is sent. Fire-and-forget meant the
       // confirmation and driver-offer emails were simply lost.
-      await firePostPaymentEmails(bookingId).catch(err => console.error("[payments] post-payment email error:", err));
+      await firePostPaymentEmails(bookingId).catch((err) =>
+        console.error("[payments] post-payment email error:", err),
+      );
     } else if (current.status === "cancelled") {
       // Booking was cancelled but payment went through anyway (race condition) — issue full refund
-      console.warn(`[payments] PI succeeded for already-cancelled booking #${bookingId} — issuing full refund (PI: ${intentId})`);
+      console.warn(
+        `[payments] PI succeeded for already-cancelled booking #${bookingId} — issuing full refund (PI: ${intentId})`,
+      );
       try {
         const stripe = getStripe();
         await stripe.refunds.create({ payment_intent: intentId });
-        console.log(`[payments] Full refund issued for cancelled booking #${bookingId} (PI: ${intentId})`);
+        console.log(
+          `[payments] Full refund issued for cancelled booking #${bookingId} (PI: ${intentId})`,
+        );
       } catch (refundErr: any) {
-        console.error(`[payments] Failed to refund cancelled booking #${bookingId}:`, refundErr.message);
+        console.error(
+          `[payments] Failed to refund cancelled booking #${bookingId}:`,
+          refundErr.message,
+        );
       }
     } else if (!current.stripePaymentIntentId) {
-      await db.update(bookings)
+      await db
+        .update(bookings)
         .set({ stripePaymentIntentId: intentId, updatedAt: new Date() })
         .where(eq(bookings.id, bookingId));
     }
@@ -920,28 +1300,48 @@ async function confirmBookingFromPaymentIntent(bookingId: number, intentId: stri
   }
 }
 
-async function authorizeBookingFromPaymentIntent(bookingId: number, intentId: string, maxAttempts = 4): Promise<void> {
+async function authorizeBookingFromPaymentIntent(
+  bookingId: number,
+  intentId: string,
+  maxAttempts = 4,
+): Promise<void> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const [current] = await db
-      .select({ status: bookings.status, stripePaymentIntentId: bookings.stripePaymentIntentId })
+      .select({
+        status: bookings.status,
+        stripePaymentIntentId: bookings.stripePaymentIntentId,
+      })
       .from(bookings)
       .where(eq(bookings.id, bookingId));
     if (!current) {
       if (attempt < maxAttempts) {
-        console.warn(`[payments] webhook: booking #${bookingId} not found yet — retrying in ${2 * attempt}s (attempt ${attempt}/${maxAttempts})`);
-        await new Promise(r => setTimeout(r, 2000 * attempt));
+        console.warn(
+          `[payments] webhook: booking #${bookingId} not found yet — retrying in ${2 * attempt}s (attempt ${attempt}/${maxAttempts})`,
+        );
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
         continue;
       }
-      console.error(`[payments] Booking #${bookingId} not found after ${maxAttempts} attempts`);
+      console.error(
+        `[payments] Booking #${bookingId} not found after ${maxAttempts} attempts`,
+      );
       return;
     }
     if (current.status === "awaiting_payment") {
-      await db.update(bookings)
-        .set({ status: "authorized", stripePaymentIntentId: intentId, authorizedAt: new Date(), updatedAt: new Date() })
+      await db
+        .update(bookings)
+        .set({
+          status: "authorized",
+          stripePaymentIntentId: intentId,
+          authorizedAt: new Date(),
+          updatedAt: new Date(),
+        })
         .where(eq(bookings.id, bookingId));
-      console.log(`[payments] PI requires_capture → Booking #${bookingId} → authorized (PI: ${intentId})`);
+      console.log(
+        `[payments] PI requires_capture → Booking #${bookingId} → authorized (PI: ${intentId})`,
+      );
     } else if (!current.stripePaymentIntentId) {
-      await db.update(bookings)
+      await db
+        .update(bookings)
         .set({ stripePaymentIntentId: intentId, updatedAt: new Date() })
         .where(eq(bookings.id, bookingId));
     }
@@ -957,7 +1357,9 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
     const stripe = getStripe();
     const webhookSecret = await getWebhookSecret();
     if (!webhookSecret) {
-      console.error("[webhook] STRIPE_WEBHOOK_SECRET not set — refusing unsigned event");
+      console.error(
+        "[webhook] STRIPE_WEBHOOK_SECRET not set — refusing unsigned event",
+      );
       res.status(503).json({ error: "Webhook signing secret not configured" });
       return;
     }
@@ -983,14 +1385,17 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
     if (event.type === "payment_intent.created") {
       const intent = event.data.object as Stripe.PaymentIntent;
       const bookingId = parseInt(intent.metadata.bookingId || "0");
-      console.log(`[payments] PI created: ${intent.id}${bookingId ? ` (booking #${bookingId})` : ""}`);
+      console.log(
+        `[payments] PI created: ${intent.id}${bookingId ? ` (booking #${bookingId})` : ""}`,
+      );
       if (bookingId) {
         const [current] = await db
           .select({ stripePaymentIntentId: bookings.stripePaymentIntentId })
           .from(bookings)
           .where(eq(bookings.id, bookingId));
         if (current && !current.stripePaymentIntentId) {
-          await db.update(bookings)
+          await db
+            .update(bookings)
             .set({ stripePaymentIntentId: intent.id, updatedAt: new Date() })
             .where(eq(bookings.id, bookingId));
         }
@@ -1005,15 +1410,32 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
         // ("2024-06-20" above), which still returns payment_intent directly on
         // the invoice — the field was only dropped from the *types* because the
         // npm package always types the latest API shape, not the pinned one.
-        const invoiceWithPI = invoice as Stripe.Invoice & { payment_intent?: string | Stripe.PaymentIntent | null };
-        const piId = typeof invoiceWithPI.payment_intent === "string" ? invoiceWithPI.payment_intent : invoiceWithPI.payment_intent?.id ?? null;
-        const [current] = await db.select({ status: bookings.status }).from(bookings).where(eq(bookings.id, bookingId));
+        const invoiceWithPI = invoice as Stripe.Invoice & {
+          payment_intent?: string | Stripe.PaymentIntent | null;
+        };
+        const piId =
+          typeof invoiceWithPI.payment_intent === "string"
+            ? invoiceWithPI.payment_intent
+            : (invoiceWithPI.payment_intent?.id ?? null);
+        const [current] = await db
+          .select({ status: bookings.status })
+          .from(bookings)
+          .where(eq(bookings.id, bookingId));
         if (current && current.status === "awaiting_payment") {
-          await db.update(bookings)
-            .set({ status: "pending", stripePaymentIntentId: piId ?? undefined, updatedAt: new Date() })
+          await db
+            .update(bookings)
+            .set({
+              status: "pending",
+              stripePaymentIntentId: piId ?? undefined,
+              updatedAt: new Date(),
+            })
             .where(eq(bookings.id, bookingId));
-          console.log(`[payments] Invoice paid → Booking #${bookingId} → pending (PI: ${piId ?? "N/A"})`);
-          await firePostPaymentEmails(bookingId).catch(err => console.error("[payments] invoice.paid email error:", err));
+          console.log(
+            `[payments] Invoice paid → Booking #${bookingId} → pending (PI: ${piId ?? "N/A"})`,
+          );
+          await firePostPaymentEmails(bookingId).catch((err) =>
+            console.error("[payments] invoice.paid email error:", err),
+          );
         }
       }
     }
@@ -1036,19 +1458,29 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       // Save the payment method to the customer's user record for future off-session charges
       if (intent.customer && intent.payment_method) {
         try {
-          const customerId = typeof intent.customer === "string" ? intent.customer : intent.customer.id;
-          const pmId = typeof intent.payment_method === "string" ? intent.payment_method : intent.payment_method.id;
+          const customerId =
+            typeof intent.customer === "string"
+              ? intent.customer
+              : intent.customer.id;
+          const pmId =
+            typeof intent.payment_method === "string"
+              ? intent.payment_method
+              : intent.payment_method.id;
           const [user] = await db
             .select({ id: usersTable.id })
             .from(usersTable)
             .where(eq(usersTable.stripeCustomerId, customerId));
           if (user) {
-            await db.update(usersTable)
+            await db
+              .update(usersTable)
               .set({ defaultPaymentMethodId: pmId })
               .where(eq(usersTable.id, user.id));
           }
         } catch (pmErr: any) {
-          console.warn("[payments] webhook: could not save payment method to user record:", pmErr?.message);
+          console.warn(
+            "[payments] webhook: could not save payment method to user record:",
+            pmErr?.message,
+          );
         }
       }
     }
@@ -1059,28 +1491,44 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       if (bookingId) {
         // Do NOT cancel the booking on payment failure — the passenger should be able to
         // retry with a different card. The booking stays at awaiting_payment.
-        console.warn(`[payments] Payment failed for booking #${bookingId}:`, intent.last_payment_error?.message ?? "unknown reason");
+        console.warn(
+          `[payments] Payment failed for booking #${bookingId}:`,
+          intent.last_payment_error?.message ?? "unknown reason",
+        );
       }
     }
 
     if (event.type === "charge.succeeded") {
       const charge = event.data.object as Stripe.Charge;
-      console.log(`[payments] charge.succeeded: ${charge.id} PI: ${charge.payment_intent} amount: $${(charge.amount / 100).toFixed(2)}`);
+      console.log(
+        `[payments] charge.succeeded: ${charge.id} PI: ${charge.payment_intent} amount: $${(charge.amount / 100).toFixed(2)}`,
+      );
     }
 
     if (event.type === "charge.updated") {
       const charge = event.data.object as Stripe.Charge;
-      console.log(`[payments] charge.updated: ${charge.id} status: ${charge.status} PI: ${charge.payment_intent}`);
+      console.log(
+        `[payments] charge.updated: ${charge.id} status: ${charge.status} PI: ${charge.payment_intent}`,
+      );
     }
 
     if (event.type === "charge.refunded") {
       const charge = event.data.object as Stripe.Charge;
-      console.log(`[payments] charge.refunded: ${charge.id} amount_refunded: $${(charge.amount_refunded / 100).toFixed(2)}`);
+      console.log(
+        `[payments] charge.refunded: ${charge.id} amount_refunded: $${(charge.amount_refunded / 100).toFixed(2)}`,
+      );
     }
 
     if (event.type === "charge.dispute.created") {
       const dispute = event.data.object as Stripe.Dispute;
-      console.warn("[payments] Chargeback dispute opened:", dispute.id, "amount:", dispute.amount, "reason:", dispute.reason);
+      console.warn(
+        "[payments] Chargeback dispute opened:",
+        dispute.id,
+        "amount:",
+        dispute.amount,
+        "reason:",
+        dispute.reason,
+      );
     }
 
     res.json({ received: true });
@@ -1094,341 +1542,493 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
 
 // ─── Passenger: list saved payment methods ───────────────────────────────────
 
-router.get("/payments/saved-cards", requireAuth, async (req, res): Promise<void> => {
-  const caller = req.currentUser!;
-  const [user] = await db
-    .select({ stripeCustomerId: usersTable.stripeCustomerId, defaultPaymentMethodId: usersTable.defaultPaymentMethodId })
-    .from(usersTable)
-    .where(eq(usersTable.id, caller.userId));
+router.get(
+  "/payments/saved-cards",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const caller = req.currentUser!;
+    const [user] = await db
+      .select({
+        stripeCustomerId: usersTable.stripeCustomerId,
+        defaultPaymentMethodId: usersTable.defaultPaymentMethodId,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, caller.userId));
 
-  if (!user?.stripeCustomerId) {
-    res.json({ cards: [] });
-    return;
-  }
-
-  try {
-    const stripe = getStripe();
-    const pms = await stripe.paymentMethods.list({ customer: user.stripeCustomerId, type: "card" });
-    res.json({
-      cards: pms.data.map(pm => ({
-        id: pm.id,
-        brand: pm.card?.brand ?? "card",
-        last4: pm.card?.last4 ?? "••••",
-        expMonth: pm.card?.exp_month,
-        expYear: pm.card?.exp_year,
-        isDefault: pm.id === user.defaultPaymentMethodId,
-      })),
-    });
-  } catch (err: any) {
-    // A customer id Stripe no longer knows means this account genuinely has no
-    // saved cards on the current Stripe account — an empty list is the honest
-    // answer, and it stops the stale id from breaking the profile page too.
-    if (isMissingCustomerError(err)) {
-      await forgetStaleStripeCustomer(caller.userId, req.log);
+    if (!user?.stripeCustomerId) {
       res.json({ cards: [] });
       return;
     }
-    sendStripeError(req, res, err);
-  }
-});
+
+    try {
+      const stripe = getStripe();
+      const pms = await stripe.paymentMethods.list({
+        customer: user.stripeCustomerId,
+        type: "card",
+      });
+      res.json({
+        cards: pms.data.map((pm) => ({
+          id: pm.id,
+          brand: pm.card?.brand ?? "card",
+          last4: pm.card?.last4 ?? "••••",
+          expMonth: pm.card?.exp_month,
+          expYear: pm.card?.exp_year,
+          isDefault: pm.id === user.defaultPaymentMethodId,
+        })),
+      });
+    } catch (err: any) {
+      // A customer id Stripe no longer knows means this account genuinely has no
+      // saved cards on the current Stripe account — an empty list is the honest
+      // answer, and it stops the stale id from breaking the profile page too.
+      if (isMissingCustomerError(err)) {
+        await forgetStaleStripeCustomer(caller.userId, req.log);
+        res.json({ cards: [] });
+        return;
+      }
+      sendStripeError(req, res, err);
+    }
+  },
+);
 
 // ─── Passenger: delete a saved payment method ────────────────────────────────
 
-router.delete("/payments/saved-cards/:pmId", requireAuth, async (req, res): Promise<void> => {
-  const pmId = String(req.params["pmId"] ?? "");
-  const caller = req.currentUser!;
+router.delete(
+  "/payments/saved-cards/:pmId",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const pmId = String(req.params["pmId"] ?? "");
+    const caller = req.currentUser!;
 
-  const [user] = await db
-    .select({ stripeCustomerId: usersTable.stripeCustomerId, defaultPaymentMethodId: usersTable.defaultPaymentMethodId })
-    .from(usersTable)
-    .where(eq(usersTable.id, caller.userId));
+    const [user] = await db
+      .select({
+        stripeCustomerId: usersTable.stripeCustomerId,
+        defaultPaymentMethodId: usersTable.defaultPaymentMethodId,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, caller.userId));
 
-  if (!user?.stripeCustomerId) {
-    res.status(404).json({ error: "No saved cards found" });
-    return;
-  }
-
-  try {
-    const stripe = getStripe();
-    // Verify the PM belongs to this customer before detaching
-    const pm = await stripe.paymentMethods.retrieve(pmId);
-    const pmCustomer = typeof pm.customer === "string" ? pm.customer : pm.customer?.id;
-    if (pmCustomer !== user.stripeCustomerId) {
-      res.status(403).json({ error: "Payment method does not belong to your account" });
+    if (!user?.stripeCustomerId) {
+      res.status(404).json({ error: "No saved cards found" });
       return;
     }
-    await stripe.paymentMethods.detach(pmId);
 
-    // Clear default if this was the default card
-    if (user.defaultPaymentMethodId === pmId) {
-      await db.update(usersTable)
-        .set({ defaultPaymentMethodId: null })
-        .where(eq(usersTable.id, caller.userId));
+    try {
+      const stripe = getStripe();
+      // Verify the PM belongs to this customer before detaching
+      const pm = await stripe.paymentMethods.retrieve(pmId);
+      const pmCustomer =
+        typeof pm.customer === "string" ? pm.customer : pm.customer?.id;
+      if (pmCustomer !== user.stripeCustomerId) {
+        res
+          .status(403)
+          .json({ error: "Payment method does not belong to your account" });
+        return;
+      }
+      await stripe.paymentMethods.detach(pmId);
+
+      // Clear default if this was the default card
+      if (user.defaultPaymentMethodId === pmId) {
+        await db
+          .update(usersTable)
+          .set({ defaultPaymentMethodId: null })
+          .where(eq(usersTable.id, caller.userId));
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      sendStripeError(req, res, err);
     }
-    res.json({ success: true });
-  } catch (err: any) {
-    sendStripeError(req, res, err);
-  }
-});
+  },
+);
 
 // ─── Passenger: charge a tip off-session ─────────────────────────────────────
 
-router.post("/payments/tip/:bookingId", requireAuth, async (req, res): Promise<void> => {
-  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
-  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
-
-  const { tipAmount } = req.body as { tipAmount?: number };
-  if (!tipAmount || tipAmount <= 0 || tipAmount > 500) {
-    res.status(400).json({ error: "Tip amount must be between $1 and $500" });
-    return;
-  }
-
-  const caller = req.currentUser!;
-
-  const [booking] = await db
-    .select()
-    .from(bookings)
-    .where(eq(bookings.id, bId));
-
-  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
-
-  if (booking.userId !== caller.userId) {
-    res.status(403).json({ error: "You can only tip on your own bookings" });
-    return;
-  }
-
-  if (booking.status !== "completed") {
-    res.status(400).json({ error: "Tips can only be added to completed trips" });
-    return;
-  }
-
-  if (booking.tipAmount != null) {
-    res.status(409).json({ error: "A tip has already been added to this booking" });
-    return;
-  }
-
-  const [user] = await db
-    .select({ stripeCustomerId: usersTable.stripeCustomerId, defaultPaymentMethodId: usersTable.defaultPaymentMethodId })
-    .from(usersTable)
-    .where(eq(usersTable.id, caller.userId));
-
-  if (!user?.stripeCustomerId || !user.defaultPaymentMethodId) {
-    res.status(400).json({ error: "No saved payment method on file. Please contact support to add a tip." });
-    return;
-  }
-
-  try {
-    const stripe = getStripe();
-    const intent = await stripe.paymentIntents.create({
-      amount: Math.round(tipAmount * 100),
-      currency: "usd",
-      customer: user.stripeCustomerId,
-      payment_method: user.defaultPaymentMethodId,
-      confirm: true,
-      off_session: true,
-      description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
-      metadata: { bookingId: String(bId), type: "tip" },
-    });
-
-    if (intent.status !== "succeeded") {
-      res.status(402).json({ error: `Tip charge did not succeed (status: ${intent.status}). Please contact support.` });
+router.post(
+  "/payments/tip/:bookingId",
+  paymentLimiter(),
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
+    if (!bId) {
+      res.status(400).json({ error: "Invalid booking id" });
       return;
     }
 
-    await db.update(bookings)
-      .set({ tipAmount: String(tipAmount), tipPaymentIntentId: intent.id, updatedAt: new Date() })
+    const { tipAmount } = req.body as { tipAmount?: number };
+    if (!tipAmount || tipAmount <= 0 || tipAmount > 500) {
+      res.status(400).json({ error: "Tip amount must be between $1 and $500" });
+      return;
+    }
+
+    const caller = req.currentUser!;
+
+    const [booking] = await db
+      .select()
+      .from(bookings)
       .where(eq(bookings.id, bId));
 
-    res.json({ success: true, tipAmount, paymentIntentId: intent.id });
-  } catch (err: any) {
-    // The saved card belongs to a customer Stripe no longer has. Off-session
-    // charging is impossible, so say so plainly and drop the dead reference —
-    // the on-session tip-checkout route below still works.
-    if (isMissingCustomerError(err)) {
-      await forgetStaleStripeCustomer(caller.userId, req.log);
-      res.status(400).json({ error: "Your saved payment method is no longer valid. Please add a card again to leave a tip." });
+    if (!booking) {
+      res.status(404).json({ error: "Booking not found" });
       return;
     }
-    sendStripeError(req, res, err, "Tip charge failed — please try again.");
-  }
-});
+
+    if (booking.userId !== caller.userId) {
+      res.status(403).json({ error: "You can only tip on your own bookings" });
+      return;
+    }
+
+    if (booking.status !== "completed") {
+      res
+        .status(400)
+        .json({ error: "Tips can only be added to completed trips" });
+      return;
+    }
+
+    if (booking.tipAmount != null) {
+      res
+        .status(409)
+        .json({ error: "A tip has already been added to this booking" });
+      return;
+    }
+
+    const [user] = await db
+      .select({
+        stripeCustomerId: usersTable.stripeCustomerId,
+        defaultPaymentMethodId: usersTable.defaultPaymentMethodId,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, caller.userId));
+
+    if (!user?.stripeCustomerId || !user.defaultPaymentMethodId) {
+      res
+        .status(400)
+        .json({
+          error:
+            "No saved payment method on file. Please contact support to add a tip.",
+        });
+      return;
+    }
+
+    try {
+      const stripe = getStripe();
+      const intent = await stripe.paymentIntents.create({
+        amount: Math.round(tipAmount * 100),
+        currency: "usd",
+        customer: user.stripeCustomerId,
+        payment_method: user.defaultPaymentMethodId,
+        confirm: true,
+        off_session: true,
+        description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
+        metadata: { bookingId: String(bId), type: "tip" },
+      });
+
+      if (intent.status !== "succeeded") {
+        res
+          .status(402)
+          .json({
+            error: `Tip charge did not succeed (status: ${intent.status}). Please contact support.`,
+          });
+        return;
+      }
+
+      await db
+        .update(bookings)
+        .set({
+          tipAmount: String(tipAmount),
+          tipPaymentIntentId: intent.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(bookings.id, bId));
+
+      res.json({ success: true, tipAmount, paymentIntentId: intent.id });
+    } catch (err: any) {
+      // The saved card belongs to a customer Stripe no longer has. Off-session
+      // charging is impossible, so say so plainly and drop the dead reference —
+      // the on-session tip-checkout route below still works.
+      if (isMissingCustomerError(err)) {
+        await forgetStaleStripeCustomer(caller.userId, req.log);
+        res
+          .status(400)
+          .json({
+            error:
+              "Your saved payment method is no longer valid. Please add a card again to leave a tip.",
+          });
+        return;
+      }
+      sendStripeError(req, res, err, "Tip charge failed — please try again.");
+    }
+  },
+);
 
 // ─── Passenger: create an on-session tip PaymentIntent (no saved card required) ──
 
-router.post("/payments/tip-checkout/:bookingId", requireAuth, async (req, res): Promise<void> => {
-  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
-  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
+router.post(
+  "/payments/tip-checkout/:bookingId",
+  paymentLimiter(),
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
+    if (!bId) {
+      res.status(400).json({ error: "Invalid booking id" });
+      return;
+    }
 
-  const { tipAmount } = req.body as { tipAmount?: number };
-  if (!tipAmount || tipAmount <= 0 || tipAmount > 500) {
-    res.status(400).json({ error: "Tip amount must be between $1 and $500" });
-    return;
-  }
+    const { tipAmount } = req.body as { tipAmount?: number };
+    if (!tipAmount || tipAmount <= 0 || tipAmount > 500) {
+      res.status(400).json({ error: "Tip amount must be between $1 and $500" });
+      return;
+    }
 
-  const caller = req.currentUser!;
+    const caller = req.currentUser!;
 
-  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
-  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
-  if (booking.userId !== caller.userId) { res.status(403).json({ error: "You can only tip on your own bookings" }); return; }
-  if (booking.status !== "completed") { res.status(400).json({ error: "Tips can only be added to completed trips" }); return; }
-  if (booking.tipAmount != null) { res.status(409).json({ error: "A tip has already been added to this booking" }); return; }
+    const [booking] = await db
+      .select()
+      .from(bookings)
+      .where(eq(bookings.id, bId));
+    if (!booking) {
+      res.status(404).json({ error: "Booking not found" });
+      return;
+    }
+    if (booking.userId !== caller.userId) {
+      res.status(403).json({ error: "You can only tip on your own bookings" });
+      return;
+    }
+    if (booking.status !== "completed") {
+      res
+        .status(400)
+        .json({ error: "Tips can only be added to completed trips" });
+      return;
+    }
+    if (booking.tipAmount != null) {
+      res
+        .status(409)
+        .json({ error: "A tip has already been added to this booking" });
+      return;
+    }
 
-  const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
-  if (!publishableKey) { res.status(503).json({ error: "Stripe not configured" }); return; }
+    const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
+    if (!publishableKey) {
+      res.status(503).json({ error: "Stripe not configured" });
+      return;
+    }
 
-  try {
-    const stripe = getStripe();
-    const intent = await stripe.paymentIntents.create({
-      amount: Math.round(tipAmount * 100),
-      currency: "usd",
-      description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
-      metadata: { bookingId: String(bId), type: "tip", userId: String(caller.userId) },
-    });
-    res.json({ clientSecret: intent.client_secret, publishableKey });
-  } catch (err: any) {
-    sendStripeError(req, res, err, "Could not initiate tip payment.");
-  }
-});
+    try {
+      const stripe = getStripe();
+      const intent = await stripe.paymentIntents.create({
+        amount: Math.round(tipAmount * 100),
+        currency: "usd",
+        description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
+        metadata: {
+          bookingId: String(bId),
+          type: "tip",
+          userId: String(caller.userId),
+        },
+      });
+      res.json({ clientSecret: intent.client_secret, publishableKey });
+    } catch (err: any) {
+      sendStripeError(req, res, err, "Could not initiate tip payment.");
+    }
+  },
+);
 
 // ─── Passenger: confirm a tip paid via on-session PaymentIntent ───────────────
 
-router.post("/payments/tip-confirm/:bookingId", requireAuth, async (req, res): Promise<void> => {
-  const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
-  if (!bId) { res.status(400).json({ error: "Invalid booking id" }); return; }
-
-  const { paymentIntentId } = req.body as { paymentIntentId?: string };
-  if (!paymentIntentId) {
-    res.status(400).json({ error: "paymentIntentId is required" });
-    return;
-  }
-
-  const caller = req.currentUser!;
-
-  const [booking] = await db.select().from(bookings).where(eq(bookings.id, bId));
-  if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
-  if (booking.userId !== caller.userId) { res.status(403).json({ error: "You can only tip on your own bookings" }); return; }
-  if (booking.tipAmount != null) { res.status(409).json({ error: "A tip has already been added to this booking" }); return; }
-
-  try {
-    const stripe = getStripe();
-    const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
-
-    // Verify intent succeeded
-    if (intent.status !== "succeeded") {
-      res.status(402).json({ error: `Payment has not succeeded (status: ${intent.status})` });
+router.post(
+  "/payments/tip-confirm/:bookingId",
+  paymentLimiter(),
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
+    if (!bId) {
+      res.status(400).json({ error: "Invalid booking id" });
       return;
     }
 
-    // Validate all metadata to prevent cross-booking and cross-user attacks
-    const meta = intent.metadata as Record<string, string>;
-    if (
-      meta["bookingId"] !== String(bId) ||
-      meta["type"] !== "tip" ||
-      meta["userId"] !== String(caller.userId)
-    ) {
-      res.status(400).json({ error: "Payment intent does not match this booking" });
+    const { paymentIntentId } = req.body as { paymentIntentId?: string };
+    if (!paymentIntentId) {
+      res.status(400).json({ error: "paymentIntentId is required" });
       return;
     }
 
-    // Derive canonical amount from Stripe — never trust the client
-    const confirmedCents = intent.amount_received ?? intent.amount;
-    const confirmedAmount = confirmedCents / 100;
-    if (confirmedAmount <= 0 || confirmedAmount > 500) {
-      res.status(400).json({ error: "Confirmed tip amount is out of valid range" });
-      return;
-    }
+    const caller = req.currentUser!;
 
-    await db.update(bookings)
-      .set({ tipAmount: String(confirmedAmount), tipPaymentIntentId: intent.id, updatedAt: new Date() })
+    const [booking] = await db
+      .select()
+      .from(bookings)
       .where(eq(bookings.id, bId));
-
-    res.json({ success: true, tipAmount: confirmedAmount, paymentIntentId: intent.id });
-
-    // Save the payment method used for this tip as the default for future off-session charges
-    const pm = intent.payment_method;
-    if (pm) {
-      const pmId = typeof pm === "string" ? pm : pm.id;
-      db.update(usersTable)
-        .set({ defaultPaymentMethodId: pmId })
-        .where(eq(usersTable.id, caller.userId))
-        .catch((e: any) => console.warn("[payments] tip-confirm: could not save PM:", e?.message));
+    if (!booking) {
+      res.status(404).json({ error: "Booking not found" });
+      return;
     }
-  } catch (err: any) {
-    sendStripeError(req, res, err, "Could not confirm tip payment.");
-  }
-});
+    if (booking.userId !== caller.userId) {
+      res.status(403).json({ error: "You can only tip on your own bookings" });
+      return;
+    }
+    if (booking.tipAmount != null) {
+      res
+        .status(409)
+        .json({ error: "A tip has already been added to this booking" });
+      return;
+    }
+
+    try {
+      const stripe = getStripe();
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+      // Verify intent succeeded
+      if (intent.status !== "succeeded") {
+        res
+          .status(402)
+          .json({
+            error: `Payment has not succeeded (status: ${intent.status})`,
+          });
+        return;
+      }
+
+      // Validate all metadata to prevent cross-booking and cross-user attacks
+      const meta = intent.metadata as Record<string, string>;
+      if (
+        meta["bookingId"] !== String(bId) ||
+        meta["type"] !== "tip" ||
+        meta["userId"] !== String(caller.userId)
+      ) {
+        res
+          .status(400)
+          .json({ error: "Payment intent does not match this booking" });
+        return;
+      }
+
+      // Derive canonical amount from Stripe — never trust the client
+      const confirmedCents = intent.amount_received ?? intent.amount;
+      const confirmedAmount = confirmedCents / 100;
+      if (confirmedAmount <= 0 || confirmedAmount > 500) {
+        res
+          .status(400)
+          .json({ error: "Confirmed tip amount is out of valid range" });
+        return;
+      }
+
+      await db
+        .update(bookings)
+        .set({
+          tipAmount: String(confirmedAmount),
+          tipPaymentIntentId: intent.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(bookings.id, bId));
+
+      res.json({
+        success: true,
+        tipAmount: confirmedAmount,
+        paymentIntentId: intent.id,
+      });
+
+      // Save the payment method used for this tip as the default for future off-session charges
+      const pm = intent.payment_method;
+      if (pm) {
+        const pmId = typeof pm === "string" ? pm : pm.id;
+        db.update(usersTable)
+          .set({ defaultPaymentMethodId: pmId })
+          .where(eq(usersTable.id, caller.userId))
+          .catch((e: any) =>
+            console.warn(
+              "[payments] tip-confirm: could not save PM:",
+              e?.message,
+            ),
+          );
+      }
+    } catch (err: any) {
+      sendStripeError(req, res, err, "Could not confirm tip payment.");
+    }
+  },
+);
 
 // ─── Save a payment method from a succeeded PaymentIntent ────────────────────
 // Called by the frontend after a successful booking payment to reliably persist
 // the card without depending on the webhook (which may not fire in all envs).
 
-router.post("/payments/save-payment-method", requireAuth, async (req, res): Promise<void> => {
-  const { paymentIntentId } = req.body as { paymentIntentId?: string };
-  if (!paymentIntentId) {
-    res.status(400).json({ error: "paymentIntentId is required" });
-    return;
-  }
-
-  const caller = req.currentUser!;
-
-  const [user] = await db
-    .select({ id: usersTable.id, stripeCustomerId: usersTable.stripeCustomerId })
-    .from(usersTable)
-    .where(eq(usersTable.id, caller.userId));
-
-  if (!user?.stripeCustomerId) {
-    res.json({ saved: false, reason: "No Stripe customer on file" });
-    return;
-  }
-
-  try {
-    const stripe = getStripe();
-    const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
-      expand: ["payment_method"],
-    });
-
-    if (intent.status !== "succeeded") {
-      res.json({ saved: false, reason: "Payment not yet succeeded" });
+router.post(
+  "/payments/save-payment-method",
+  paymentLimiter(),
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const { paymentIntentId } = req.body as { paymentIntentId?: string };
+    if (!paymentIntentId) {
+      res.status(400).json({ error: "paymentIntentId is required" });
       return;
     }
 
-    const pm = intent.payment_method as Stripe.PaymentMethod | null;
-    if (!pm?.id) {
-      res.json({ saved: false, reason: "No payment method on intent" });
+    const caller = req.currentUser!;
+
+    const [user] = await db
+      .select({
+        id: usersTable.id,
+        stripeCustomerId: usersTable.stripeCustomerId,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, caller.userId));
+
+    if (!user?.stripeCustomerId) {
+      res.json({ saved: false, reason: "No Stripe customer on file" });
       return;
     }
 
-    // Attach to customer if not already attached
-    const pmCustomer = typeof pm.customer === "string" ? pm.customer : pm.customer?.id;
-    if (pmCustomer !== user.stripeCustomerId) {
-      await stripe.paymentMethods.attach(pm.id, { customer: user.stripeCustomerId });
-    }
+    try {
+      const stripe = getStripe();
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+        expand: ["payment_method"],
+      });
 
-    await db.update(usersTable)
-      .set({ defaultPaymentMethodId: pm.id })
-      .where(eq(usersTable.id, user.id));
+      if (intent.status !== "succeeded") {
+        res.json({ saved: false, reason: "Payment not yet succeeded" });
+        return;
+      }
 
-    res.json({
-      saved: true,
-      card: {
-        id: pm.id,
-        brand: pm.card?.brand ?? "card",
-        last4: pm.card?.last4 ?? "••••",
-        expMonth: pm.card?.exp_month,
-        expYear: pm.card?.exp_year,
-      },
-    });
-  } catch (err: any) {
-    // Saving the card is a convenience that runs after the money has already
-    // moved. A dead customer id must never turn that into a visible failure on
-    // the confirmation screen — drop it and report the card as unsaved.
-    if (isMissingCustomerError(err)) {
-      await forgetStaleStripeCustomer(caller.userId, req.log);
-      res.json({ saved: false, reason: "Stripe customer no longer exists — a new one will be created on your next booking." });
-      return;
+      const pm = intent.payment_method as Stripe.PaymentMethod | null;
+      if (!pm?.id) {
+        res.json({ saved: false, reason: "No payment method on intent" });
+        return;
+      }
+
+      // Attach to customer if not already attached
+      const pmCustomer =
+        typeof pm.customer === "string" ? pm.customer : pm.customer?.id;
+      if (pmCustomer !== user.stripeCustomerId) {
+        await stripe.paymentMethods.attach(pm.id, {
+          customer: user.stripeCustomerId,
+        });
+      }
+
+      await db
+        .update(usersTable)
+        .set({ defaultPaymentMethodId: pm.id })
+        .where(eq(usersTable.id, user.id));
+
+      res.json({
+        saved: true,
+        card: {
+          id: pm.id,
+          brand: pm.card?.brand ?? "card",
+          last4: pm.card?.last4 ?? "••••",
+          expMonth: pm.card?.exp_month,
+          expYear: pm.card?.exp_year,
+        },
+      });
+    } catch (err: any) {
+      // Saving the card is a convenience that runs after the money has already
+      // moved. A dead customer id must never turn that into a visible failure on
+      // the confirmation screen — drop it and report the card as unsaved.
+      if (isMissingCustomerError(err)) {
+        await forgetStaleStripeCustomer(caller.userId, req.log);
+        res.json({
+          saved: false,
+          reason:
+            "Stripe customer no longer exists — a new one will be created on your next booking.",
+        });
+        return;
+      }
+      sendStripeError(req, res, err);
     }
-    sendStripeError(req, res, err);
-  }
-});
+  },
+);
 
 export default router;

@@ -78,6 +78,12 @@ overrides:
   ip-address: '>=10.3.1'
   body-parser: '>=2.3.0'
   fast-xml-parser: '>=5.7.0'
+  # uuid: GHSA-w5hq-g745-h8pq (missing buffer bounds check), arrives via
+  # svix under resend in api-server's production dependencies.
+  uuid: '>=11.1.1'
+  # yaml: GHSA-48c2-rrv3-qjmp (stack overflow DoS), arrives via vite/vitest
+  # and the Expo/Metro build toolchain.
+  yaml: '>=2.8.3'
   # Expo/Metro build toolchain. These never reach the APK — they run on the
   # machine doing the build — but they are `dependencies` of driver-app, so
   # `pnpm audit --prod` counts them and the CI gate would never go green.

@@ -22,7 +22,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 30,
-      "includeFiles": "artifacts/api-server/dist/**"
+      "includeFiles": "artifacts/api-server/dist/**/*.mjs"
     }
   },
   "crons": [

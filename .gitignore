@@ -52,8 +52,16 @@ Thumbs.db
 
 # Environment variables (never commit real secrets — .env.example files are the templates)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+
+# Key/certificate material — supabase-prod-ca-2021.crt below is Supabase's
+# public root CA, intentionally committed for TLS verification, not a secret.
+*.pem
+*.key
+*.p12
+*.pfx
+!lib/db/certs/supabase-prod-ca-2021.crt
 
 # Agent skills installed with `npx skills add` — tooling for whoever is working
 # on the repo, not part of the product.

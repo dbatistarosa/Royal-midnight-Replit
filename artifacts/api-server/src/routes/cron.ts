@@ -36,7 +36,12 @@ function verifyCronRequest(req: import("express").Request, res: import("express"
     provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
 
   if (!matches) {
-    logger.warn({ ip: req.ip, path: req.path }, "cron_auth_failed");
+    const extra = { ip: req.ip, path: req.path };
+    logger.warn(extra, "cron_auth_failed");
+    // Dynamic import — see lib/sentry.ts's comment on why this must never be static.
+    void import("../lib/sentry.js")
+      .then(({ captureSecurityEvent }) => captureSecurityEvent("cron_auth_failed", extra))
+      .catch(() => {});
     res.status(401).json({ error: "Unauthorized" });
     return false;
   }

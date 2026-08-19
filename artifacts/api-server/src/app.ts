@@ -12,10 +12,13 @@ import { globalLimiter } from "./lib/rateLimit";
 /**
  * Error monitoring.
  *
- * Every authentication_failed, authorization_failed and cron_auth_failed this
- * codebase carefully logs went to stdout and nowhere else — no alert, no
- * aggregation, nobody watching. If someone probed the app there would be no
- * signal at all.
+ * authorization_failed (middleware/auth.ts) and cron_auth_failed (routes/cron.ts)
+ * now also fire a best-effort Sentry captureMessage alongside the stdout log
+ * (lib/sentry.ts's captureSecurityEvent), each via its own dynamic import so a
+ * missing/broken Sentry setup can never affect the request being reported on.
+ * authentication_required / invalid_or_expired_session (routine 401s — expired
+ * sessions, logged-out tabs) are deliberately left stdout-only: alerting on
+ * every one would be noise, not signal.
  *
  * Loaded through a guarded dynamic import rather than a static one, and that is
  * not superstition: importing @sentry/node at the top of this file took the
@@ -36,7 +39,10 @@ try {
   sentry.initSentry();
 } catch (err) {
   sentry = null;
-  console.error("[sentry] monitoring unavailable, continuing without it:", (err as Error)?.message);
+  console.error(
+    "[sentry] monitoring unavailable, continuing without it:",
+    (err as Error)?.message,
+  );
 }
 
 const app: Express = express();
@@ -85,7 +91,7 @@ app.use(
 const ALLOWED_ORIGINS = new Set(
   (process.env.ALLOWED_ORIGINS ?? "https://royalmidnight.com")
     .split(",")
-    .map(o => o.trim())
+    .map((o) => o.trim())
     .filter(Boolean),
 );
 
@@ -94,16 +100,22 @@ const ALLOWED_ORIGINS = new Set(
 // ALLOWED_ORIGINS ahead of time — scoped narrowly to this project's own
 // preview URL pattern, not all of *.vercel.app, so other Vercel projects
 // aren't accidentally allowed.
-const PREVIEW_ORIGIN_PATTERN = /^https:\/\/royal-midnight-[a-z0-9-]+\.vercel\.app$/;
+const PREVIEW_ORIGIN_PATTERN =
+  /^https:\/\/royal-midnight-[a-z0-9-]+\.vercel\.app$/;
 
 app.use(
   cors({
     origin(requestOrigin, callback) {
       // Allow server-to-server calls (no Origin header) and whitelisted origins only
-      const isAllowedPreview = process.env.VERCEL_ENV === "preview"
-        && !!requestOrigin
-        && PREVIEW_ORIGIN_PATTERN.test(requestOrigin);
-      if (!requestOrigin || ALLOWED_ORIGINS.has(requestOrigin) || isAllowedPreview) {
+      const isAllowedPreview =
+        process.env.VERCEL_ENV === "preview" &&
+        !!requestOrigin &&
+        PREVIEW_ORIGIN_PATTERN.test(requestOrigin);
+      if (
+        !requestOrigin ||
+        ALLOWED_ORIGINS.has(requestOrigin) ||
+        isAllowedPreview
+      ) {
         callback(null, true);
       } else {
         callback(new Error(`Origin "${requestOrigin}" not allowed`));
@@ -133,15 +145,46 @@ app.use("/api", globalLimiter());
 app.use("/api", router);
 
 // In production, serve the Vite frontend build as static files and handle SPA routing.
+//
+// This branch only runs on a non-Vercel host (e.g. Railway, per railway.json) —
+// on Vercel the frontend is served by Vercel's own static hosting and these
+// responses never reach Express. The full header set below mirrors vercel.json
+// so security posture doesn't depend on which host is actually serving traffic.
 if (process.env.NODE_ENV === "production") {
-  const frontendDist = path.resolve(process.cwd(), "artifacts/royal-midnight/dist/public");
+  const frontendDist = path.resolve(
+    process.cwd(),
+    "artifacts/royal-midnight/dist/public",
+  );
   if (existsSync(frontendDist)) {
+    app.use((_req, res, next) => {
+      res.setHeader(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' https://js.stripe.com https://m.stripe.network; " +
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+          "font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; " +
+          "worker-src 'self' blob:; child-src 'self' blob:; " +
+          "connect-src 'self' https://api.mapbox.com https://events.mapbox.com https://api.stripe.com " +
+          "https://maps.stripe.com https://merchant-ui-api.stripe.com https://m.stripe.network " +
+          "https://r.stripe.com https://q.stripe.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io; " +
+          "frame-src https://js.stripe.com https://hooks.stripe.com https://m.stripe.network; " +
+          "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
+      );
+      res.setHeader("X-Frame-Options", "DENY");
+      res.setHeader(
+        "Permissions-Policy",
+        'camera=(), microphone=(), payment=(self "https://js.stripe.com"), geolocation=(self)',
+      );
+      next();
+    });
     app.use(express.static(frontendDist));
     app.use((_req, res) => {
       res.sendFile(path.join(frontendDist, "index.html"));
     });
   } else {
-    logger.warn({ frontendDist }, "Frontend dist not found — static serving skipped");
+    logger.warn(
+      { frontendDist },
+      "Frontend dist not found — static serving skipped",
+    );
   }
 }
 
@@ -151,18 +194,36 @@ if (sentry) {
   try {
     sentry.Sentry.setupExpressErrorHandler(app);
   } catch (err) {
-    console.error("[sentry] express error handler not installed:", (err as Error)?.message);
+    console.error(
+      "[sentry] express error handler not installed:",
+      (err as Error)?.message,
+    );
   }
 }
 
 // Global error handler — logs unhandled route errors via pino, returns generic JSON
-app.use((err: unknown, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
-  const message = err instanceof Error ? err.message : String(err);
-  const cause = (err as any)?.cause;
-  const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : undefined;
-  const stack = err instanceof Error ? err.stack : undefined;
-  logger.error({ err: { message, causeMsg, stack } }, "Unhandled route error");
-  res.status(500).json({ error: "Internal server error" });
-});
+app.use(
+  (
+    err: unknown,
+    _req: import("express").Request,
+    res: import("express").Response,
+    _next: import("express").NextFunction,
+  ) => {
+    const message = err instanceof Error ? err.message : String(err);
+    const cause = (err as any)?.cause;
+    const causeMsg =
+      cause instanceof Error
+        ? cause.message
+        : cause
+          ? String(cause)
+          : undefined;
+    const stack = err instanceof Error ? err.stack : undefined;
+    logger.error(
+      { err: { message, causeMsg, stack } },
+      "Unhandled route error",
+    );
+    res.status(500).json({ error: "Internal server error" });
+  },
+);
 
 export default app;

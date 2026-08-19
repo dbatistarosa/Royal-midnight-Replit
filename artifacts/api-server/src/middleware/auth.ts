@@ -54,7 +54,12 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   }
 
   if (session.role !== "admin") {
-    req.log?.warn({ ip: req.ip, path: req.path, userId: session.userId, role: session.role }, "authorization_failed");
+    const extra = { ip: req.ip, path: req.path, userId: session.userId, role: session.role };
+    req.log?.warn(extra, "authorization_failed");
+    // Dynamic import — see lib/sentry.ts's comment on why this must never be static.
+    void import("../lib/sentry.js")
+      .then(({ captureSecurityEvent }) => captureSecurityEvent("authorization_failed", extra))
+      .catch(() => {});
     res.status(403).json({ error: "Admin access required" });
     return;
   }

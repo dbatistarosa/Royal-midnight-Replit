@@ -1,12 +1,35 @@
 import { Router, type IRouter } from "express";
 import { sql, desc, eq, and, isNull, or, gt, inArray } from "drizzle-orm";
-import { db, bookingsTable, driversTable, vehiclesTable, usersTable, supportTicketsTable, settingsTable, emailLogsTable, vehicleCatalogTable, complianceDocumentsTable, corporateAccountsTable } from "@workspace/db";
+import {
+  db,
+  bookingsTable,
+  driversTable,
+  vehiclesTable,
+  usersTable,
+  supportTicketsTable,
+  settingsTable,
+  emailLogsTable,
+  vehicleCatalogTable,
+  complianceDocumentsTable,
+  corporateAccountsTable,
+} from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
-import { encryptField, safeDecryptField, lastN, isFieldEncryptionConfigError, getFieldEncryptionStatus } from "../lib/encrypt.js";
-import { getMailerStatus, ADMIN_EMAIL } from "../lib/mailer.js";
+import {
+  encryptField,
+  safeDecryptField,
+  lastN,
+  isFieldEncryptionConfigError,
+  getFieldEncryptionStatus,
+} from "../lib/encrypt.js";
+import { getMailerStatus, ADMIN_EMAIL, escapeHtml } from "../lib/mailer.js";
 import { serializeBooking } from "../lib/serializeBooking.js";
 import { loadCompletedBookingMoney } from "../lib/fareBreakdown.js";
-import { resolvePayoutWeek, computeWeeklyEarnings, loadApprovedDrivers, emptyWeekEarnings } from "../lib/weeklyPayouts.js";
+import {
+  resolvePayoutWeek,
+  computeWeeklyEarnings,
+  loadApprovedDrivers,
+  emptyWeekEarnings,
+} from "../lib/weeklyPayouts.js";
 import { loadBookingExtras, driverExtrasTotal } from "../lib/bookingExtras.js";
 import { Resend } from "resend";
 import {
@@ -24,11 +47,17 @@ const router: IRouter = Router();
 const parseBooking = serializeBooking;
 
 /** Decrypt one payout field without letting a bad key fail the whole request. */
-function safeDecrypt<T>(fn: () => T, req: { log: { error: (o: object, m: string) => void } }): T | null {
+function safeDecrypt<T>(
+  fn: () => T,
+  req: { log: { error: (o: object, m: string) => void } },
+): T | null {
   try {
     return fn();
   } catch (err) {
-    req.log.error({ err: (err as Error).message }, "payout_field_decrypt_failed");
+    req.log.error(
+      { err: (err as Error).message },
+      "payout_field_decrypt_failed",
+    );
     return null;
   }
 }
@@ -38,7 +67,9 @@ function parseDriver(d: typeof driversTable.$inferSelect) {
     ...d,
     rating: d.rating != null ? parseFloat(d.rating) : null,
     createdAt: d.createdAt.toISOString(),
-    locationUpdatedAt: d.locationUpdatedAt ? d.locationUpdatedAt.toISOString() : null,
+    locationUpdatedAt: d.locationUpdatedAt
+      ? d.locationUpdatedAt.toISOString()
+      : null,
   };
 }
 
@@ -97,38 +128,47 @@ router.get("/admin/stats", requireAdmin, async (_req, res): Promise<void> => {
       avgRating: driverStats?.avgRating ?? 0,
       totalPassengers: userStats?.passengers ?? 0,
       openTickets: ticketStats?.open ?? 0,
-    })
+    }),
   );
 });
 
-router.get("/admin/recent-bookings", requireAdmin, async (req, res): Promise<void> => {
-  const parsed = GetRecentBookingsQueryParams.safeParse(req.query);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
+router.get(
+  "/admin/recent-bookings",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const parsed = GetRecentBookingsQueryParams.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
 
-  const bookings = await db
-    .select()
-    .from(bookingsTable)
-    .orderBy(desc(bookingsTable.createdAt))
-    .limit(parsed.data.limit ?? 10);
+    const bookings = await db
+      .select()
+      .from(bookingsTable)
+      .orderBy(desc(bookingsTable.createdAt))
+      .limit(parsed.data.limit ?? 10);
 
-  res.json(GetRecentBookingsResponse.parse(bookings.map(parseBooking)));
-});
+    res.json(GetRecentBookingsResponse.parse(bookings.map(parseBooking)));
+  },
+);
 
 router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
   // ── Date range params ────────────────────────────────────────────────────────
-  const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+  const { startDate, endDate } = req.query as {
+    startDate?: string;
+    endDate?: string;
+  };
   const start = startDate ? new Date(startDate) : null;
   const end = endDate ? new Date(endDate) : null;
   // Build a SQL fragment for date-scoping completed bookings
-  const dateFilter = start && end
-    ? sql`status = 'completed' AND pickup_at >= ${start.toISOString()} AND pickup_at < ${end.toISOString()}`
-    : sql`status = 'completed'`;
-  const completedFilter = start && end
-    ? sql`status = 'completed' AND pickup_at >= ${start.toISOString()} AND pickup_at < ${end.toISOString()}`
-    : sql`status = 'completed'`;
+  const dateFilter =
+    start && end
+      ? sql`status = 'completed' AND pickup_at >= ${start.toISOString()} AND pickup_at < ${end.toISOString()}`
+      : sql`status = 'completed'`;
+  const completedFilter =
+    start && end
+      ? sql`status = 'completed' AND pickup_at >= ${start.toISOString()} AND pickup_at < ${end.toISOString()}`
+      : sql`status = 'completed'`;
 
   // ── Load all settings in one pass ────────────────────────────────────────────
   const settingRows = await db.select().from(settingsTable);
@@ -157,9 +197,11 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
       bookings: sql<number>`count(*)::int`,
     })
     .from(bookingsTable)
-    .where(start && end
-      ? sql`pickup_at >= ${start.toISOString()} AND pickup_at < ${end.toISOString()}`
-      : sql`pickup_at >= now() - interval '30 days'`)
+    .where(
+      start && end
+        ? sql`pickup_at >= ${start.toISOString()} AND pickup_at < ${end.toISOString()}`
+        : sql`pickup_at >= now() - interval '30 days'`,
+    )
     .groupBy(sql`date(pickup_at)`)
     .orderBy(sql`date(pickup_at)`);
 
@@ -189,7 +231,7 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
   // tax and card fee, at the rate in force on the day it was sold, and only the
   // rows that predate that recording fall back to an estimate.
   const rows = await loadCompletedBookingMoney(dateFilter);
-  const extrasByBooking = await loadBookingExtras(rows.map(r => r.id));
+  const extrasByBooking = await loadBookingExtras(rows.map((r) => r.id));
 
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -223,7 +265,9 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
     // far better one than "everything that isn't the fare is tax".
     estimatedRows++;
     const extrasTotal = extras.reduce((sum, e) => sum + e.total, 0);
-    const grossed = (r.priceQuoted + r.discountAmount - extrasTotal) / ((1 + taxRatePct) * (1 + ccFeePct));
+    const grossed =
+      (r.priceQuoted + r.discountAmount - extrasTotal) /
+      ((1 + taxRatePct) * (1 + ccFeePct));
     const taxable = Math.max(0, grossed);
     const tax = taxable * taxRatePct;
     totalTaxesCollected += tax;
@@ -239,234 +283,338 @@ router.get("/admin/revenue", requireAdmin, async (req, res): Promise<void> => {
   // overtime, plus the add-ons they keep in full (pet, car seat) with no
   // commission taken. Gratuities are excluded from both sides — they are not in
   // gross income either, being collected and passed straight through.
-  const totalDriverCommissions = round2(totalCommissionBase * commissionPct + totalDriverExtras);
+  const totalDriverCommissions = round2(
+    totalCommissionBase * commissionPct + totalDriverExtras,
+  );
 
   const companyNetIncome = round2(
-    totalGrossIncome - totalTaxesCollected - totalFeesCollected - totalDriverCommissions,
+    totalGrossIncome -
+      totalTaxesCollected -
+      totalFeesCollected -
+      totalDriverCommissions,
   );
 
   // Legacy fields (kept for backward compat with existing hooks/components)
   const totalCommissionPaid = totalDriverCommissions;
   const totalCompanyRevenue = round2(totalGrossIncome - totalCommissionPaid);
 
-  res.json(GetRevenueStatsResponse.parse({
-    daily,
-    byVehicleClass,
-    totalRevenue: totalGrossIncome,
-    totalCommissionPaid,
-    totalCompanyRevenue,
-    commissionPct,
-    completedRides: rows.length,
-    // New financial breakdown fields
-    totalGrossIncome,
-    totalTaxesCollected,
-    totalFeesCollected,
-    totalDriverCommissions,
-    companyNetIncome,
-    taxRatePct,
-    ccFeePct,
-    totalTips,
-    totalDriverExtras: round2(totalDriverExtras),
-    /** How many rows in this range had no recorded breakdown and were estimated,
-     *  so the screen can say so instead of implying false precision. */
-    estimatedRows,
-  }));
-});
-
-router.post("/admin/email/test-send", requireAdmin, async (req, res): Promise<void> => {
-  const { to } = req.body as { to?: string };
-  if (!to || !to.includes("@")) {
-    res.status(400).json({ error: "Valid 'to' email address required" });
-    return;
-  }
-  const { getMailerStatus } = await import("../lib/mailer.js");
-  const status = getMailerStatus();
-  if (!status.configured) {
-    res.status(503).json({ error: "No email provider configured (set RESEND_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS)" });
-    return;
-  }
-  const { sendBookingConfirmationPassenger } = await import("../lib/mailer.js");
-  await sendBookingConfirmationPassenger({
-    id: 0,
-    passengerName: "Test Passenger",
-    passengerEmail: to,
-    pickupAddress: "Fort Lauderdale–Hollywood International Airport (FLL)",
-    dropoffAddress: "1 Hotel South Beach, Miami Beach",
-    pickupAt: new Date(Date.now() + 86400000).toISOString(),
-    vehicleClass: "business",
-    passengers: 2,
-    priceQuoted: 149.0,
-    flightNumber: "AA1234",
-    specialRequests: "This is a test email from Royal Midnight.",
-  });
-  res.json({ success: true, provider: status.provider, message: `Test email sent via ${status.provider} to ${to}` });
-});
-
-router.get("/admin/email-logs", requireAdmin, async (req, res): Promise<void> => {
-  const limit = Math.min(parseInt((req.query["limit"] as string) ?? "50", 10), 200);
-  const logs = await db
-    .select()
-    .from(emailLogsTable)
-    .orderBy(desc(emailLogsTable.sentAt))
-    .limit(limit);
-  res.json(logs.map(l => ({ ...l, sentAt: l.sentAt.toISOString() })));
-});
-
-router.get("/admin/dispatch", requireAdmin, async (_req, res): Promise<void> => {
-  const [activeTripsRaw, availableDriversRaw, pendingRaw] = await Promise.all([
-    db.select().from(bookingsTable).where(sql`status IN ('on_way','on_location','in_progress')`),
-    db.select().from(driversTable).where(sql`approval_status = 'approved'`),
-    db.select().from(bookingsTable).where(eq(bookingsTable.status, "pending")).orderBy(bookingsTable.pickupAt),
-  ]);
-
   res.json(
-    GetDispatchBoardResponse.parse({
-      activeTrips: activeTripsRaw.map(parseBooking),
-      availableDrivers: availableDriversRaw.map(parseDriver),
-      pendingBookings: pendingRaw.map(parseBooking),
-    })
+    GetRevenueStatsResponse.parse({
+      daily,
+      byVehicleClass,
+      totalRevenue: totalGrossIncome,
+      totalCommissionPaid,
+      totalCompanyRevenue,
+      commissionPct,
+      completedRides: rows.length,
+      // New financial breakdown fields
+      totalGrossIncome,
+      totalTaxesCollected,
+      totalFeesCollected,
+      totalDriverCommissions,
+      companyNetIncome,
+      taxRatePct,
+      ccFeePct,
+      totalTips,
+      totalDriverExtras: round2(totalDriverExtras),
+      /** How many rows in this range had no recorded breakdown and were estimated,
+       *  so the screen can say so instead of implying false precision. */
+      estimatedRows,
+    }),
   );
 });
 
+router.post(
+  "/admin/email/test-send",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const { to } = req.body as { to?: string };
+    if (!to || !to.includes("@")) {
+      res.status(400).json({ error: "Valid 'to' email address required" });
+      return;
+    }
+    const { getMailerStatus } = await import("../lib/mailer.js");
+    const status = getMailerStatus();
+    if (!status.configured) {
+      res
+        .status(503)
+        .json({
+          error:
+            "No email provider configured (set RESEND_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS)",
+        });
+      return;
+    }
+    const { sendBookingConfirmationPassenger } =
+      await import("../lib/mailer.js");
+    await sendBookingConfirmationPassenger({
+      id: 0,
+      passengerName: "Test Passenger",
+      passengerEmail: to,
+      pickupAddress: "Fort Lauderdale–Hollywood International Airport (FLL)",
+      dropoffAddress: "1 Hotel South Beach, Miami Beach",
+      pickupAt: new Date(Date.now() + 86400000).toISOString(),
+      vehicleClass: "business",
+      passengers: 2,
+      priceQuoted: 149.0,
+      flightNumber: "AA1234",
+      specialRequests: "This is a test email from Royal Midnight.",
+    });
+    res.json({
+      success: true,
+      provider: status.provider,
+      message: `Test email sent via ${status.provider} to ${to}`,
+    });
+  },
+);
+
+router.get(
+  "/admin/email-logs",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const limit = Math.min(
+      parseInt((req.query["limit"] as string) ?? "50", 10),
+      200,
+    );
+    const logs = await db
+      .select()
+      .from(emailLogsTable)
+      .orderBy(desc(emailLogsTable.sentAt))
+      .limit(limit);
+    res.json(logs.map((l) => ({ ...l, sentAt: l.sentAt.toISOString() })));
+  },
+);
+
+router.get(
+  "/admin/dispatch",
+  requireAdmin,
+  async (_req, res): Promise<void> => {
+    const [activeTripsRaw, availableDriversRaw, pendingRaw] = await Promise.all(
+      [
+        db
+          .select()
+          .from(bookingsTable)
+          .where(sql`status IN ('on_way','on_location','in_progress')`),
+        db
+          .select()
+          .from(driversTable)
+          .where(sql`approval_status = 'approved'`),
+        db
+          .select()
+          .from(bookingsTable)
+          .where(eq(bookingsTable.status, "pending"))
+          .orderBy(bookingsTable.pickupAt),
+      ],
+    );
+
+    res.json(
+      GetDispatchBoardResponse.parse({
+        activeTrips: activeTripsRaw.map(parseBooking),
+        availableDrivers: availableDriversRaw.map(parseDriver),
+        pendingBookings: pendingRaw.map(parseBooking),
+      }),
+    );
+  },
+);
+
 // POST /admin/bookings/:id/link-user — manually link a booking to a user account
-router.post("/admin/bookings/:id/link-user", requireAdmin, async (req, res): Promise<void> => {
-  const bookingId = parseInt(String(req.params["id"] ?? ""), 10);
-  const { userId } = req.body as { userId?: number };
-  if (isNaN(bookingId) || !userId) {
-    res.status(400).json({ error: "bookingId and userId are required" });
-    return;
-  }
-  const [user] = await db.select({ id: usersTable.id, email: usersTable.email, name: usersTable.name })
-    .from(usersTable).where(eq(usersTable.id, userId));
-  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+router.post(
+  "/admin/bookings/:id/link-user",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const bookingId = parseInt(String(req.params["id"] ?? ""), 10);
+    const { userId } = req.body as { userId?: number };
+    if (isNaN(bookingId) || !userId) {
+      res.status(400).json({ error: "bookingId and userId are required" });
+      return;
+    }
+    const [user] = await db
+      .select({
+        id: usersTable.id,
+        email: usersTable.email,
+        name: usersTable.name,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, userId));
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
 
-  const [updated] = await db
-    .update(bookingsTable)
-    .set({ userId: user.id, updatedAt: new Date() })
-    .where(eq(bookingsTable.id, bookingId))
-    .returning({ id: bookingsTable.id, userId: bookingsTable.userId });
+    const [updated] = await db
+      .update(bookingsTable)
+      .set({ userId: user.id, updatedAt: new Date() })
+      .where(eq(bookingsTable.id, bookingId))
+      .returning({ id: bookingsTable.id, userId: bookingsTable.userId });
 
-  if (!updated) { res.status(404).json({ error: "Booking not found" }); return; }
-  res.json({ ok: true, bookingId, linkedUserId: user.id, userEmail: user.email, userName: user.name });
-});
+    if (!updated) {
+      res.status(404).json({ error: "Booking not found" });
+      return;
+    }
+    res.json({
+      ok: true,
+      bookingId,
+      linkedUserId: user.id,
+      userEmail: user.email,
+      userName: user.name,
+    });
+  },
+);
 
 // GET /admin/payouts/weekly — weekly earnings per driver
-router.get("/admin/payouts/weekly", requireAdmin, async (req, res): Promise<void> => {
-  const week = resolvePayoutWeek(typeof req.query["week"] === "string" ? req.query["week"] : null);
-  const { weekStart, weekEnd } = week;
+router.get(
+  "/admin/payouts/weekly",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const week = resolvePayoutWeek(
+      typeof req.query["week"] === "string" ? req.query["week"] : null,
+    );
+    const { weekStart, weekEnd } = week;
 
-  // Shared with the statement emailed to the chauffeur — see lib/weeklyPayouts.ts
-  // for why these two used to be separate, drifting copies.
-  const { commissionPct, byDriver } = await computeWeeklyEarnings(week);
-  const drivers = await loadApprovedDrivers();
+    // Shared with the statement emailed to the chauffeur — see lib/weeklyPayouts.ts
+    // for why these two used to be separate, drifting copies.
+    const { commissionPct, byDriver } = await computeWeeklyEarnings(week);
+    const drivers = await loadApprovedDrivers();
 
-  // One driver whose stored value cannot be decrypted must not take down the
-  // whole board — that is the screen an operator opens to find out that
-  // something is wrong with payouts in the first place. The failure is reported
-  // once, as a flag on the response, rather than as a 500.
-  let decryptionFailed = false;
-  const readEncrypted = <T>(fn: () => T): T | null => {
-    try {
-      return fn();
-    } catch (err) {
-      decryptionFailed = true;
-      req.log.error({ err: (err as Error).message }, "payout_field_decrypt_failed");
-      return null;
-    }
-  };
-
-  const payouts = drivers.map(d => {
-    const e = byDriver.get(d.id) ?? emptyWeekEarnings(d.id);
-    return {
-      driverId: d.id,
-      driverName: d.name,
-      driverEmail: d.email,
-      driverPhone: d.phone,
-      rides: e.rides,
-      grossEarnings: e.grossEarnings,
-      commissionPct,
-      commission: e.commission,
-      /** Add-ons kept in full — shown separately so the chauffeur can check it. */
-      extrasTotal: e.extrasTotal,
-      tipsTotal: e.tipsTotal,
-      driverNet: e.driverNet,
-      bankName: d.payoutBankName ?? null,
-      // The routing number identifies a bank, not an account, and the payout
-      // emails already carry it in full. The account number does not leave the
-      // server — the UI has only ever shown its last four, and the emails mask
-      // it the same way. Returning it whole was the odd one out.
-      routingNumber: readEncrypted(() => safeDecryptField(d.payoutRoutingNumber)),
-      accountLast4: readEncrypted(() => lastN(d.payoutAccountNumber, 4)),
-      legalName: d.payoutLegalName ?? null,
-      payoutEmail: d.payoutEmail ?? d.email,
-      hasBankDetails: !!(d.payoutBankName && d.payoutRoutingNumber && d.payoutAccountNumber),
+    // One driver whose stored value cannot be decrypted must not take down the
+    // whole board — that is the screen an operator opens to find out that
+    // something is wrong with payouts in the first place. The failure is reported
+    // once, as a flag on the response, rather than as a 500.
+    let decryptionFailed = false;
+    const readEncrypted = <T>(fn: () => T): T | null => {
+      try {
+        return fn();
+      } catch (err) {
+        decryptionFailed = true;
+        req.log.error(
+          { err: (err as Error).message },
+          "payout_field_decrypt_failed",
+        );
+        return null;
+      }
     };
-  });
 
-  res.json({
-    weekStart: weekStart.toISOString(),
-    weekEnd: weekEnd.toISOString(),
-    commissionPct,
-    payouts,
-    totalGross: Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) / 100,
-    totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
-    ...(decryptionFailed
-      ? { encryptionWarning: "Some banking fields could not be decrypted. Check FIELD_ENCRYPTION_KEY in the deployment environment." }
-      : {}),
-  });
-});
+    const payouts = drivers.map((d) => {
+      const e = byDriver.get(d.id) ?? emptyWeekEarnings(d.id);
+      return {
+        driverId: d.id,
+        driverName: d.name,
+        driverEmail: d.email,
+        driverPhone: d.phone,
+        rides: e.rides,
+        grossEarnings: e.grossEarnings,
+        commissionPct,
+        commission: e.commission,
+        /** Add-ons kept in full — shown separately so the chauffeur can check it. */
+        extrasTotal: e.extrasTotal,
+        tipsTotal: e.tipsTotal,
+        driverNet: e.driverNet,
+        bankName: d.payoutBankName ?? null,
+        // The routing number identifies a bank, not an account, and the payout
+        // emails already carry it in full. The account number does not leave the
+        // server — the UI has only ever shown its last four, and the emails mask
+        // it the same way. Returning it whole was the odd one out.
+        routingNumber: readEncrypted(() =>
+          safeDecryptField(d.payoutRoutingNumber),
+        ),
+        accountLast4: readEncrypted(() => lastN(d.payoutAccountNumber, 4)),
+        legalName: d.payoutLegalName ?? null,
+        payoutEmail: d.payoutEmail ?? d.email,
+        hasBankDetails: !!(
+          d.payoutBankName &&
+          d.payoutRoutingNumber &&
+          d.payoutAccountNumber
+        ),
+      };
+    });
+
+    res.json({
+      weekStart: weekStart.toISOString(),
+      weekEnd: weekEnd.toISOString(),
+      commissionPct,
+      payouts,
+      totalGross:
+        Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) /
+        100,
+      totalDriverNet:
+        Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
+      ...(decryptionFailed
+        ? {
+            encryptionWarning:
+              "Some banking fields could not be decrypted. Check FIELD_ENCRYPTION_KEY in the deployment environment.",
+          }
+        : {}),
+    });
+  },
+);
 
 // POST /admin/payouts/send-weekly — send weekly payout emails to all drivers + admin
-router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promise<void> => {
-  const { weekStart: weekStartStr } = req.body as { weekStart?: string };
+router.post(
+  "/admin/payouts/send-weekly",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const { weekStart: weekStartStr } = req.body as { weekStart?: string };
 
-  const week = resolvePayoutWeek(weekStartStr ?? null);
-  const { weekLabel } = week;
+    const week = resolvePayoutWeek(weekStartStr ?? null);
+    const { weekLabel } = week;
 
-  // Same computation as the board above. It used to be a second copy, and the
-  // two would now disagree about overtime and paid add-ons.
-  const { commissionPct, byDriver } = await computeWeeklyEarnings(week);
-  const drivers = await loadApprovedDrivers();
+    // Same computation as the board above. It used to be a second copy, and the
+    // two would now disagree about overtime and paid add-ons.
+    const { commissionPct, byDriver } = await computeWeeklyEarnings(week);
+    const drivers = await loadApprovedDrivers();
 
-  const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } = await import("../lib/mailer.js");
+    const { sendWeeklyDriverPayout, sendWeeklyPayoutAdminReport } =
+      await import("../lib/mailer.js");
 
-  const payouts = drivers.map(d => {
-    const e = byDriver.get(d.id) ?? emptyWeekEarnings(d.id);
-    return {
-      driverId: d.id, driverName: d.name, driverEmail: d.payoutEmail ?? d.email,
-      rides: e.rides, grossEarnings: e.grossEarnings,
-      commissionPct, commission: e.commission, extrasTotal: e.extrasTotal,
-      tipsTotal: e.tipsTotal, driverNet: e.driverNet,
-      bankName: d.payoutBankName ?? null,
-      // Decrypted here, as the board does. These used to be passed through raw
-      // from the column — AES-GCM ciphertext — so the "****1234" in the
-      // chauffeur's statement was the last four characters of an encrypted blob.
-      routingNumber: safeDecrypt(() => safeDecryptField(d.payoutRoutingNumber), req),
-      accountLast4: safeDecrypt(() => lastN(d.payoutAccountNumber, 4), req),
-      legalName: d.payoutLegalName ?? null,
-    };
-  });
-
-  let emailsSent = 0;
-  for (const p of payouts) {
-    try {
-      await sendWeeklyDriverPayout({ ...p, weekLabel });
-      emailsSent++;
-    } catch {}
-  }
-
-  try {
-    await sendWeeklyPayoutAdminReport({
-      weekLabel,
-      payouts,
-      totalGross: Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) / 100,
-      totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
-      commissionPct,
+    const payouts = drivers.map((d) => {
+      const e = byDriver.get(d.id) ?? emptyWeekEarnings(d.id);
+      return {
+        driverId: d.id,
+        driverName: d.name,
+        driverEmail: d.payoutEmail ?? d.email,
+        rides: e.rides,
+        grossEarnings: e.grossEarnings,
+        commissionPct,
+        commission: e.commission,
+        extrasTotal: e.extrasTotal,
+        tipsTotal: e.tipsTotal,
+        driverNet: e.driverNet,
+        bankName: d.payoutBankName ?? null,
+        // Decrypted here, as the board does. These used to be passed through raw
+        // from the column — AES-GCM ciphertext — so the "****1234" in the
+        // chauffeur's statement was the last four characters of an encrypted blob.
+        routingNumber: safeDecrypt(
+          () => safeDecryptField(d.payoutRoutingNumber),
+          req,
+        ),
+        accountLast4: safeDecrypt(() => lastN(d.payoutAccountNumber, 4), req),
+        legalName: d.payoutLegalName ?? null,
+      };
     });
-  } catch {}
 
-  res.json({ ok: true, emailsSent, driverCount: drivers.length, weekLabel });
-});
+    let emailsSent = 0;
+    for (const p of payouts) {
+      try {
+        await sendWeeklyDriverPayout({ ...p, weekLabel });
+        emailsSent++;
+      } catch {}
+    }
+
+    try {
+      await sendWeeklyPayoutAdminReport({
+        weekLabel,
+        payouts,
+        totalGross:
+          Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) /
+          100,
+        totalDriverNet:
+          Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
+        commissionPct,
+      });
+    } catch {}
+
+    res.json({ ok: true, emailsSent, driverCount: drivers.length, weekLabel });
+  },
+);
 
 /**
  * PATCH /admin/drivers/:id/bank — update driver bank details.
@@ -478,124 +626,226 @@ router.post("/admin/payouts/send-weekly", requireAdmin, async (req, res): Promis
  * every field it was not given to null, so editing only the bank name silently
  * erased the account number.
  */
-router.patch("/admin/drivers/:id/bank", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(String(req.params["id"] ?? ""), 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid driver ID" }); return; }
-  const { bankName, routingNumber, accountNumber, legalName, payoutEmail } = req.body as {
-    bankName?: string; routingNumber?: string; accountNumber?: string; legalName?: string; payoutEmail?: string;
-  };
-
-  const updates: Partial<typeof driversTable.$inferInsert> = {};
-  if (bankName !== undefined)    updates.payoutBankName  = bankName.trim() || null;
-  if (legalName !== undefined)   updates.payoutLegalName = legalName.trim() || null;
-  if (payoutEmail !== undefined) updates.payoutEmail     = payoutEmail.trim() || null;
-
-  // The secrets are never blanked by omission or by an empty string: the edit
-  // form no longer pre-fills them, so "unchanged" and "cleared" would otherwise
-  // look identical. Clearing them is not something this screen needs to do.
-  //
-  // encryptField throws when FIELD_ENCRYPTION_KEY is malformed, and that is a
-  // deployment fault rather than a bad request — answer 503 and name the
-  // variable instead of letting it fall through to a generic 500. Refusing the
-  // write is the point: storing a routing number in cleartext because the key
-  // is broken would be worse than failing.
-  try {
-    if (routingNumber) {
-      const digits = routingNumber.replace(/\D/g, "");
-      if (digits.length !== 9) { res.status(400).json({ error: "Routing number must be 9 digits" }); return; }
-      updates.payoutRoutingNumber = encryptField(digits);
-    }
-    if (accountNumber) {
-      const digits = accountNumber.replace(/\D/g, "");
-      if (digits.length < 4) { res.status(400).json({ error: "Account number is too short" }); return; }
-      updates.payoutAccountNumber = encryptField(digits);
-    }
-  } catch (err) {
-    if (isFieldEncryptionConfigError(err)) {
-      req.log.error({ err: err.message }, "field_encryption_misconfigured");
-      res.status(503).json({
-        error: "Banking details cannot be saved: field encryption is misconfigured on the server. " +
-               "Set FIELD_ENCRYPTION_KEY to a 64-character hex value in the deployment environment, then redeploy.",
-      });
+router.patch(
+  "/admin/drivers/:id/bank",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const id = parseInt(String(req.params["id"] ?? ""), 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid driver ID" });
       return;
     }
-    throw err;
-  }
+    const { bankName, routingNumber, accountNumber, legalName, payoutEmail } =
+      req.body as {
+        bankName?: string;
+        routingNumber?: string;
+        accountNumber?: string;
+        legalName?: string;
+        payoutEmail?: string;
+      };
 
-  if (Object.keys(updates).length === 0) {
-    res.status(400).json({ error: "No valid fields to update" });
-    return;
-  }
+    const updates: Partial<typeof driversTable.$inferInsert> = {};
+    if (bankName !== undefined)
+      updates.payoutBankName = bankName.trim() || null;
+    if (legalName !== undefined)
+      updates.payoutLegalName = legalName.trim() || null;
+    if (payoutEmail !== undefined)
+      updates.payoutEmail = payoutEmail.trim() || null;
 
-  const [updated] = await db
-    .update(driversTable)
-    .set(updates)
-    .where(eq(driversTable.id, id))
-    .returning({ id: driversTable.id, payoutAccountNumber: driversTable.payoutAccountNumber });
-  if (!updated) { res.status(404).json({ error: "Driver not found" }); return; }
-  res.json({ ok: true, driverId: id, accountLast4: lastN(updated.payoutAccountNumber, 4) });
-});
+    // The secrets are never blanked by omission or by an empty string: the edit
+    // form no longer pre-fills them, so "unchanged" and "cleared" would otherwise
+    // look identical. Clearing them is not something this screen needs to do.
+    //
+    // encryptField throws when FIELD_ENCRYPTION_KEY is malformed, and that is a
+    // deployment fault rather than a bad request — answer 503 and name the
+    // variable instead of letting it fall through to a generic 500. Refusing the
+    // write is the point: storing a routing number in cleartext because the key
+    // is broken would be worse than failing.
+    try {
+      if (routingNumber) {
+        const digits = routingNumber.replace(/\D/g, "");
+        if (digits.length !== 9) {
+          res.status(400).json({ error: "Routing number must be 9 digits" });
+          return;
+        }
+        updates.payoutRoutingNumber = encryptField(digits);
+      }
+      if (accountNumber) {
+        const digits = accountNumber.replace(/\D/g, "");
+        if (digits.length < 4) {
+          res.status(400).json({ error: "Account number is too short" });
+          return;
+        }
+        updates.payoutAccountNumber = encryptField(digits);
+      }
+    } catch (err) {
+      if (isFieldEncryptionConfigError(err)) {
+        req.log.error({ err: err.message }, "field_encryption_misconfigured");
+        res.status(503).json({
+          error:
+            "Banking details cannot be saved: field encryption is misconfigured on the server. " +
+            "Set FIELD_ENCRYPTION_KEY to a 64-character hex value in the deployment environment, then redeploy.",
+        });
+        return;
+      }
+      throw err;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "No valid fields to update" });
+      return;
+    }
+
+    const [updated] = await db
+      .update(driversTable)
+      .set(updates)
+      .where(eq(driversTable.id, id))
+      .returning({
+        id: driversTable.id,
+        payoutAccountNumber: driversTable.payoutAccountNumber,
+      });
+    if (!updated) {
+      res.status(404).json({ error: "Driver not found" });
+      return;
+    }
+    res.json({
+      ok: true,
+      driverId: id,
+      accountLast4: lastN(updated.payoutAccountNumber, 4),
+    });
+  },
+);
 
 // ─── Vehicle Catalog ────────────────────────────────────────────────────────
 
 // GET /admin/vehicle-catalog
-router.get("/admin/vehicle-catalog", requireAdmin, async (_req, res): Promise<void> => {
-  const entries = await db.select().from(vehicleCatalogTable).orderBy(vehicleCatalogTable.createdAt);
-  res.json(entries.map(e => ({ ...e, createdAt: e.createdAt.toISOString() })));
-});
+router.get(
+  "/admin/vehicle-catalog",
+  requireAdmin,
+  async (_req, res): Promise<void> => {
+    const entries = await db
+      .select()
+      .from(vehicleCatalogTable)
+      .orderBy(vehicleCatalogTable.createdAt);
+    res.json(
+      entries.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
+    );
+  },
+);
 
 // POST /admin/vehicle-catalog
-router.post("/admin/vehicle-catalog", requireAdmin, async (req, res): Promise<void> => {
-  const { make, model, minYear, vehicleTypes, notes } = req.body as {
-    make?: string; model?: string; minYear?: number; vehicleTypes?: string[]; notes?: string;
-  };
-  if (!make || !model || !minYear || !vehicleTypes?.length) {
-    res.status(400).json({ error: "make, model, minYear, and at least one vehicleType are required" });
-    return;
-  }
-  const [entry] = await db.insert(vehicleCatalogTable).values({
-    make: make.trim(),
-    model: model.trim(),
-    minYear: Number(minYear),
-    vehicleTypes: vehicleTypes.join(","),
-    notes: notes?.trim() || null,
-    isActive: true,
-  }).returning();
-  res.status(201).json(entry);
-});
+router.post(
+  "/admin/vehicle-catalog",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const { make, model, minYear, vehicleTypes, notes } = req.body as {
+      make?: string;
+      model?: string;
+      minYear?: number;
+      vehicleTypes?: string[];
+      notes?: string;
+    };
+    if (!make || !model || !minYear || !vehicleTypes?.length) {
+      res
+        .status(400)
+        .json({
+          error:
+            "make, model, minYear, and at least one vehicleType are required",
+        });
+      return;
+    }
+    const [entry] = await db
+      .insert(vehicleCatalogTable)
+      .values({
+        make: make.trim(),
+        model: model.trim(),
+        minYear: Number(minYear),
+        vehicleTypes: vehicleTypes.join(","),
+        notes: notes?.trim() || null,
+        isActive: true,
+      })
+      .returning();
+    res.status(201).json(entry);
+  },
+);
 
 // PATCH /admin/vehicle-catalog/:id/toggle
-router.patch("/admin/vehicle-catalog/:id/toggle", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(String(req.params["id"] ?? ""), 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  const [entry] = await db.select().from(vehicleCatalogTable).where(eq(vehicleCatalogTable.id, id));
-  if (!entry) { res.status(404).json({ error: "Not found" }); return; }
-  const [updated] = await db.update(vehicleCatalogTable).set({ isActive: !entry.isActive }).where(eq(vehicleCatalogTable.id, id)).returning();
-  res.json(updated);
-});
+router.patch(
+  "/admin/vehicle-catalog/:id/toggle",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const id = parseInt(String(req.params["id"] ?? ""), 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [entry] = await db
+      .select()
+      .from(vehicleCatalogTable)
+      .where(eq(vehicleCatalogTable.id, id));
+    if (!entry) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    const [updated] = await db
+      .update(vehicleCatalogTable)
+      .set({ isActive: !entry.isActive })
+      .where(eq(vehicleCatalogTable.id, id))
+      .returning();
+    res.json(updated);
+  },
+);
 
 // DELETE /admin/vehicle-catalog/:id
-router.delete("/admin/vehicle-catalog/:id", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(String(req.params["id"] ?? ""), 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  await db.delete(vehicleCatalogTable).where(eq(vehicleCatalogTable.id, id));
-  res.json({ ok: true });
-});
+router.delete(
+  "/admin/vehicle-catalog/:id",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const id = parseInt(String(req.params["id"] ?? ""), 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    await db.delete(vehicleCatalogTable).where(eq(vehicleCatalogTable.id, id));
+    res.json({ ok: true });
+  },
+);
 
 // PATCH /admin/vehicle-catalog/:id/approve — approve a driver-submitted pending entry
-router.patch("/admin/vehicle-catalog/:id/approve", requireAdmin, async (req, res): Promise<void> => {
-  const id = parseInt(String(req.params["id"] ?? ""), 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  const { vehicleTypes, minYear } = req.body as { vehicleTypes?: string[]; minYear?: number };
-  if (!vehicleTypes?.length) { res.status(400).json({ error: "vehicleTypes are required" }); return; }
-  const [updated] = await db.update(vehicleCatalogTable).set({
-    isActive: true, pendingReview: false,
-    vehicleTypes: vehicleTypes.join(","),
-    minYear: minYear ?? new Date().getFullYear(),
-  }).where(eq(vehicleCatalogTable.id, id)).returning();
-  if (!updated) { res.status(404).json({ error: "Not found" }); return; }
-  res.json({ ...updated, createdAt: updated.createdAt.toISOString() });
-});
+router.patch(
+  "/admin/vehicle-catalog/:id/approve",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const id = parseInt(String(req.params["id"] ?? ""), 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const { vehicleTypes, minYear } = req.body as {
+      vehicleTypes?: string[];
+      minYear?: number;
+    };
+    if (!vehicleTypes?.length) {
+      res.status(400).json({ error: "vehicleTypes are required" });
+      return;
+    }
+    const [updated] = await db
+      .update(vehicleCatalogTable)
+      .set({
+        isActive: true,
+        pendingReview: false,
+        vehicleTypes: vehicleTypes.join(","),
+        minYear: minYear ?? new Date().getFullYear(),
+      })
+      .where(eq(vehicleCatalogTable.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    res.json({ ...updated, createdAt: updated.createdAt.toISOString() });
+  },
+);
 
 // ─── Mailer ──────────────────────────────────────────────────────────────────
 
@@ -617,31 +867,38 @@ router.get("/admin/encryption-status", requireAdmin, (_req, res) => {
 });
 
 // POST /admin/test-email — send a test email to verify Resend is working
-router.post("/admin/test-email", requireAdmin, async (req, res): Promise<void> => {
-  const to = (req.body as { to?: string }).to ?? ADMIN_EMAIL;
-  const status = getMailerStatus();
-  if (!status.configured) {
-    res.status(503).json({ error: "No email provider configured. Set RESEND_API_KEY." });
-    return;
-  }
-  try {
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    const fromAddr = process.env.SMTP_FROM ?? "Royal Midnight <noreply@royalmidnight.com>";
-    const result = await resend.emails.send({
-      from: fromAddr,
-      to: [to],
-      subject: "Royal Midnight — Email Test",
-      html: `<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#e8e0d0;padding:32px">
+router.post(
+  "/admin/test-email",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const to = (req.body as { to?: string }).to ?? ADMIN_EMAIL;
+    const status = getMailerStatus();
+    if (!status.configured) {
+      res
+        .status(503)
+        .json({ error: "No email provider configured. Set RESEND_API_KEY." });
+      return;
+    }
+    try {
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      const fromAddr =
+        process.env.SMTP_FROM ?? "Royal Midnight <noreply@royalmidnight.com>";
+      const result = await resend.emails.send({
+        from: fromAddr,
+        to: [to],
+        subject: "Royal Midnight — Email Test",
+        html: `<!DOCTYPE html><html><body style="font-family:Georgia,serif;background:#050505;color:#e8e0d0;padding:32px">
         <h2 style="color:#c9a84c">Email delivery is working!</h2>
         <p>Your Resend integration is correctly configured for <strong>Royal Midnight</strong>.</p>
         <p style="color:#888;font-size:12px">Sent from: ${fromAddr}</p>
       </body></html>`,
-    });
-    res.json({ ok: true, provider: "resend", id: result.data?.id });
-  } catch (err: any) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+      });
+      res.json({ ok: true, provider: "resend", id: result.data?.id });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  },
+);
 
 // ─── Fleet Compliance ─────────────────────────────────────────────────────────
 
@@ -650,222 +907,317 @@ router.post("/admin/test-email", requireAdmin, async (req, res): Promise<void> =
  * Returns drivers whose license, registration, or insurance is expiring within
  * the next 30 days (or is already past), enriched with any pending review docs.
  */
-router.get("/admin/compliance", requireAdmin, async (_req, res): Promise<void> => {
-  const drivers = await db.select({
-    id: driversTable.id,
-    name: driversTable.name,
-    email: driversTable.email,
-    phone: driversTable.phone,
-    complianceHold: driversTable.complianceHold,
-    licenseExpiry: driversTable.licenseExpiry,
-    regExpiry: driversTable.regExpiry,
-    insuranceExpiry: driversTable.insuranceExpiry,
-  }).from(driversTable);
+router.get(
+  "/admin/compliance",
+  requireAdmin,
+  async (_req, res): Promise<void> => {
+    const drivers = await db
+      .select({
+        id: driversTable.id,
+        name: driversTable.name,
+        email: driversTable.email,
+        phone: driversTable.phone,
+        complianceHold: driversTable.complianceHold,
+        licenseExpiry: driversTable.licenseExpiry,
+        regExpiry: driversTable.regExpiry,
+        insuranceExpiry: driversTable.insuranceExpiry,
+      })
+      .from(driversTable);
 
-  // Fetch all pending/approved docs submitted in last 90 days
-  const pendingDocs = await db.select().from(complianceDocumentsTable)
-    .where(sql`status IN ('pending_review', 'approved') AND submitted_at >= now() - interval '90 days'`);
+    // Fetch all pending/approved docs submitted in last 90 days
+    const pendingDocs = await db
+      .select()
+      .from(complianceDocumentsTable)
+      .where(
+        sql`status IN ('pending_review', 'approved') AND submitted_at >= now() - interval '90 days'`,
+      );
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-  type Alert = {
-    driverId: number;
-    driverName: string;
-    driverEmail: string;
-    driverPhone: string;
-    type: string;
-    expiry: string;
-    daysRemaining: number;
-    complianceHold: boolean;
-    pendingDoc?: { id: number; fileUrl: string; newExpiry: string | null; submittedAt: string };
-  };
-  const alerts: Alert[] = [];
+    type Alert = {
+      driverId: number;
+      driverName: string;
+      driverEmail: string;
+      driverPhone: string;
+      type: string;
+      expiry: string;
+      daysRemaining: number;
+      complianceHold: boolean;
+      pendingDoc?: {
+        id: number;
+        fileUrl: string;
+        newExpiry: string | null;
+        submittedAt: string;
+      };
+    };
+    const alerts: Alert[] = [];
 
-  for (const d of drivers) {
-    const checks: Array<{ label: string; val: string | null | undefined }> = [
-      { label: "Driver License",       val: d.licenseExpiry },
-      { label: "Vehicle Registration", val: d.regExpiry },
-      { label: "Insurance",            val: d.insuranceExpiry },
-    ];
-    for (const { label, val } of checks) {
-      if (!val) continue;
-      const expiry = new Date(val);
-      if (isNaN(expiry.getTime())) continue;
-      const daysRemaining = Math.floor((expiry.getTime() - today.getTime()) / 86_400_000);
-      if (daysRemaining > 30) continue;
+    for (const d of drivers) {
+      const checks: Array<{ label: string; val: string | null | undefined }> = [
+        { label: "Driver License", val: d.licenseExpiry },
+        { label: "Vehicle Registration", val: d.regExpiry },
+        { label: "Insurance", val: d.insuranceExpiry },
+      ];
+      for (const { label, val } of checks) {
+        if (!val) continue;
+        const expiry = new Date(val);
+        if (isNaN(expiry.getTime())) continue;
+        const daysRemaining = Math.floor(
+          (expiry.getTime() - today.getTime()) / 86_400_000,
+        );
+        if (daysRemaining > 30) continue;
 
-      // Find the most recent pending_review doc for this driver+type
-      const pending = pendingDocs
-        .filter(p => p.driverId === d.id && p.docType === label && p.status === "pending_review")
-        .sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime())[0];
+        // Find the most recent pending_review doc for this driver+type
+        const pending = pendingDocs
+          .filter(
+            (p) =>
+              p.driverId === d.id &&
+              p.docType === label &&
+              p.status === "pending_review",
+          )
+          .sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime())[0];
 
-      alerts.push({
-        driverId: d.id,
-        driverName: d.name,
-        driverEmail: d.email,
-        driverPhone: d.phone,
-        type: label,
-        expiry: val,
-        daysRemaining,
-        complianceHold: d.complianceHold ?? false,
-        pendingDoc: pending
-          ? { id: pending.id, fileUrl: pending.fileUrl, newExpiry: pending.newExpiry, submittedAt: pending.submittedAt.toISOString() }
-          : undefined,
-      });
+        alerts.push({
+          driverId: d.id,
+          driverName: d.name,
+          driverEmail: d.email,
+          driverPhone: d.phone,
+          type: label,
+          expiry: val,
+          daysRemaining,
+          complianceHold: d.complianceHold ?? false,
+          pendingDoc: pending
+            ? {
+                id: pending.id,
+                fileUrl: pending.fileUrl,
+                newExpiry: pending.newExpiry,
+                submittedAt: pending.submittedAt.toISOString(),
+              }
+            : undefined,
+        });
+      }
     }
-  }
 
-  alerts.sort((a, b) => a.daysRemaining - b.daysRemaining);
-  res.json(alerts);
-});
+    alerts.sort((a, b) => a.daysRemaining - b.daysRemaining);
+    res.json(alerts);
+  },
+);
 
 /**
  * POST /admin/compliance/remind
  * Send a compliance reminder email to a specific driver for a specific doc type.
  */
-router.post("/admin/compliance/remind", requireAdmin, async (req, res): Promise<void> => {
-  const { driverId, docType } = req.body as { driverId?: number; docType?: string };
-  if (!driverId || !docType) {
-    res.status(400).json({ error: "driverId and docType are required" });
-    return;
-  }
+router.post(
+  "/admin/compliance/remind",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const { driverId, docType } = req.body as {
+      driverId?: number;
+      docType?: string;
+    };
+    if (!driverId || !docType) {
+      res.status(400).json({ error: "driverId and docType are required" });
+      return;
+    }
 
-  const [driver] = await db.select({
-    id: driversTable.id,
-    name: driversTable.name,
-    email: driversTable.email,
-    licenseExpiry: driversTable.licenseExpiry,
-    regExpiry: driversTable.regExpiry,
-    insuranceExpiry: driversTable.insuranceExpiry,
-  }).from(driversTable).where(eq(driversTable.id, driverId));
+    const [driver] = await db
+      .select({
+        id: driversTable.id,
+        name: driversTable.name,
+        email: driversTable.email,
+        licenseExpiry: driversTable.licenseExpiry,
+        regExpiry: driversTable.regExpiry,
+        insuranceExpiry: driversTable.insuranceExpiry,
+      })
+      .from(driversTable)
+      .where(eq(driversTable.id, driverId));
 
-  if (!driver) {
-    res.status(404).json({ error: "Driver not found" });
-    return;
-  }
+    if (!driver) {
+      res.status(404).json({ error: "Driver not found" });
+      return;
+    }
 
-  const expiryMap: Record<string, string | null | undefined> = {
-    "Driver License": driver.licenseExpiry,
-    "Vehicle Registration": driver.regExpiry,
-    "Insurance": driver.insuranceExpiry,
-  };
-  const expiryDate = expiryMap[docType] ?? "";
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const daysRemaining = expiryDate
-    ? Math.floor((new Date(expiryDate).getTime() - today.getTime()) / 86_400_000)
-    : 0;
+    const expiryMap: Record<string, string | null | undefined> = {
+      "Driver License": driver.licenseExpiry,
+      "Vehicle Registration": driver.regExpiry,
+      Insurance: driver.insuranceExpiry,
+    };
+    const expiryDate = expiryMap[docType] ?? "";
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daysRemaining = expiryDate
+      ? Math.floor(
+          (new Date(expiryDate).getTime() - today.getTime()) / 86_400_000,
+        )
+      : 0;
 
-  const { sendComplianceReminder } = await import("../lib/mailer.js");
-  await sendComplianceReminder({
-    to: driver.email,
-    driverName: driver.name,
-    docType,
-    expiryDate,
-    daysRemaining,
-  });
+    const { sendComplianceReminder } = await import("../lib/mailer.js");
+    await sendComplianceReminder({
+      to: driver.email,
+      driverName: driver.name,
+      docType,
+      expiryDate,
+      daysRemaining,
+    });
 
-  res.json({ success: true, sentTo: driver.email });
-});
+    res.json({ success: true, sentTo: driver.email });
+  },
+);
 
 /**
  * POST /admin/compliance/documents/:id/approve
  * Approve a submitted compliance document and update the driver's expiry field.
  * Also clears compliance_hold if all docs are now valid.
  */
-router.post("/admin/compliance/documents/:id/approve", requireAdmin, async (req, res): Promise<void> => {
-  const docId = parseInt(String(req.params["id"] ?? ""), 10);
-  const { newExpiry, adminNotes } = req.body as { newExpiry?: string; adminNotes?: string };
+router.post(
+  "/admin/compliance/documents/:id/approve",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const docId = parseInt(String(req.params["id"] ?? ""), 10);
+    const { newExpiry, adminNotes } = req.body as {
+      newExpiry?: string;
+      adminNotes?: string;
+    };
 
-  if (isNaN(docId)) {
-    res.status(400).json({ error: "Invalid document id" });
-    return;
-  }
-  if (!newExpiry) {
-    res.status(400).json({ error: "newExpiry (YYYY-MM-DD) is required" });
-    return;
-  }
-
-  const [doc] = await db.select().from(complianceDocumentsTable).where(eq(complianceDocumentsTable.id, docId));
-  if (!doc) {
-    res.status(404).json({ error: "Document not found" });
-    return;
-  }
-
-  // Mark doc as approved
-  await db.update(complianceDocumentsTable)
-    .set({ status: "approved", newExpiry, adminNotes: adminNotes ?? null, reviewedAt: new Date() })
-    .where(eq(complianceDocumentsTable.id, docId));
-
-  // Update the relevant expiry field on the driver record
-  const expiryField: Record<string, keyof typeof driversTable.$inferInsert> = {
-    "Driver License": "licenseExpiry",
-    "Vehicle Registration": "regExpiry",
-    "Insurance": "insuranceExpiry",
-  };
-  const field = expiryField[doc.docType];
-  if (field) {
-    await db.update(driversTable).set({ [field]: newExpiry } as any).where(eq(driversTable.id, doc.driverId));
-  }
-
-  // Re-check all docs — if none are expired anymore, lift compliance_hold
-  const [updatedDriver] = await db.select({
-    licenseExpiry: driversTable.licenseExpiry,
-    regExpiry: driversTable.regExpiry,
-    insuranceExpiry: driversTable.insuranceExpiry,
-  }).from(driversTable).where(eq(driversTable.id, doc.driverId));
-
-  if (updatedDriver) {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const allValid = [updatedDriver.licenseExpiry, updatedDriver.regExpiry, updatedDriver.insuranceExpiry]
-      .filter(Boolean)
-      .every(exp => (exp as string) > todayStr);
-
-    if (allValid) {
-      await db.update(driversTable).set({ complianceHold: false }).where(eq(driversTable.id, doc.driverId));
+    if (isNaN(docId)) {
+      res.status(400).json({ error: "Invalid document id" });
+      return;
     }
-  }
+    if (!newExpiry) {
+      res.status(400).json({ error: "newExpiry (YYYY-MM-DD) is required" });
+      return;
+    }
 
-  res.json({ success: true, docId, driverId: doc.driverId, newExpiry });
-});
+    const [doc] = await db
+      .select()
+      .from(complianceDocumentsTable)
+      .where(eq(complianceDocumentsTable.id, docId));
+    if (!doc) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+
+    // Mark doc as approved
+    await db
+      .update(complianceDocumentsTable)
+      .set({
+        status: "approved",
+        newExpiry,
+        adminNotes: adminNotes ?? null,
+        reviewedAt: new Date(),
+      })
+      .where(eq(complianceDocumentsTable.id, docId));
+
+    // Update the relevant expiry field on the driver record
+    const expiryField: Record<string, keyof typeof driversTable.$inferInsert> =
+      {
+        "Driver License": "licenseExpiry",
+        "Vehicle Registration": "regExpiry",
+        Insurance: "insuranceExpiry",
+      };
+    const field = expiryField[doc.docType];
+    if (field) {
+      await db
+        .update(driversTable)
+        .set({ [field]: newExpiry } as any)
+        .where(eq(driversTable.id, doc.driverId));
+    }
+
+    // Re-check all docs — if none are expired anymore, lift compliance_hold
+    const [updatedDriver] = await db
+      .select({
+        licenseExpiry: driversTable.licenseExpiry,
+        regExpiry: driversTable.regExpiry,
+        insuranceExpiry: driversTable.insuranceExpiry,
+      })
+      .from(driversTable)
+      .where(eq(driversTable.id, doc.driverId));
+
+    if (updatedDriver) {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const allValid = [
+        updatedDriver.licenseExpiry,
+        updatedDriver.regExpiry,
+        updatedDriver.insuranceExpiry,
+      ]
+        .filter(Boolean)
+        .every((exp) => (exp as string) > todayStr);
+
+      if (allValid) {
+        await db
+          .update(driversTable)
+          .set({ complianceHold: false })
+          .where(eq(driversTable.id, doc.driverId));
+      }
+    }
+
+    res.json({ success: true, docId, driverId: doc.driverId, newExpiry });
+  },
+);
 
 /**
  * POST /admin/compliance/documents/:id/reject
  * Reject a submitted compliance document. Stores the admin's reason and notifies
  * the driver to re-upload. Does NOT update driver expiry fields.
  */
-router.post("/admin/compliance/documents/:id/reject", requireAdmin, async (req, res): Promise<void> => {
-  const docId = parseInt(String(req.params["id"] ?? ""), 10);
-  const { reason } = req.body as { reason?: string };
+router.post(
+  "/admin/compliance/documents/:id/reject",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const docId = parseInt(String(req.params["id"] ?? ""), 10);
+    const { reason } = req.body as { reason?: string };
 
-  if (isNaN(docId)) { res.status(400).json({ error: "Invalid document id" }); return; }
-  if (!reason?.trim()) { res.status(400).json({ error: "reason is required" }); return; }
+    if (isNaN(docId)) {
+      res.status(400).json({ error: "Invalid document id" });
+      return;
+    }
+    if (!reason?.trim()) {
+      res.status(400).json({ error: "reason is required" });
+      return;
+    }
 
-  const [doc] = await db.select().from(complianceDocumentsTable).where(eq(complianceDocumentsTable.id, docId));
-  if (!doc) { res.status(404).json({ error: "Document not found" }); return; }
+    const [doc] = await db
+      .select()
+      .from(complianceDocumentsTable)
+      .where(eq(complianceDocumentsTable.id, docId));
+    if (!doc) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
 
-  await db.update(complianceDocumentsTable)
-    .set({ status: "rejected", adminNotes: reason.trim(), reviewedAt: new Date() })
-    .where(eq(complianceDocumentsTable.id, docId));
+    await db
+      .update(complianceDocumentsTable)
+      .set({
+        status: "rejected",
+        adminNotes: reason.trim(),
+        reviewedAt: new Date(),
+      })
+      .where(eq(complianceDocumentsTable.id, docId));
 
-  // Email driver to re-upload
-  const [driver] = await db.select({ name: driversTable.name, email: driversTable.email })
-    .from(driversTable).where(eq(driversTable.id, doc.driverId));
-  if (driver) {
-    const resend = new Resend(process.env["RESEND_API_KEY"]);
-    await resend.emails.send({
-      from: ADMIN_EMAIL,
-      to: driver.email,
-      subject: `Action required: Re-upload your ${doc.docType}`,
-      html: `<p>Hi ${driver.name},</p>
-        <p>Your <strong>${doc.docType}</strong> submission was not accepted.</p>
-        <p><strong>Reason:</strong> ${reason.trim()}</p>
+    // Email driver to re-upload
+    const [driver] = await db
+      .select({ name: driversTable.name, email: driversTable.email })
+      .from(driversTable)
+      .where(eq(driversTable.id, doc.driverId));
+    if (driver) {
+      const resend = new Resend(process.env["RESEND_API_KEY"]);
+      await resend.emails
+        .send({
+          from: ADMIN_EMAIL,
+          to: driver.email,
+          subject: `Action required: Re-upload your ${doc.docType}`,
+          html: `<p>Hi ${escapeHtml(driver.name)},</p>
+        <p>Your <strong>${escapeHtml(doc.docType)}</strong> submission was not accepted.</p>
+        <p><strong>Reason:</strong> ${escapeHtml(reason.trim())}</p>
         <p>Please log in to the Royal Midnight Driver app and upload a new copy.</p>`,
-    }).catch(() => {});
-  }
+        })
+        .catch(() => {});
+    }
 
-  res.json({ success: true, docId, driverId: doc.driverId });
-});
+    res.json({ success: true, docId, driverId: doc.driverId });
+  },
+);
 
 /**
  * GET /admin/compliance/pending
@@ -873,54 +1225,82 @@ router.post("/admin/compliance/documents/:id/reject", requireAdmin, async (req, 
  * on file yet (new drivers uploading for the first time). These don't appear in the
  * regular compliance alerts (which only tracks expiring/expired docs).
  */
-router.get("/admin/compliance/pending", requireAdmin, async (_req, res): Promise<void> => {
-  const pendingDocs = await db.select().from(complianceDocumentsTable)
-    .where(sql`status = 'pending_review' AND submitted_at >= now() - interval '90 days'`);
+router.get(
+  "/admin/compliance/pending",
+  requireAdmin,
+  async (_req, res): Promise<void> => {
+    const pendingDocs = await db
+      .select()
+      .from(complianceDocumentsTable)
+      .where(
+        sql`status = 'pending_review' AND submitted_at >= now() - interval '90 days'`,
+      );
 
-  if (pendingDocs.length === 0) { res.json([]); return; }
+    if (pendingDocs.length === 0) {
+      res.json([]);
+      return;
+    }
 
-  const driverIds = [...new Set(pendingDocs.map(d => d.driverId))];
-  const drivers = await db.select({
-    id: driversTable.id,
-    name: driversTable.name,
-    email: driversTable.email,
-    phone: driversTable.phone,
-    complianceHold: driversTable.complianceHold,
-    licenseExpiry: driversTable.licenseExpiry,
-    regExpiry: driversTable.regExpiry,
-    insuranceExpiry: driversTable.insuranceExpiry,
-  }).from(driversTable).where(inArray(driversTable.id, driverIds));
+    const driverIds = [...new Set(pendingDocs.map((d) => d.driverId))];
+    const drivers = await db
+      .select({
+        id: driversTable.id,
+        name: driversTable.name,
+        email: driversTable.email,
+        phone: driversTable.phone,
+        complianceHold: driversTable.complianceHold,
+        licenseExpiry: driversTable.licenseExpiry,
+        regExpiry: driversTable.regExpiry,
+        insuranceExpiry: driversTable.insuranceExpiry,
+      })
+      .from(driversTable)
+      .where(inArray(driversTable.id, driverIds));
 
-  const expiryMap: Record<string, { "Driver License": string | null; "Vehicle Registration": string | null; "Insurance": string | null }> = {};
-  for (const d of drivers) {
-    expiryMap[d.id] = { "Driver License": d.licenseExpiry, "Vehicle Registration": d.regExpiry, "Insurance": d.insuranceExpiry };
-  }
-
-  // Only include submissions where the driver has NO existing expiry for that doc type
-  // (i.e., this is a first-time upload, not a renewal — renewals are in the main alerts)
-  const result = pendingDocs
-    .filter(doc => {
-      const label = doc.docType as "Driver License" | "Vehicle Registration" | "Insurance";
-      const expiry = expiryMap[doc.driverId]?.[label];
-      return !expiry;
-    })
-    .map(doc => {
-      const driver = drivers.find(d => d.id === doc.driverId);
-      return {
-        docId: doc.id,
-        driverId: doc.driverId,
-        driverName: driver?.name ?? "Unknown",
-        driverEmail: driver?.email ?? "",
-        docType: doc.docType,
-        fileUrl: doc.fileUrl,
-        newExpiry: doc.newExpiry,
-        submittedAt: doc.submittedAt.toISOString(),
-        complianceHold: driver?.complianceHold ?? false,
+    const expiryMap: Record<
+      string,
+      {
+        "Driver License": string | null;
+        "Vehicle Registration": string | null;
+        Insurance: string | null;
+      }
+    > = {};
+    for (const d of drivers) {
+      expiryMap[d.id] = {
+        "Driver License": d.licenseExpiry,
+        "Vehicle Registration": d.regExpiry,
+        Insurance: d.insuranceExpiry,
       };
-    });
+    }
 
-  res.json(result);
-});
+    // Only include submissions where the driver has NO existing expiry for that doc type
+    // (i.e., this is a first-time upload, not a renewal — renewals are in the main alerts)
+    const result = pendingDocs
+      .filter((doc) => {
+        const label = doc.docType as
+          | "Driver License"
+          | "Vehicle Registration"
+          | "Insurance";
+        const expiry = expiryMap[doc.driverId]?.[label];
+        return !expiry;
+      })
+      .map((doc) => {
+        const driver = drivers.find((d) => d.id === doc.driverId);
+        return {
+          docId: doc.id,
+          driverId: doc.driverId,
+          driverName: driver?.name ?? "Unknown",
+          driverEmail: driver?.email ?? "",
+          docType: doc.docType,
+          fileUrl: doc.fileUrl,
+          newExpiry: doc.newExpiry,
+          submittedAt: doc.submittedAt.toISOString(),
+          complianceHold: driver?.complianceHold ?? false,
+        };
+      });
+
+    res.json(result);
+  },
+);
 
 // ─── Corporate Accounts (Net-30 billing) ────────────────────────────────────
 
@@ -943,112 +1323,193 @@ router.get("/admin/compliance/pending", requireAdmin, async (_req, res): Promise
 const CORPORATE_BILLABLE = sql<string>`(${bookingsTable.priceQuoted} + coalesce(${bookingsTable.extraCharge}, 0))`;
 
 // GET /admin/corporate-accounts — company-level billing view with unbilled totals
-router.get("/admin/corporate-accounts", requireAdmin, async (_req, res): Promise<void> => {
-  const accounts = await db.select().from(corporateAccountsTable).orderBy(corporateAccountsTable.companyName);
+router.get(
+  "/admin/corporate-accounts",
+  requireAdmin,
+  async (_req, res): Promise<void> => {
+    const accounts = await db
+      .select()
+      .from(corporateAccountsTable)
+      .orderBy(corporateAccountsTable.companyName);
 
-  const result = await Promise.all(accounts.map(async (account) => {
-    const userRows = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.corporateAccountId, account.id));
-    const userIds = userRows.map(u => u.id);
+    const result = await Promise.all(
+      accounts.map(async (account) => {
+        const userRows = await db
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(eq(usersTable.corporateAccountId, account.id));
+        const userIds = userRows.map((u) => u.id);
 
-    let unbilledTotal = 0;
-    let unbilledRides = 0;
-    if (userIds.length > 0) {
-      const unbilled = await db
-        .select({ amount: CORPORATE_BILLABLE })
-        .from(bookingsTable)
-        .where(and(
-          inArray(bookingsTable.userId, userIds),
-          inArray(bookingsTable.status, ["confirmed", "completed"]),
-          isNull(bookingsTable.invoicedAt),
-        ));
-      unbilledRides = unbilled.length;
-      unbilledTotal = Math.round(unbilled.reduce((sum, b) => sum + parseFloat(b.amount || "0"), 0) * 100) / 100;
-    }
+        let unbilledTotal = 0;
+        let unbilledRides = 0;
+        if (userIds.length > 0) {
+          const unbilled = await db
+            .select({ amount: CORPORATE_BILLABLE })
+            .from(bookingsTable)
+            .where(
+              and(
+                inArray(bookingsTable.userId, userIds),
+                inArray(bookingsTable.status, ["confirmed", "completed"]),
+                isNull(bookingsTable.invoicedAt),
+              ),
+            );
+          unbilledRides = unbilled.length;
+          unbilledTotal =
+            Math.round(
+              unbilled.reduce(
+                (sum, b) => sum + parseFloat(b.amount || "0"),
+                0,
+              ) * 100,
+            ) / 100;
+        }
 
-    return {
-      id: account.id,
-      companyName: account.companyName,
-      billingEmail: account.billingEmail,
-      billingAddress: account.billingAddress,
-      netTermsDays: account.netTermsDays,
-      volumeDiscountPct: parseFloat(account.volumeDiscountPct),
-      creditLimit: account.creditLimit != null ? parseFloat(account.creditLimit) : null,
-      status: account.status,
-      userCount: userIds.length,
-      unbilledRides,
-      unbilledTotal,
-      createdAt: account.createdAt.toISOString(),
-    };
-  }));
+        return {
+          id: account.id,
+          companyName: account.companyName,
+          billingEmail: account.billingEmail,
+          billingAddress: account.billingAddress,
+          netTermsDays: account.netTermsDays,
+          volumeDiscountPct: parseFloat(account.volumeDiscountPct),
+          creditLimit:
+            account.creditLimit != null
+              ? parseFloat(account.creditLimit)
+              : null,
+          status: account.status,
+          userCount: userIds.length,
+          unbilledRides,
+          unbilledTotal,
+          createdAt: account.createdAt.toISOString(),
+        };
+      }),
+    );
 
-  res.json(result);
-});
+    res.json(result);
+  },
+);
 
 // PATCH /admin/corporate-accounts/:id — update billing terms
-router.patch("/admin/corporate-accounts/:id", requireAdmin, async (req, res): Promise<void> => {
-  const idParam = req.params["id"];
-  const id = parseInt(Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "", 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid corporate account ID" }); return; }
+router.patch(
+  "/admin/corporate-accounts/:id",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const idParam = req.params["id"];
+    const id = parseInt(
+      Array.isArray(idParam) ? (idParam[0] ?? "") : (idParam ?? ""),
+      10,
+    );
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid corporate account ID" });
+      return;
+    }
 
-  const { companyName, billingEmail, billingAddress, netTermsDays, volumeDiscountPct, creditLimit, status } = req.body as {
-    companyName?: string; billingEmail?: string; billingAddress?: string | null;
-    netTermsDays?: number; volumeDiscountPct?: number; creditLimit?: number | null; status?: string;
-  };
+    const {
+      companyName,
+      billingEmail,
+      billingAddress,
+      netTermsDays,
+      volumeDiscountPct,
+      creditLimit,
+      status,
+    } = req.body as {
+      companyName?: string;
+      billingEmail?: string;
+      billingAddress?: string | null;
+      netTermsDays?: number;
+      volumeDiscountPct?: number;
+      creditLimit?: number | null;
+      status?: string;
+    };
 
-  const updates: Record<string, unknown> = {};
-  if (companyName !== undefined) updates["companyName"] = companyName;
-  if (billingEmail !== undefined) updates["billingEmail"] = billingEmail;
-  if (billingAddress !== undefined) updates["billingAddress"] = billingAddress;
-  if (netTermsDays !== undefined) updates["netTermsDays"] = netTermsDays;
-  if (volumeDiscountPct !== undefined) updates["volumeDiscountPct"] = String(volumeDiscountPct);
-  if (creditLimit !== undefined) updates["creditLimit"] = creditLimit != null ? String(creditLimit) : null;
-  if (status !== undefined) updates["status"] = status;
+    const updates: Record<string, unknown> = {};
+    if (companyName !== undefined) updates["companyName"] = companyName;
+    if (billingEmail !== undefined) updates["billingEmail"] = billingEmail;
+    if (billingAddress !== undefined)
+      updates["billingAddress"] = billingAddress;
+    if (netTermsDays !== undefined) updates["netTermsDays"] = netTermsDays;
+    if (volumeDiscountPct !== undefined)
+      updates["volumeDiscountPct"] = String(volumeDiscountPct);
+    if (creditLimit !== undefined)
+      updates["creditLimit"] = creditLimit != null ? String(creditLimit) : null;
+    if (status !== undefined) updates["status"] = status;
 
-  const [updated] = await db
-    .update(corporateAccountsTable)
-    .set(updates)
-    .where(eq(corporateAccountsTable.id, id))
-    .returning({ id: corporateAccountsTable.id });
+    const [updated] = await db
+      .update(corporateAccountsTable)
+      .set(updates)
+      .where(eq(corporateAccountsTable.id, id))
+      .returning({ id: corporateAccountsTable.id });
 
-  if (!updated) { res.status(404).json({ error: "Corporate account not found" }); return; }
-  res.json({ ok: true, accountId: id });
-});
+    if (!updated) {
+      res.status(404).json({ error: "Corporate account not found" });
+      return;
+    }
+    res.json({ ok: true, accountId: id });
+  },
+);
 
 // POST /admin/corporate-accounts/:id/mark-invoiced — Net-30 billing run: marks every
 // currently-unbilled ride for this account as invoiced so it isn't billed twice.
-router.post("/admin/corporate-accounts/:id/mark-invoiced", requireAdmin, async (req, res): Promise<void> => {
-  const idParam = req.params["id"];
-  const id = parseInt(Array.isArray(idParam) ? idParam[0] ?? "" : idParam ?? "", 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid corporate account ID" }); return; }
+router.post(
+  "/admin/corporate-accounts/:id/mark-invoiced",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const idParam = req.params["id"];
+    const id = parseInt(
+      Array.isArray(idParam) ? (idParam[0] ?? "") : (idParam ?? ""),
+      10,
+    );
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid corporate account ID" });
+      return;
+    }
 
-  const userRows = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.corporateAccountId, id));
-  const userIds = userRows.map(u => u.id);
-  if (userIds.length === 0) {
-    res.json({ ok: true, accountId: id, invoicedRides: 0, invoicedTotal: 0 });
-    return;
-  }
+    const userRows = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.corporateAccountId, id));
+    const userIds = userRows.map((u) => u.id);
+    if (userIds.length === 0) {
+      res.json({ ok: true, accountId: id, invoicedRides: 0, invoicedTotal: 0 });
+      return;
+    }
 
-  const toInvoice = await db
-    .select({ id: bookingsTable.id, amount: CORPORATE_BILLABLE })
-    .from(bookingsTable)
-    .where(and(
-      inArray(bookingsTable.userId, userIds),
-      inArray(bookingsTable.status, ["confirmed", "completed"]),
-      isNull(bookingsTable.invoicedAt),
-    ));
+    const toInvoice = await db
+      .select({ id: bookingsTable.id, amount: CORPORATE_BILLABLE })
+      .from(bookingsTable)
+      .where(
+        and(
+          inArray(bookingsTable.userId, userIds),
+          inArray(bookingsTable.status, ["confirmed", "completed"]),
+          isNull(bookingsTable.invoicedAt),
+        ),
+      );
 
-  if (toInvoice.length === 0) {
-    res.json({ ok: true, accountId: id, invoicedRides: 0, invoicedTotal: 0 });
-    return;
-  }
+    if (toInvoice.length === 0) {
+      res.json({ ok: true, accountId: id, invoicedRides: 0, invoicedTotal: 0 });
+      return;
+    }
 
-  await db
-    .update(bookingsTable)
-    .set({ invoicedAt: new Date() })
-    .where(inArray(bookingsTable.id, toInvoice.map(b => b.id)));
+    await db
+      .update(bookingsTable)
+      .set({ invoicedAt: new Date() })
+      .where(
+        inArray(
+          bookingsTable.id,
+          toInvoice.map((b) => b.id),
+        ),
+      );
 
-  const invoicedTotal = Math.round(toInvoice.reduce((sum, b) => sum + parseFloat(b.amount || "0"), 0) * 100) / 100;
-  res.json({ ok: true, accountId: id, invoicedRides: toInvoice.length, invoicedTotal });
-});
+    const invoicedTotal =
+      Math.round(
+        toInvoice.reduce((sum, b) => sum + parseFloat(b.amount || "0"), 0) *
+          100,
+      ) / 100;
+    res.json({
+      ok: true,
+      accountId: id,
+      invoicedRides: toInvoice.length,
+      invoicedTotal,
+    });
+  },
+);
 
 export default router;
