@@ -10,6 +10,9 @@ import {
   UpdatePricingRuleResponse,
   DeletePricingRuleParams,
 } from "@workspace/api-zod";
+import { getOrSetCache, invalidateCache } from "../lib/cache.js";
+
+const PRICING_CACHE_KEY = "pricing:rules";
 
 const router: IRouter = Router();
 
@@ -26,8 +29,11 @@ function parseRule(r: typeof pricingRulesTable.$inferSelect) {
 }
 
 router.get("/pricing", async (_req, res): Promise<void> => {
-  const rules = await db.select().from(pricingRulesTable);
-  res.json(ListPricingRulesResponse.parse(rules.map(parseRule)));
+  const rules = await getOrSetCache(PRICING_CACHE_KEY, 300, async () => {
+    const rows = await db.select().from(pricingRulesTable);
+    return rows.map(parseRule);
+  });
+  res.json(ListPricingRulesResponse.parse(rules));
 });
 
 router.post("/pricing", requireAdmin, async (req, res): Promise<void> => {
@@ -50,6 +56,7 @@ router.post("/pricing", requireAdmin, async (req, res): Promise<void> => {
     })
     .returning();
 
+  await invalidateCache(PRICING_CACHE_KEY);
   res.status(201).json(parseRule(rule));
 });
 
@@ -92,6 +99,7 @@ router.patch("/pricing/:id", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
 
+  await invalidateCache(PRICING_CACHE_KEY);
   res.json(UpdatePricingRuleResponse.parse(parseRule(rule)));
 });
 
@@ -103,6 +111,7 @@ router.delete("/pricing/:id", requireAdmin, async (req, res): Promise<void> => {
   }
 
   await db.delete(pricingRulesTable).where(eq(pricingRulesTable.id, params.data.id));
+  await invalidateCache(PRICING_CACHE_KEY);
   res.sendStatus(204);
 });
 

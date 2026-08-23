@@ -14,6 +14,8 @@ import {
   corporateAccountsTable,
 } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
+import { invalidateCache } from "../lib/cache.js";
+import { VEHICLE_CATALOG_CACHE_KEY } from "../lib/cacheKeys.js";
 import {
   encryptField,
   safeDecryptField,
@@ -765,6 +767,7 @@ router.post(
         isActive: true,
       })
       .returning();
+    await invalidateCache(VEHICLE_CATALOG_CACHE_KEY);
     res.status(201).json(entry);
   },
 );
@@ -792,6 +795,7 @@ router.patch(
       .set({ isActive: !entry.isActive })
       .where(eq(vehicleCatalogTable.id, id))
       .returning();
+    await invalidateCache(VEHICLE_CATALOG_CACHE_KEY);
     res.json(updated);
   },
 );
@@ -807,6 +811,7 @@ router.delete(
       return;
     }
     await db.delete(vehicleCatalogTable).where(eq(vehicleCatalogTable.id, id));
+    await invalidateCache(VEHICLE_CATALOG_CACHE_KEY);
     res.json({ ok: true });
   },
 );
@@ -843,6 +848,7 @@ router.patch(
       res.status(404).json({ error: "Not found" });
       return;
     }
+    await invalidateCache(VEHICLE_CATALOG_CACHE_KEY);
     res.json({ ...updated, createdAt: updated.createdAt.toISOString() });
   },
 );

@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { mapsLimiter } from "../lib/rateLimit.js";
+import { getOrSetCache } from "../lib/cache.js";
 
 const router: IRouter = Router();
 
@@ -65,28 +66,36 @@ router.get("/autocomplete", mapsLimiter(), async (req, res): Promise<void> => {
   }
 
   try {
-    const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json`);
-    url.searchParams.set("access_token", token);
-    url.searchParams.set("autocomplete", "true");
-    url.searchParams.set("country", "us");
-    url.searchParams.set("limit", "5");
+    // Geocoding results for a given string don't change — an address is an
+    // address — so a cache hit here is a free win, not a staleness trade.
+    // Every keystroke of a debounced typeahead is a distinct key, but the
+    // overlap across users typing the same hotel/airport/street name is
+    // exactly what a 24h TTL is sized to catch.
+    const cacheKey = `autocomplete:${isDropoff ? "dropoff" : "pickup"}:${query.toLowerCase()}`;
+    const suggestions = await getOrSetCache(cacheKey, 24 * 60 * 60, async () => {
+      const url = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json`);
+      url.searchParams.set("access_token", token);
+      url.searchParams.set("autocomplete", "true");
+      url.searchParams.set("country", "us");
+      url.searchParams.set("limit", "5");
 
-    // Florida-wide bias (dropoff) vs. South Florida bias (pickup)
-    url.searchParams.set("proximity", isDropoff ? "-82.0,28.0" : "-80.1,26.0");
+      // Florida-wide bias (dropoff) vs. South Florida bias (pickup)
+      url.searchParams.set("proximity", isDropoff ? "-82.0,28.0" : "-80.1,26.0");
 
-    const response = await fetch(url.toString());
-    const data = await response.json() as {
-      features?: Array<{ id: string; place_name: string; text: string }>;
-    };
-
-    const suggestions = (data.features || []).slice(0, 5).map(f => {
-      const [mainText, ...rest] = f.place_name.split(", ");
-      return {
-        placeId: f.id,
-        text: f.place_name,
-        mainText: mainText || f.text,
-        secondaryText: rest.join(", "),
+      const response = await fetch(url.toString());
+      const data = await response.json() as {
+        features?: Array<{ id: string; place_name: string; text: string }>;
       };
+
+      return (data.features || []).slice(0, 5).map(f => {
+        const [mainText, ...rest] = f.place_name.split(", ");
+        return {
+          placeId: f.id,
+          text: f.place_name,
+          mainText: mainText || f.text,
+          secondaryText: rest.join(", "),
+        };
+      });
     });
 
     res.json({ airports: airportMatches, suggestions });

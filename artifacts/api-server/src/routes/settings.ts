@@ -3,6 +3,10 @@ import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "../middleware/auth.js";
 import { isSecretSetting, redactSettings } from "../lib/secretSettings.js";
+import { getOrSetCache, invalidateCache } from "../lib/cache.js";
+
+const PUBLIC_SETTINGS_CACHE_KEY = "settings:public";
+const PUBLIC_SETTINGS_TTL_SECONDS = 300;
 
 const router: IRouter = Router();
 
@@ -21,14 +25,17 @@ const PUBLIC_SETTING_KEYS = [
 ];
 
 router.get("/settings/public", async (_req, res): Promise<void> => {
-  const rows = await db.select().from(settingsTable);
-  const map: Record<string, string> = {};
-  for (const row of rows) {
-    // Only expose non-sensitive keys
-    if (PUBLIC_SETTING_KEYS.includes(row.key)) {
-      map[row.key] = row.value;
+  const map = await getOrSetCache(PUBLIC_SETTINGS_CACHE_KEY, PUBLIC_SETTINGS_TTL_SECONDS, async () => {
+    const rows = await db.select().from(settingsTable);
+    const result: Record<string, string> = {};
+    for (const row of rows) {
+      // Only expose non-sensitive keys
+      if (PUBLIC_SETTING_KEYS.includes(row.key)) {
+        result[row.key] = row.value;
+      }
     }
-  }
+    return result;
+  });
   res.json(map);
 });
 
@@ -75,6 +82,7 @@ async function bulkPatchSettings(body: unknown, res: import("express").Response)
       .onConflictDoUpdate({ target: settingsTable.key, set: { value, updatedAt: new Date() } });
     result[key] = value;
   }
+  await invalidateCache(PUBLIC_SETTINGS_CACHE_KEY);
   res.json(result);
 }
 
@@ -107,6 +115,7 @@ router.patch("/settings/:key", requireAdmin, async (req, res): Promise<void> => 
       set: { value, updatedAt: new Date() },
     });
 
+  await invalidateCache(PUBLIC_SETTINGS_CACHE_KEY);
   res.json({ key, value });
 });
 
@@ -130,6 +139,7 @@ router.patch("/admin/settings/:key", requireAdmin, async (req, res): Promise<voi
       set: { value, updatedAt: new Date() },
     });
 
+  await invalidateCache(PUBLIC_SETTINGS_CACHE_KEY);
   res.json({ key, value });
 });
 

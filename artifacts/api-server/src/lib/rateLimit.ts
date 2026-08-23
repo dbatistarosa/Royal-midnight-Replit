@@ -1,4 +1,6 @@
-import rateLimit, { type RateLimitRequestHandler } from "express-rate-limit";
+import rateLimit, { ipKeyGenerator, type RateLimitRequestHandler } from "express-rate-limit";
+import { getRedis } from "./redis.js";
+import { RedisRateLimitStore } from "./redisRateLimitStore.js";
 
 /**
  * Rate limiting beyond /auth/*.
@@ -10,17 +12,24 @@ import rateLimit, { type RateLimitRequestHandler } from "express-rate-limit";
  * data-disclosure problem — it is a bill, and a denial-of-service one, since
  * exhausting the Mapbox quota degrades quoting for real customers.
  *
- * Known limitation, deliberately accepted for now: the default MemoryStore is
- * per-instance, and Vercel runs many. The effective limit is therefore
- * (limit x live instances). That still turns "unbounded" into "bounded", which
- * is the whole point at this traffic level. A shared store (Vercel KV /
- * Upstash) is the follow-up, and is the same work that moves the OTP store out
- * of memory.
+ * Each limiter's store used to be the default MemoryStore, which is
+ * per-instance — Vercel runs many, so the effective limit was (limit x live
+ * instances). storeFor() swaps in a shared Redis-backed store the moment
+ * KV_REST_API_URL/TOKEN (or UPSTASH_REDIS_REST_*) is set; until then it
+ * returns undefined and express-rate-limit falls back to MemoryStore exactly
+ * as before, so this is safe to deploy ahead of provisioning Redis.
  */
+function storeFor(prefix: string): RedisRateLimitStore | undefined {
+  return getRedis() ? new RedisRateLimitStore(prefix) : undefined;
+}
 
 const shared = {
   standardHeaders: true as const,
   legacyHeaders: false as const,
+  // A Redis hiccup should cost latency, not turn "rate limited" into "site
+  // down" — let the request through and rely on Stripe Radar / DB constraints
+  // as the backstop for whatever this limiter was guarding.
+  passOnStoreError: true as const,
 };
 
 /**
@@ -35,6 +44,7 @@ const shared = {
 export function globalLimiter(): RateLimitRequestHandler {
   return rateLimit({
     ...shared,
+    store: storeFor("global"),
     windowMs: 60 * 1000,
     limit: 240,
     skip: (req) =>
@@ -56,6 +66,7 @@ export function globalLimiter(): RateLimitRequestHandler {
 export function mapsLimiter(): RateLimitRequestHandler {
   return rateLimit({
     ...shared,
+    store: storeFor("maps"),
     windowMs: 60 * 1000,
     limit: 60,
     message: { error: "Too many address lookups. Please wait a moment." },
@@ -67,6 +78,7 @@ export function mapsLimiter(): RateLimitRequestHandler {
 export function quoteLimiter(): RateLimitRequestHandler {
   return rateLimit({
     ...shared,
+    store: storeFor("quote"),
     windowMs: 60 * 1000,
     limit: 30,
     message: { error: "Too many quote requests. Please wait a moment." },
@@ -78,6 +90,7 @@ export function quoteLimiter(): RateLimitRequestHandler {
 export function promoLimiter(): RateLimitRequestHandler {
   return rateLimit({
     ...shared,
+    store: storeFor("promo"),
     windowMs: 15 * 60 * 1000,
     limit: 20,
     message: { error: "Too many promo code attempts. Please try again later." },
@@ -94,10 +107,16 @@ export function promoLimiter(): RateLimitRequestHandler {
 export function paymentLimiter(): RateLimitRequestHandler {
   return rateLimit({
     ...shared,
+    store: storeFor("payment"),
     windowMs: 15 * 60 * 1000,
     limit: 20,
+    // ipKeyGenerator(), not req.ip directly: express-rate-limit validates this
+    // at startup and logs ERR_ERL_KEY_GEN_IPV6 otherwise — a raw IPv6 address
+    // is per-connection, not per-client, so keying on it verbatim lets an
+    // unauthenticated caller rotate through addresses in their own /64 and
+    // never hit the limit. The helper normalizes to the standard /56 subnet.
     keyGenerator: (req) =>
-      req.currentUser?.userId?.toString() ?? req.ip ?? "unknown",
+      req.currentUser?.userId?.toString() ?? ipKeyGenerator(req.ip ?? "unknown"),
     message: {
       error: "Too many payment requests. Please wait a moment and try again.",
     },

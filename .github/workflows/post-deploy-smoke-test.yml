@@ -1,0 +1,57 @@
+name: Post-Deploy Smoke Test
+
+# Vercel's GitHub integration posts a Deployment + Deployment Status back to
+# this repo for every deploy it makes. This fires once Vercel itself reports
+# the deployment READY and aliased — which is exactly the moment CI cannot
+# see, since `ci.yml` runs against the *commit*, before Vercel has built or
+# served anything from it.
+#
+# Two of this app's three real outages (CORS/ALLOWED_ORIGINS twice, DB TLS
+# once) built and typechecked cleanly and only broke once traffic hit the
+# live function. This is the automated version of the manual check that used
+# to be "someone remembers to curl production 60-90s after every deploy."
+on:
+  deployment_status: {}
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  smoke-test:
+    # Vercel's GitHub App reports environment as "Production" for prod
+    # deploys (Preview deployments get their own per-branch value). If this
+    # condition ever stops matching — e.g. Vercel changes the string — the
+    # job simply never runs rather than false-failing, so a mismatch here is
+    # silent and worth checking after the first real production deploy.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment == 'Production')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit the real production domain and check the database answered
+        run: |
+          # Small buffer for DNS/alias propagation right after Vercel marks
+          # the deployment ready.
+          sleep 15
+
+          # Wrong password against a real endpoint that touches the DB on
+          # every call. 401 = the API and the database are both healthy.
+          # 500 = something in the deployed function is broken (bad import,
+          # unreachable DB, TLS misconfigured) — the exact failure mode that
+          # has taken this app down before, and the build never catches.
+          http_status=$(curl -sS --fail-with-body \
+            -o /tmp/smoke-response.txt -w '%{http_code}' \
+            -X POST "https://www.royalmidnight.com/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"smoke-test@royalmidnight.invalid","password":"wrong"}') || true
+
+          echo "HTTP $http_status"
+          cat /tmp/smoke-response.txt || true
+
+          if [ "$http_status" != "401" ]; then
+            echo "::error title=Production looks broken after this deploy::Expected 401 (bad credentials, DB healthy), got $http_status."
+            exit 1
+          fi
+
+          echo "Smoke test passed: production is answering correctly."

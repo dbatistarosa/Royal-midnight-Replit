@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { eq, and } from "drizzle-orm";
 import { db, vehiclesTable, vehicleCatalogTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
+import { getOrSetCache } from "../lib/cache.js";
+import { VEHICLE_CATALOG_CACHE_KEY } from "../lib/cacheKeys.js";
 import {
   ListVehiclesQueryParams,
   ListVehiclesResponse,
@@ -102,11 +104,13 @@ router.patch("/vehicles/:id", requireAdmin, async (req, res): Promise<void> => {
 
 // Public: GET /vehicle-catalog — used by driver onboarding to build dropdowns
 router.get("/vehicle-catalog", async (_req, res): Promise<void> => {
-  const entries = await db
-    .select()
-    .from(vehicleCatalogTable)
-    .where(eq(vehicleCatalogTable.isActive, true))
-    .orderBy(vehicleCatalogTable.make, vehicleCatalogTable.model);
+  const entries = await getOrSetCache(VEHICLE_CATALOG_CACHE_KEY, 600, () =>
+    db
+      .select()
+      .from(vehicleCatalogTable)
+      .where(eq(vehicleCatalogTable.isActive, true))
+      .orderBy(vehicleCatalogTable.make, vehicleCatalogTable.model),
+  );
   res.json(entries);
 });
 

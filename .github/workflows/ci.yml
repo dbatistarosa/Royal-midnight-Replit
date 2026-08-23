@@ -51,3 +51,19 @@ jobs:
       # tree indefinitely without anyone noticing. --prod keeps build/dev-only
       # toolchain noise (Expo, vitest, orval) from blocking merges.
       - run: pnpm audit --audit-level high --prod
+
+      # The two outages this repo has actually had (Sentry/@opentelemetry,
+      # twice) were both MODULE_NOT_FOUND at Vercel cold-start on a bundle
+      # that had built and typechecked cleanly — esbuild leaves an externalised
+      # package as a bare import, and Node only fails to resolve it once the
+      # function actually runs. Building here and importing the real output
+      # moves that failure from "production, after deploy" to "this PR".
+      - run: pnpm --filter @workspace/api-server run build
+
+      - name: Verify the built API bundle loads
+        run: |
+          DATABASE_URL="postgresql://u:p@localhost:5432/none" node -e "
+            import('./artifacts/api-server/dist/app.mjs')
+              .then((m) => { console.log('Bundle loaded OK:', typeof m.default); process.exit(0); })
+              .catch((e) => { console.error('Bundle failed to load:', e.message); process.exit(1); });
+          "

@@ -197,6 +197,9 @@ importers:
       '@types/bcrypt':
         specifier: ^6.0.0
         version: 6.0.0
+      '@upstash/redis':
+        specifier: ^1.35.5
+        version: 1.38.2
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod
@@ -214,7 +217,7 @@ importers:
         version: 2.8.6
       drizzle-orm:
         specifier: 'catalog:'
-        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(pg@8.20.0)
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(@upstash/redis@1.38.2)(pg@8.20.0)
       express:
         specifier: ^5
         version: 5.2.1
@@ -808,10 +811,10 @@ importers:
         version: 1.9.1
       drizzle-orm:
         specifier: 'catalog:'
-        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(pg@8.20.0)
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(@upstash/redis@1.38.2)(pg@8.20.0)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(pg@8.20.0))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(@upstash/redis@1.38.2)(pg@8.20.0))(zod@3.25.76)
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -2939,6 +2942,9 @@ packages:
 
   '@uppy/utils@7.2.0':
     resolution: {integrity: sha512-6lC246qszMv6bTyl/+QyHwrudgeguWkA94ME1wHn+a6uRAvmtAEaUManIfGqTJfoKvWAiCJqdJPl5xRJjhAloQ==}
+
+  '@upstash/redis@1.38.2':
+    resolution: {integrity: sha512-RZ+JaRCVIS+ZTGnjOnDMr+/0aqDxsBb5rV6aW+Pys4SGELwr5lwE3UbLHRCHqMQ5Ulxj0b/CFBHfbmE175Otog==}
 
   '@vitejs/plugin-react@5.1.4':
     resolution: {integrity: sha512-VIcFLdRi/VYRU8OL/puL7QXMYafHmqOnwTZY50U1JPlCNj30PxCMx65c494b1K9be9hX83KVt0+gTEwTWLqToA==}
@@ -5888,6 +5894,9 @@ packages:
 
   uc.micro@2.1.0:
     resolution: {integrity: sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A==}
+
+  uncrypto@0.1.3:
+    resolution: {integrity: sha512-Ql87qFHB3s/De2ClA9e0gsnS6zXG27SkTiSJwjCc9MebbfapQfuPzumMIUMi38ezPZVNFcHI9sUIepeQfw8J8Q==}
 
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
@@ -8847,6 +8856,10 @@ snapshots:
       lodash: 4.18.1
       preact: 10.29.1
 
+  '@upstash/redis@1.38.2':
+    dependencies:
+      uncrypto: 0.1.3
+
   '@vitejs/plugin-react@5.1.4(vite@7.3.6(@types/node@25.3.5)(jiti@2.7.0)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.9.0))':
     dependencies:
       '@babel/core': 7.29.7
@@ -9600,15 +9613,16 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(pg@8.20.0):
+  drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(@upstash/redis@1.38.2)(pg@8.20.0):
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
       '@types/pg': 8.18.0
+      '@upstash/redis': 1.38.2
       pg: 8.20.0
 
-  drizzle-zod@0.8.3(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(pg@8.20.0))(zod@3.25.76):
+  drizzle-zod@0.8.3(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(@upstash/redis@1.38.2)(pg@8.20.0))(zod@3.25.76):
     dependencies:
-      drizzle-orm: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(pg@8.20.0)
+      drizzle-orm: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.18.0)(@upstash/redis@1.38.2)(pg@8.20.0)
       zod: 3.25.76
 
   dunder-proto@1.0.1:
@@ -11936,6 +11950,8 @@ snapshots:
 
   uc.micro@2.1.0: {}
 
+  uncrypto@0.1.3: {}
+
   undici-types@7.18.2: {}
 
   unicode-canonical-property-names-ecmascript@2.0.1: {}
@@ -12036,11 +12052,11 @@ snapshots:
   vite@7.3.6(@types/node@25.3.5)(jiti@2.7.0)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.21.0)(yaml@2.9.0):
     dependencies:
       esbuild: 0.28.2
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.5)
+      picomatch: 4.0.5
       postcss: 8.5.26
       rollup: 4.60.1
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 25.3.5
       fsevents: 2.3.3
@@ -12053,11 +12069,11 @@ snapshots:
   vite@7.3.6(@types/node@25.3.5)(jiti@2.7.0)(lightningcss@1.31.1)(terser@5.48.0)(tsx@4.23.12)(yaml@2.9.0):
     dependencies:
       esbuild: 0.28.2
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.5)
+      picomatch: 4.0.5
       postcss: 8.5.26
       rollup: 4.60.1
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 25.3.5
       fsevents: 2.3.3
