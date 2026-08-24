@@ -383,7 +383,11 @@ export async function sendBookingCancelledPassenger(b: BookingEmailData, cancell
   ${refundAmount > 0 ? row("Refund Amount", `<span style="color:#22c55e;font-weight:bold">$${refundAmount.toFixed(2)}</span>`) : ""}
 </table>
 <p style="margin-top:20px;color:#888;font-size:12px">
-  ${cancellationFee > 0 ? `A cancellation fee applies per our policy. A refund of $${refundAmount.toFixed(2)} will be processed within 5–10 business days.` : "No cancellation fee applies. If payment was collected, a full refund will be processed within 5–10 business days."}
+  ${cancellationFee === 0
+    ? "No cancellation fee applies. If payment was collected, a full refund will be processed within 5–10 business days."
+    : refundAmount > 0
+      ? `A cancellation fee applies per our policy. A refund of $${refundAmount.toFixed(2)} will be processed within 5–10 business days.`
+      : "This cancellation falls within our no-refund window (less than 2 hours before pickup, or a no-show), so the full charge applies and no refund is due."}
 </p>
 <p style="margin-top:20px">
   <a href="${appUrl}/book" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">BOOK AGAIN</a>

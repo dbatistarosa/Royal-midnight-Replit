@@ -3181,10 +3181,18 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     existing.status,
   );
 
-  await db
+  // Conditioned on status != cancelled so two overlapping cancel requests (a
+  // double-click, a retried request) can't both see a row to act on — only
+  // the one that actually flips the status fires the Stripe side effect
+  // below. Without this, the second request would re-derive the same policy
+  // against an "already cancelled" row (netRefund 0, harmless), but a
+  // narrower race where both reads land before either write completes could
+  // otherwise trigger two refunds for one cancellation.
+  const [cancelled] = await db
     .update(bookingsTable)
     .set({ status: "cancelled", updatedAt: new Date() })
-    .where(eq(bookingsTable.id, params.data.id));
+    .where(and(eq(bookingsTable.id, params.data.id), ne(bookingsTable.status, "cancelled")))
+    .returning({ id: bookingsTable.id });
 
   res.json({
     success: true,
@@ -3193,13 +3201,18 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     netRefund: policy.netRefund,
   });
 
-  // Fire-and-forget: void the Stripe payment intent on cancellation
-  // - awaiting_payment: PI may not have been paid yet — try to cancel it so the customer cannot be charged
-  // - authorized: card hold has been placed — cancel the PI to release the hold
-  if (
-    ["awaiting_payment", "authorized"].includes(existing.status) &&
-    existing.stripePaymentIntentId
-  ) {
+  // Fire-and-forget: settle the Stripe side of the cancellation.
+  //
+  // This used to only run for awaiting_payment/authorized — i.e. before the
+  // card was actually charged. But the payment intent is created with
+  // capture_method: "automatic" (payments.ts), so a booking is captured and
+  // moved out of those two statuses within moments of payment succeeding.
+  // Every cancellation after that point — which in practice is nearly all of
+  // them — updated the booking, emailed the passenger a promise of a refund
+  // per the 12h/2h policy, and never actually called Stripe. The refund the
+  // email promised never happened unless an admin noticed and did it by hand
+  // in the Stripe dashboard.
+  if (cancelled && existing.stripePaymentIntentId) {
     (async () => {
       try {
         const stripe = getStripe();
@@ -3214,18 +3227,31 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
             "requires_capture",
           ].includes(pi.status)
         ) {
+          // Never charged (or only a hold placed) — cancelling the PI is the
+          // whole story, there is nothing to refund.
           await stripe.paymentIntents.cancel(existing.stripePaymentIntentId!);
           console.log(
             `[bookings] PI cancelled on booking cancel for booking #${existing.id} (PI status was: ${pi.status})`,
           );
         } else if (pi.status === "succeeded") {
-          // Payment came through before we could cancel — issue a full refund
-          await stripe.refunds.create({
-            payment_intent: existing.stripePaymentIntentId!,
-          });
-          console.log(
-            `[bookings] PI already succeeded on cancel for booking #${existing.id} — full refund issued`,
-          );
+          // Charged. Refund exactly what the cancellation policy says is
+          // owed — full refund at 12h+, 75% at 2-12h (25% fee retained),
+          // nothing under 2h/no-show. Not a flat full refund: that would
+          // hand back the cancellation fee the passenger was told about.
+          const refundCents = Math.round(policy.netRefund * 100);
+          if (refundCents > 0) {
+            await stripe.refunds.create({
+              payment_intent: existing.stripePaymentIntentId!,
+              amount: refundCents,
+            });
+            console.log(
+              `[bookings] Refunded $${policy.netRefund.toFixed(2)} (tier: ${policy.tier}) for booking #${existing.id}`,
+            );
+          } else {
+            console.log(
+              `[bookings] No refund owed (tier: ${policy.tier}) for booking #${existing.id} — cancellation fee covers the full charge`,
+            );
+          }
         } else {
           console.log(
             `[bookings] PI in unvoidable status '${pi.status}' for booking #${existing.id} — no action taken`,

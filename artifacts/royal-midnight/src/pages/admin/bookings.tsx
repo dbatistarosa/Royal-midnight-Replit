@@ -1367,7 +1367,7 @@ export default function AdminBookings() {
               </div>
 
               <p className="text-xs text-muted-foreground">
-                This will cancel the booking and notify both the admin and the passenger by email. Stripe refunds must be processed manually via the Stripe dashboard.
+                This will cancel the booking, notify both the admin and the passenger by email, and automatically refund ${cancelPreview.policy.netRefund.toFixed(2)} to the passenger's card via Stripe, per the cancellation policy above.
               </p>
             </div>
 
