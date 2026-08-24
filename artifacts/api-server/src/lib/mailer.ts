@@ -808,6 +808,54 @@ export async function sendDriverAccountSetupEmail(to: string, driverName: string
   await send(to, "Welcome to Royal Midnight — Set Up Your Driver Account", html, "driver_account_setup");
 }
 
+/** Sent to the applicant right after POST /auth/driver-register succeeds.
+ *  Confirms the three required documents actually arrived — the applicant's
+ *  only other signal is the in-app "Application Submitted" screen, which is
+ *  gone the moment they close the tab. */
+export async function sendDriverApplicationReceived(to: string, driverName: string) {
+  const html = wrap(`
+<h2 style="color:#ffffff;margin:0 0 8px;font-size:22px;font-weight:600">Application Received</h2>
+<p style="color:#e5e7eb;font-size:15px;margin:0 0 16px">Hello ${escapeHtml(driverName)},</p>
+<p style="color:#9ca3af;font-size:14px;margin:0 0 16px">
+  Thank you for applying to join the Royal Midnight fleet. We've received your license, vehicle registration and
+  insurance documents, and our team will review your application shortly.
+</p>
+<p style="color:#9ca3af;font-size:14px;margin:0 0 24px">
+  This typically takes 1&ndash;2 business days. You'll get another email the moment a decision is made, with
+  instructions for setting up billing if you're approved.
+</p>`);
+  await send(to, "Royal Midnight — Application Received", html, "driver_application_received");
+}
+
+/** Sent to admin the moment a driver application lands — the only place a
+ *  pending application otherwise surfaces is the "My Fleet" table in /admin,
+ *  which nothing prompts anyone to go check. */
+export async function sendNewDriverApplicationAdmin(params: {
+  driverId: number;
+  name: string;
+  email: string;
+  phone: string;
+  serviceArea?: string | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehicleYear?: string | null;
+}) {
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const vehicle = [params.vehicleYear, params.vehicleMake, params.vehicleModel].filter(Boolean).join(" ");
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 4px">New Driver Application</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">A chauffeur applicant is awaiting review.</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Name", escapeHtml(params.name))}
+  ${row("Email", escapeHtml(params.email))}
+  ${row("Phone", escapeHtml(params.phone))}
+  ${params.serviceArea ? row("Service Area", escapeHtml(params.serviceArea)) : ""}
+  ${vehicle ? row("Vehicle", escapeHtml(vehicle)) : ""}
+</table>
+<p style="margin-top:24px"><a href="${appUrl}/admin/drivers" style="background:#c9a84c;color:#050505;padding:10px 24px;text-decoration:none;font-weight:bold;font-size:13px;letter-spacing:1px">REVIEW APPLICATION</a></p>`);
+  await send(ADMIN_EMAIL, `New Driver Application — ${params.name}`, html, "new_driver_application_admin");
+}
+
 // ─── Compliance Emails ────────────────────────────────────────────────────────
 
 export async function sendComplianceReminder(params: {

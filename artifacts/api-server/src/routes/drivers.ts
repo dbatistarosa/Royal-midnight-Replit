@@ -11,12 +11,11 @@ import {
   driverLocationsTable,
   passwordResetTokensTable,
   driverVehiclesTable,
-  vehiclesTable,
-  vehicleCatalogTable,
 } from "@workspace/db";
 import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
 import { signedObjectDownloadPath } from "../lib/signedUrl.js";
 import { revokeAllSessionsForUser } from "../lib/session.js";
+import { createDriverVehicle } from "../lib/driverVehicles.js";
 import {
   encryptField,
   lastN,
@@ -1565,111 +1564,18 @@ router.post(
       return;
     }
 
-    if (isDefault) {
-      await db
-        .update(driverVehiclesTable)
-        .set({ isDefault: false })
-        .where(eq(driverVehiclesTable.driverId, driverId));
-    }
-
-    const [v] = await db
-      .insert(driverVehiclesTable)
-      .values({
-        driverId,
-        year: (year as string) ?? null,
-        make: make as string,
-        model: model as string,
-        color: (color as string) ?? null,
-        vehicleClass: (vehicleClass as string) ?? null,
-        passengerCapacity: (passengerCapacity as number) ?? null,
-        luggageCapacity: (luggageCapacity as number) ?? null,
-        hasCarSeat: (hasCarSeat as boolean) ?? false,
-        regPlate: (regPlate as string) ?? null,
-        isDefault: (isDefault as boolean) ?? false,
-      })
-      .returning();
-
-    // Sync to driversTable legacy fields when this becomes the default vehicle
-    if (isDefault) {
-      await db
-        .update(driversTable)
-        .set({
-          vehicleMake: make as string,
-          vehicleModel: model as string,
-          vehicleYear: (year as string) ?? null,
-          vehicleColor: (color as string) ?? null,
-          vehicleClass: (vehicleClass as string) ?? null,
-          passengerCapacity: (passengerCapacity as number) ?? null,
-          luggageCapacity: (luggageCapacity as number) ?? null,
-          hasCarSeat: (hasCarSeat as boolean) ?? false,
-          regPlate: (regPlate as string) ?? null,
-        })
-        .where(eq(driversTable.id, driverId));
-    }
-
-    // Sync to vehiclesTable (Fleet Management → Registered Vehicles) when plate provided
-    if (regPlate && typeof regPlate === "string") {
-      const yearInt = year
-        ? parseInt(year as string, 10)
-        : new Date().getFullYear();
-      const capacity =
-        typeof passengerCapacity === "number" ? passengerCapacity : 3;
-      const vClass = (vehicleClass as string) ?? "standard";
-      const existing = await db
-        .select({ id: vehiclesTable.id })
-        .from(vehiclesTable)
-        .where(eq(vehiclesTable.plate, regPlate));
-      if (existing.length > 0) {
-        await db
-          .update(vehiclesTable)
-          .set({
-            driverId,
-            make: make as string,
-            model: model as string,
-            year: isNaN(yearInt) ? new Date().getFullYear() : yearInt,
-            color: (color as string) ?? "Unknown",
-            vehicleClass: vClass,
-            capacity,
-          })
-          .where(eq(vehiclesTable.plate, regPlate));
-      } else {
-        await db.insert(vehiclesTable).values({
-          driverId,
-          make: make as string,
-          model: model as string,
-          year: isNaN(yearInt) ? new Date().getFullYear() : yearInt,
-          color: (color as string) ?? "Unknown",
-          plate: regPlate,
-          vehicleClass: vClass,
-          capacity,
-          isAvailable: true,
-        });
-      }
-    }
-
-    // If vehicle make+model not in catalog, add a pending entry for admin to categorize
-    const catalogMatch = await db
-      .select({ id: vehicleCatalogTable.id })
-      .from(vehicleCatalogTable)
-      .where(
-        sql`LOWER(make) = LOWER(${make as string}) AND LOWER(model) = LOWER(${model as string})`,
-      );
-    if (catalogMatch.length === 0) {
-      await db
-        .insert(vehicleCatalogTable)
-        .values({
-          make: make as string,
-          model: model as string,
-          minYear: year
-            ? parseInt(year as string, 10) || new Date().getFullYear()
-            : new Date().getFullYear(),
-          vehicleTypes: "",
-          isActive: false,
-          pendingReview: true,
-          notes: `Submitted by driver #${driverId} — pending admin categorization`,
-        })
-        .catch(() => {});
-    }
+    const v = await createDriverVehicle(db, driverId, {
+      year: (year as string) ?? null,
+      make: make as string,
+      model: model as string,
+      color: (color as string) ?? null,
+      vehicleClass: (vehicleClass as string) ?? null,
+      passengerCapacity: (passengerCapacity as number) ?? null,
+      luggageCapacity: (luggageCapacity as number) ?? null,
+      hasCarSeat: (hasCarSeat as boolean) ?? false,
+      regPlate: (regPlate as string) ?? null,
+      isDefault: (isDefault as boolean) ?? false,
+    });
 
     res.status(201).json(v);
   },

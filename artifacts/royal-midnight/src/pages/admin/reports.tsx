@@ -6,7 +6,7 @@ import { generateReportPdf } from "@/lib/generateReportPdf";
 import {
   LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag, MessageSquare,
   BarChart, Settings, TrendingUp, TrendingDown, CheckCircle, Wallet, FileDown,
-  Loader2, CreditCard, Building2, Receipt, Gift,
+  Loader2, CreditCard, Building2, Receipt, Gift, AlertTriangle,
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import {
@@ -227,13 +227,25 @@ export default function AdminReports() {
           </div>
 
           {/* Say so when some rows had to be estimated, rather than implying a
-              precision the data does not have. */}
+              precision the data does not have. A muted caption here was easy to
+              read past while scanning the dollar figures above it — this is
+              exactly the note that explains why a booking's tax can look like
+              the wrong percentage of its total (add-ons on an estimated row
+              weren't part of the taxable base under the pricing rules in force
+              when it was booked). */}
           {(stats?.estimatedRows ?? 0) > 0 && (
-            <p className="text-xs text-amber-400/80 -mt-4">
-              {stats?.estimatedRows} booking{stats?.estimatedRows === 1 ? " was" : "s were"} taken before the
-              per-line tax and fee breakdown was recorded. Their tax and processing figures above are estimated
-              from the current rates; every later booking is exact.
-            </p>
+            <div className="border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-sm text-amber-300">
+                <strong>{stats?.estimatedRows} booking{stats?.estimatedRows === 1 ? " was" : "s were"} estimated.</strong>{" "}
+                <span className="text-amber-300/80">
+                  {stats?.estimatedRows === 1 ? "It was" : "They were"} taken before the per-line tax and fee
+                  breakdown was recorded, so its tax and processing figures above are reverse-calculated from
+                  today's rates rather than read from what was actually charged — this is why its tax may not
+                  look like exactly {taxPctDisplay} of its total. Every booking after that point is exact.
+                </span>
+              </p>
+            </div>
           )}
 
           {/* ── Revenue Split Visual ──────────────────────────────────────────── */}

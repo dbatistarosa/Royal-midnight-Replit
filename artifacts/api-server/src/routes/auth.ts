@@ -7,7 +7,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import { requireAdmin, requireAuth, SESSION_COOKIE } from "../middleware/auth.js";
 import { hashPassword, verifyPassword, isLegacyHash } from "../lib/hash.js";
-import { sendPasswordResetEmail } from "../lib/mailer.js";
+import { sendPasswordResetEmail, sendDriverApplicationReceived, sendNewDriverApplicationAdmin } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
 import { storeOtp, verifyOtp } from "../lib/otpStore.js";
 import { createSession, revokeSession, revokeAllSessionsForUser, SESSION_TTL_MS } from "../lib/session.js";
@@ -16,6 +16,7 @@ import { recordAcceptances } from "../lib/legalAcceptance.js";
 import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
 import { hasPgErrorCode, UNDEFINED_TABLE } from "../lib/pgError.js";
 import { canonicalObjectPath } from "./storage.js";
+import { createDriverVehicle } from "../lib/driverVehicles.js";
 
 const router: IRouter = Router();
 
@@ -419,6 +420,27 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
       })
       .returning();
 
+    // Registering with vehicle info used to only write the drivers columns
+    // above. Fleet (admin) and "My Vehicles" (driver portal) both read from
+    // separate tables that never got a row from this handler, so a driver's
+    // own vehicle was invisible everywhere except "My Profile" — the same
+    // sync createDriverVehicle() does for POST /drivers/:id/vehicles keeps
+    // all three in step from account creation on.
+    if (driverFields.vehicleMake && driverFields.vehicleModel) {
+      await createDriverVehicle(tx, driver.id, {
+        year: driverFields.vehicleYear ?? null,
+        make: driverFields.vehicleMake,
+        model: driverFields.vehicleModel,
+        color: driverFields.vehicleColor ?? null,
+        vehicleClass: driverFields.vehicleClass ?? null,
+        passengerCapacity: driverFields.passengerCapacity ?? null,
+        luggageCapacity: driverFields.luggageCapacity ?? null,
+        hasCarSeat: driverFields.hasCarSeat ?? false,
+        regPlate: driverFields.regPlate ?? null,
+        isDefault: true,
+      });
+    }
+
     // The license/insurance/registration/profile-photo paths above were
     // uploaded via POST /storage/registration-uploads/request-url before this
     // account existed, so nothing owns them yet — canReadObject() in
@@ -455,6 +477,25 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
     driverId: result.driver.id,
     email,
   });
+
+  // Same non-blocking rationale as the acceptance record above: the account
+  // already exists, so a mail-provider hiccup must not turn into a failed
+  // registration. Previously nothing sent either of these at all — the
+  // applicant's only confirmation was the in-app screen, and admin had no
+  // signal a new application existed short of opening My Fleet and looking.
+  void sendDriverApplicationReceived(email, name).catch(err =>
+    req.log.error({ err }, "Failed to send driver application received email"),
+  );
+  void sendNewDriverApplicationAdmin({
+    driverId: result.driver.id,
+    name,
+    email,
+    phone,
+    serviceArea: driverFields.serviceArea,
+    vehicleMake: driverFields.vehicleMake,
+    vehicleModel: driverFields.vehicleModel,
+    vehicleYear: driverFields.vehicleYear,
+  }).catch(err => req.log.error({ err }, "Failed to send new driver application admin email"));
 
   res.status(201).json({
     token: result.token,
