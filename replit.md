@@ -23,18 +23,40 @@ Dark midnight/champagne gold branding. Playfair Display headings, Inter body. No
 ## Database (PostgreSQL via Drizzle ORM)
 
 ### Tables
-- `users` — Passengers, drivers, admins (has passwordHash for auth)
+- `users` — Passengers, drivers, admins, corporate accounts (has passwordHash for auth)
 - `vehicles` — Fleet vehicles by class
+- `vehicle_catalog` — Admin-managed vehicle class definitions
 - `drivers` — Driver profiles, status, ratings
+- `driver_vehicles` — Multi-vehicle assignment per driver
+- `driver_locations` — Realtime driver GPS history (Mapbox tracking)
+- `driver_warnings` — Accountability warnings issued to drivers
+- `booking_driver_blocks` — Scheduling-conflict blocks between drivers and bookings
 - `bookings` — Trip bookings with status, pricing, promo codes
+- `booking_extras` — Paid extras attached to a booking (pet, car seat, etc.)
+- `extra_services` — Catalog of bookable paid extras
+- `fixed_routes` — Bidirectional fixed-price hotel/airport routes
+- `corporate_accounts` — Corporate billing accounts
+- `managed_travelers` — Travelers managed under a corporate account
+- `geo_zones` — Service-area geo zones
+- `driver_service_zones` — Which geo zones a driver serves
 - `saved_addresses` — User saved addresses
 - `reviews` — Post-ride reviews
 - `support_tickets` — Customer support tickets
 - `ticket_messages` — Threaded replies on support tickets (authorRole: admin|passenger)
+- `compliance_documents` — Driver-uploaded compliance/onboarding documents
+- `legal_acceptances` — Signed legal-agreement acceptance records
+- `object_owners` — Ownership mapping for uploaded storage objects
 - `password_reset_tokens` — Secure 30-min password reset tokens
+- `otp_codes` — One-time codes for phone/email verification
+- `sessions` — Auth session tokens
 - `notifications` — In-app notifications (system-generated)
+- `email_logs` — Sent-email audit log
+- `message_events` — Inbound SMS/WhatsApp delivery events (Sent.dm webhook)
 - `promo_codes` — Discount codes (percentage or fixed)
 - `pricing_rules` — Per-vehicle-class pricing configuration
+- `settings` — Key/value platform settings (tax rate, fees, secrets, etc.)
+- `social_posts` — Scheduled/published social-media posts
+- `user_favorite_drivers` — Passenger's favorited drivers
 
 ### DB Commands
 ```bash
@@ -91,6 +113,7 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - `/passenger/addresses` — Saved addresses
 - `/passenger/profile` — Profile management
 - `/passenger/support` — Submit support tickets
+- `/passenger/reports` — Passenger-facing reports
 
 ### Driver Portal (/driver/*)
 - `/driver/dashboard` — Availability toggle, active trips
@@ -98,6 +121,11 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - `/driver/earnings` — Earnings breakdown
 - `/driver/profile` — Profile
 - `/driver/onboarding` — Multi-step onboarding
+- `/driver/payout` — Payout method/history
+- `/driver/stats` — Performance stats
+- `/driver/documents` — Compliance document uploads
+- `/driver/vehicles` — Assigned/registered vehicles
+- `/driver-agreement` — Driver legal agreement acceptance
 
 ### Corporate Portal (/corporate/*)
 - `/corporate/dashboard` — Overview, upcoming trips, quick book button
@@ -117,6 +145,12 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - `/admin/support` — Support tickets
 - `/admin/reports` — Revenue charts
 - `/admin/settings` — System settings + Create Admin + Create Corporate Account sections
+- `/admin/payouts` — Driver payout management
+- `/admin/geo-zones` — Service-area geo zone management
+- `/admin/extras` — Paid extras catalog management
+- `/admin/affiliates` — Affiliate/referral management
+- `/admin/corporate-accounts` — Corporate account management
+- `/admin/driver-app` — Driver app APK distribution page
 
 ## Code Conventions
 - Express 5: `res.status().json(); return;` pattern with `Promise<void>` annotations
