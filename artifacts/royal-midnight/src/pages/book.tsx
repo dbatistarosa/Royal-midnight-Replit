@@ -225,9 +225,6 @@ export default function Book() {
   type ExtraService = { id: number; name: string; description?: string | null; category: string; price: number; icon?: string | null };
   const [availableExtras, setAvailableExtras] = useState<ExtraService[]>([]);
   const [selectedExtras, setSelectedExtras] = useState<Set<number>>(new Set());
-  type FavoriteDriver = { driverId: number; driverName: string | null; vehicleMake: string | null; vehicleModel: string | null; vehicleYear: string | null; rating: string | null };
-  const [favoriteDrivers, setFavoriteDrivers] = useState<FavoriteDriver[]>([]);
-  const [requestPreferredDriver, setRequestPreferredDriver] = useState(false);
   // Multi-stop itinerary state
   const [waypoints, setWaypoints] = useState<string[]>([]);
   const [charterMode, setCharterMode] = useState<"route" | "hourly">("route");
@@ -498,13 +495,9 @@ export default function Book() {
       .catch(() => {});
   }, [step, token, user]);
 
-  // Load favorite drivers + managed travelers when reaching step 2 for logged-in users
+  // Load managed travelers when reaching step 2 for logged-in users
   useEffect(() => {
     if (step !== 2 || !isAuthenticated || !user) return;
-    fetch(`${API_BASE}/users/${user.id}/favorite-drivers`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-      .then(r => r.ok ? r.json() as Promise<FavoriteDriver[]> : Promise.resolve([]))
-      .then(data => setFavoriteDrivers(Array.isArray(data) ? data : []))
-      .catch(() => {});
     fetch(`${API_BASE}/users/${user.id}/managed-travelers`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() as Promise<ManagedTraveler[]> : Promise.resolve([]))
       .then(data => setManagedTravelers(Array.isArray(data) ? data : []))
@@ -790,7 +783,6 @@ export default function Book() {
             userId: bookingForTravelerId ?? userId,
             bookedByUserId: bookingForTravelerId ? userId : null,
             paymentType: "standard",
-            preferredDriverId: requestPreferredDriver && favoriteDrivers.length > 0 ? favoriteDrivers[0]!.driverId : null,
             waypoints: waypoints.filter(w => w.trim()).length > 0 ? JSON.stringify(waypoints.filter(w => w.trim())) : null,
             charterMode: charterMode !== "route" ? charterMode : null,
             charterHours: charterMode === "hourly" ? charterHours : null,
@@ -1397,27 +1389,6 @@ export default function Book() {
                     )}
                   </div>
                 )}
-
-                {/* Preferred Driver Toggle — only shown when passenger has saved drivers */}
-                {favoriteDrivers.length > 0 && (() => {
-                  const fd = favoriteDrivers[0]!;
-                  const vehicleDesc = [fd.vehicleYear, fd.vehicleMake, fd.vehicleModel].filter(Boolean).join(" ");
-                  return (
-                    <div
-                      onClick={() => setRequestPreferredDriver(v => !v)}
-                      className={`cursor-pointer flex items-center justify-between p-4 border transition-colors ${requestPreferredDriver ? "border-primary/50 bg-primary/5" : "border-white/10 bg-white/2"}`}
-                    >
-                      <div>
-                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-0.5">Request Preferred Chauffeur</p>
-                        <p className="text-sm font-medium text-white">{fd.driverName ?? "Saved Chauffeur"}</p>
-                        {vehicleDesc && <p className="text-xs text-muted-foreground">{vehicleDesc}</p>}
-                      </div>
-                      <div className={`w-5 h-5 rounded-none border-2 flex items-center justify-center flex-shrink-0 transition-colors ${requestPreferredDriver ? "border-primary bg-primary" : "border-white/20 bg-transparent"}`}>
-                        {requestPreferredDriver && <svg className="w-3 h-3 text-black" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                      </div>
-                    </div>
-                  );
-                })()}
 
                 <p className="text-center text-xs uppercase tracking-[0.3em] text-gray-600 py-1">Select your vehicle</p>
 

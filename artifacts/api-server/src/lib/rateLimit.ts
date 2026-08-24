@@ -90,6 +90,21 @@ export function quoteLimiter(): RateLimitRequestHandler {
   });
 }
 
+/** POST /bookings runs the exact same computeQuote() as /quote internally
+ *  (geocoding + Directions) on top of a database write, and — unlike /quote —
+ *  is reachable without an account. It fell back to globalLimiter() alone
+ *  (240/min across all of /api), so an anonymous caller could drive up to
+ *  240 Mapbox-billed writes a minute through this one route. */
+export function bookingLimiter(): RateLimitRequestHandler {
+  return rateLimit({
+    ...shared,
+    store: storeFor("booking"),
+    windowMs: 60 * 1000,
+    limit: 20,
+    message: { error: "Too many booking attempts. Please wait a moment." },
+  });
+}
+
 /** Promo codes are short and guessable, and validating one costs the attacker
  *  nothing. This is the only thing standing between the codes and enumeration. */
 export function promoLimiter(): RateLimitRequestHandler {

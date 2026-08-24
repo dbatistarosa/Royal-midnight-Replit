@@ -17,6 +17,7 @@ import {
   bookingDriverBlocksTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
+import { bookingLimiter } from "../lib/rateLimit.js";
 import { signedObjectDownloadPath } from "../lib/signedUrl.js";
 import { hasPgErrorCode, UNDEFINED_COLUMN } from "../lib/pgError.js";
 import { hasDriverBlockTable } from "../lib/schemaGuards.js";
@@ -886,7 +887,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   res.json(parsed2.map((b) => ({ ...b, extras: listExtras.get(b.id) ?? [] })));
 });
 
-router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
+router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promise<void> => {
   // Public endpoint — allows anonymous booking creation from the booking form.
   // Corporate account paymentType is restricted: caller must be authenticated as role=corporate (or admin).
   const parsed = CreateBookingBody.safeParse(req.body);
@@ -1076,6 +1077,13 @@ router.post("/bookings", optionalAuth, async (req, res): Promise<void> => {
     flightNumber: parsed.data.flightNumber ?? null,
     specialRequests: parsed.data.specialRequests ?? null,
     userId: bookingUserId,
+    // Audit trail: who actually placed this booking, when that's someone
+    // other than who it's for (an EA booking for a managed traveler, or
+    // admin booking on a passenger's behalf) — bookingUserId's own
+    // derivation above is the authority on whether that happened. The
+    // client sends this too but it was never read; deriving it here instead
+    // of trusting the body is the same reasoning as bookingUserId itself.
+    bookedByUserId: bookingUserId !== (caller?.userId ?? null) ? (caller?.userId ?? null) : null,
     promoCode: appliedPromoCode,
     priceQuoted: String(priceQuoted),
     fareSubtotal: String(fareSubtotal),

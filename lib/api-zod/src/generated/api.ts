@@ -128,7 +128,13 @@ export const ListBookingsResponseItem = zod.object({
   pickupAddress: zod.string(),
   dropoffAddress: zod.string(),
   pickupAt: zod.coerce.date(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   passengers: zod.number(),
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
@@ -168,7 +174,13 @@ export const CreateBookingBody = zod.object({
   pickupAddress: zod.string(),
   dropoffAddress: zod.string(),
   pickupAt: zod.string(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   passengers: zod.number(),
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
@@ -204,7 +216,13 @@ export const GetBookingResponse = zod.object({
   pickupAddress: zod.string(),
   dropoffAddress: zod.string(),
   pickupAt: zod.coerce.date(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   passengers: zod.number(),
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
@@ -266,7 +284,13 @@ export const UpdateBookingResponse = zod.object({
   pickupAddress: zod.string(),
   dropoffAddress: zod.string(),
   pickupAt: zod.coerce.date(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   passengers: zod.number(),
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
@@ -315,7 +339,13 @@ export const AcceptBookingResponse = zod.object({
   pickupAddress: zod.string(),
   dropoffAddress: zod.string(),
   pickupAt: zod.coerce.date(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   passengers: zod.number(),
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
@@ -348,7 +378,13 @@ export const AcceptBookingResponse = zod.object({
 export const GetQuoteBody = zod.object({
   pickupAddress: zod.string(),
   dropoffAddress: zod.string(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   passengers: zod.number(),
   pickupAt: zod.string(),
   promoCode: zod.string().nullish(),
@@ -401,7 +437,13 @@ export const ListVehiclesResponseItem = zod.object({
   year: zod.number(),
   color: zod.string(),
   plate: zod.string(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   capacity: zod.number(),
   imageUrl: zod.string().nullish(),
   isAvailable: zod.boolean(),
@@ -419,7 +461,13 @@ export const CreateVehicleBody = zod.object({
   year: zod.number(),
   color: zod.string(),
   plate: zod.string(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   capacity: zod.number(),
   imageUrl: zod.string().nullish(),
 });
@@ -439,7 +487,13 @@ export const GetVehicleResponse = zod.object({
   year: zod.number(),
   color: zod.string(),
   plate: zod.string(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   capacity: zod.number(),
   imageUrl: zod.string().nullish(),
   isAvailable: zod.boolean(),
@@ -468,7 +522,13 @@ export const UpdateVehicleResponse = zod.object({
   year: zod.number(),
   color: zod.string(),
   plate: zod.string(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   capacity: zod.number(),
   imageUrl: zod.string().nullish(),
   isAvailable: zod.boolean(),
@@ -783,7 +843,13 @@ export const GetUserBookingsResponseItem = zod.object({
   pickupAddress: zod.string(),
   dropoffAddress: zod.string(),
   pickupAt: zod.coerce.date(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   passengers: zod.number(),
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
@@ -1200,7 +1266,13 @@ export const GetRecentBookingsResponseItem = zod.object({
   pickupAddress: zod.string(),
   dropoffAddress: zod.string(),
   pickupAt: zod.coerce.date(),
-  vehicleClass: zod.enum(["standard", "business", "first_class", "suv", "van"]),
+  // Hand-relaxed from a fixed enum (not from a codegen run — see the note on
+  // GetRecentBookingsResponseItem above): vehicle classes are admin-configurable
+  // (pricing_rules), so the original five-value enum 400'd on any class an
+  // admin created beyond the launch set. The real check — does this class
+  // exist and is it active — already happens against the database in
+  // computeQuote().
+  vehicleClass: zod.string(),
   passengers: zod.number(),
   flightNumber: zod.string().nullish(),
   specialRequests: zod.string().nullish(),
@@ -1284,13 +1356,7 @@ export const GetDispatchBoardResponse = zod.object({
       pickupAddress: zod.string(),
       dropoffAddress: zod.string(),
       pickupAt: zod.coerce.date(),
-      vehicleClass: zod.enum([
-        "standard",
-        "business",
-        "first_class",
-        "suv",
-        "van",
-      ]),
+      vehicleClass: zod.string(), // admin-configurable — see the note above
       passengers: zod.number(),
       flightNumber: zod.string().nullish(),
       specialRequests: zod.string().nullish(),
@@ -1352,13 +1418,7 @@ export const GetDispatchBoardResponse = zod.object({
       pickupAddress: zod.string(),
       dropoffAddress: zod.string(),
       pickupAt: zod.coerce.date(),
-      vehicleClass: zod.enum([
-        "standard",
-        "business",
-        "first_class",
-        "suv",
-        "van",
-      ]),
+      vehicleClass: zod.string(), // admin-configurable — see the note above
       passengers: zod.number(),
       flightNumber: zod.string().nullish(),
       specialRequests: zod.string().nullish(),
