@@ -117,7 +117,7 @@ export const FAQ_ITEMS = [
   {
     question: "Do you offer corporate accounts?",
     answer:
-      "Yes. Royal Midnight provides dedicated corporate accounts with streamlined invoicing, account management, and priority service. Contact us at concierge@royalmidnight.com to set up a corporate account.",
+      "Yes. Royal Midnight provides dedicated corporate accounts with streamlined invoicing, account management, and priority service. Contact us at support@royalmidnight.com to set up a corporate account.",
   },
 ];
 

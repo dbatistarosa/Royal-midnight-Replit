@@ -95,7 +95,7 @@ export default function Terms() {
 
           <h2 className="font-serif text-2xl text-foreground mt-8 mb-4">10. Contact Us</h2>
           <p>
-            Questions about these terms can be directed to concierge@royalmidnight.com or +1 (728) 230-4531.
+            Questions about these terms can be directed to support@royalmidnight.com or +1 (728) 230-4531.
           </p>
         </div>
       </div>

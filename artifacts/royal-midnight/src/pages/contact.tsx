@@ -100,7 +100,7 @@ export default function Contact() {
                 </div>
                 <div>
                   <h3 className="font-medium mb-1">Email</h3>
-                  <p className="text-muted-foreground">concierge@royalmidnight.com</p>
+                  <p className="text-muted-foreground">support@royalmidnight.com</p>
                   <p className="text-sm text-muted-foreground mt-1">We aim to respond within 1 hour</p>
                 </div>
               </div>
@@ -109,8 +109,8 @@ export default function Contact() {
                   <MapPin className="w-6 h-6 text-primary" />
                 </div>
                 <div>
-                  <h3 className="font-medium mb-1">Headquarters</h3>
-                  <p className="text-muted-foreground">100 Biscayne Blvd, Suite 2100<br/>Miami, FL 33132</p>
+                  <h3 className="font-medium mb-1">Location</h3>
+                  <p className="text-muted-foreground">South Florida, USA</p>
                 </div>
               </div>
             </div>

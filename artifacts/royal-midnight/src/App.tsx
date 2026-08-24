@@ -1,5 +1,6 @@
 import { Loader2, Clock, XCircle } from "lucide-react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Analytics } from "@vercel/analytics/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -172,7 +173,7 @@ function DriverApprovalGate({ children }: { children: React.ReactNode }) {
               Once approved, you will receive an email with instructions for setting up your payment and billing information.
             </p>
           </div>
-          <p className="text-xs text-gray-600">Questions? Contact dispatch@royalmidnight.com</p>
+          <p className="text-xs text-gray-600">Questions? Contact support@royalmidnight.com</p>
         </div>
       </div>
     );
@@ -432,6 +433,7 @@ function App({ ssrPath }: AppProps = {}) {
                 </WouterRouter>
               </ErrorBoundary>
               <Toaster />
+              <Analytics />
             </TooltipProvider>
           </DriverStatusProvider>
         </AuthProvider>
