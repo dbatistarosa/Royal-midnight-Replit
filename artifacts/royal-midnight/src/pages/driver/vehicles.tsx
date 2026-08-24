@@ -7,6 +7,7 @@ import { assertOk } from "@/lib/assertOk";
 import { authHeaders, jsonAuthHeaders } from "@/lib/authHeaders";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth";
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { driverNavItems } from "@/config/portalNav";
@@ -25,6 +26,7 @@ function VehiclesInner() {
   const { token, user } = useAuth();
   const { toast } = useToast();
   const authHdr = jsonAuthHeaders(token);
+  const { vehicleClasses } = useVehicleClasses();
 
   const [driverId, setDriverId] = useState<number | null>(null);
   const [vehicles, setVehicles] = useState<DriverVehicle[]>([]);
@@ -180,8 +182,9 @@ function VehiclesInner() {
               </div>
               <div><label className={LABEL}>Vehicle Class</label>
                 <select value={form.vehicleClass} onChange={e => setForm(p => ({ ...p, vehicleClass: e.target.value }))} className="bg-white/5 border border-white/10 text-white rounded-none h-10 text-sm px-3 w-full">
-                  <option value="business">Business Class Sedan</option>
-                  <option value="suv">Premium SUV</option>
+                  {vehicleClasses.map(vc => (
+                    <option key={vc.id} value={vc.id}>{vc.name}</option>
+                  ))}
                 </select>
               </div>
               <label className="flex items-center gap-3 cursor-pointer">

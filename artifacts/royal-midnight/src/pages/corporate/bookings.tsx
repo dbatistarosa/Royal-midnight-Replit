@@ -9,6 +9,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { STATUS_COLORS } from "@/lib/constants";
 import { corporateNavItems } from "@/config/portalNav";
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 
 
 type Booking = {
@@ -23,6 +24,8 @@ type Booking = {
   paymentType?: string | null;
 };
 
+// Fallback only, for a vehicleClass value that no longer matches any active
+// pricing rule. Live classes come from useVehicleClasses() below.
 const CLASS_LABELS: Record<string, string> = {
   business: "Business Sedan",
   suv: "Premium SUV",
@@ -31,6 +34,8 @@ const CLASS_LABELS: Record<string, string> = {
 
 function CorporateBookingsInner() {
   const { token, isAuthenticated } = useAuth();
+  const { vehicleClasses } = useVehicleClasses();
+  const classLabel = (id: string) => vehicleClasses.find(vc => vc.id === id)?.name ?? CLASS_LABELS[id] ?? id;
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "upcoming" | "completed">("all");
@@ -119,7 +124,7 @@ function CorporateBookingsInner() {
                       {format(new Date(b.pickupAt), "MMM d, yyyy h:mm a")}
                     </td>
                     <td className="px-5 py-4 text-muted-foreground whitespace-nowrap">
-                      {CLASS_LABELS[b.vehicleClass] ?? b.vehicleClass}
+                      {classLabel(b.vehicleClass)}
                     </td>
                     <td className="px-5 py-4 font-medium text-primary whitespace-nowrap">
                       {b.priceQuoted > 0 ? `$${b.priceQuoted.toFixed(2)}` : <span className="text-muted-foreground text-xs italic">Billed to account</span>}

@@ -11,20 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, LayoutDashboard, Plus, BookOpen, User, Car, CheckCircle2 } from "lucide-react";
 import { corporateNavItems } from "@/config/portalNav";
-
-
-const VEHICLE_OPTIONS = [
-  {
-    value: "business",
-    label: "Business Class Sedan",
-    description: "Luxury sedan — up to 3 passengers",
-  },
-  {
-    value: "suv",
-    label: "Premium SUV — 2026 Chevrolet Suburban",
-    description: "Spacious SUV — up to 6 passengers",
-  },
-];
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 
 type BookingResult = { id: number };
 type QuoteResult = {
@@ -61,6 +48,7 @@ function CorporateBookInner() {
   const { user, token } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { vehicleClasses } = useVehicleClasses();
 
   const [form, setForm] = useState({
     passengerName: "",
@@ -321,11 +309,11 @@ function CorporateBookInner() {
           <h2 className="font-serif text-lg border-b border-border pb-4 mb-5">Vehicle Class</h2>
 
           <div className="space-y-3">
-            {VEHICLE_OPTIONS.map(opt => (
+            {vehicleClasses.map(vc => (
               <label
-                key={opt.value}
+                key={vc.id}
                 className={`flex items-start gap-4 p-4 border cursor-pointer transition-colors ${
-                  form.vehicleClass === opt.value
+                  form.vehicleClass === vc.id
                     ? "border-primary bg-primary/5"
                     : "border-border hover:border-border/80"
                 }`}
@@ -333,17 +321,17 @@ function CorporateBookInner() {
                 <input
                   type="radio"
                   name="vehicleClass"
-                  value={opt.value}
-                  checked={form.vehicleClass === opt.value}
-                  onChange={() => setForm(p => ({ ...p, vehicleClass: opt.value }))}
+                  value={vc.id}
+                  checked={form.vehicleClass === vc.id}
+                  onChange={() => setForm(p => ({ ...p, vehicleClass: vc.id }))}
                   className="mt-1 accent-primary"
                 />
                 <div>
                   <div className="flex items-center gap-2">
                     <Car className="w-4 h-4 text-primary" />
-                    <span className="font-medium text-sm">{opt.label}</span>
+                    <span className="font-medium text-sm">{vc.name}</span>
                   </div>
-                  <p className="text-muted-foreground text-xs mt-0.5">{opt.description}</p>
+                  <p className="text-muted-foreground text-xs mt-0.5">{vc.description || `Up to ${vc.passengers} passengers`}</p>
                 </div>
               </label>
             ))}

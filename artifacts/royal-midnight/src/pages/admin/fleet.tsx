@@ -10,6 +10,7 @@ import { API_BASE } from "@/lib/constants";
 import { assertOk } from "@/lib/assertOk";
 import { useAuth } from "@/contexts/auth";
 import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +54,10 @@ const VEHICLE_TYPES = [
 
 const REJECT_REASONS = ["Expired Document", "Blurry Image", "No Match", "Other"];
 
+// Fallback only, for a vehicle_class value that no longer matches any active
+// pricing rule (renamed or deactivated after the vehicle was tagged with it).
+// Live classes come from useVehicleClasses() below — admin-configurable, not
+// fixed to these five.
 const CLASS_LABELS: Record<string, string> = {
   standard: "Standard",
   business: "Business",
@@ -96,6 +101,8 @@ type NewSubmission = {
 export default function AdminFleet() {
   const { token, isAuthenticated } = useAuth();
   const { toast } = useToast();
+  const { vehicleClasses } = useVehicleClasses();
+  const classLabel = (id: string) => vehicleClasses.find(vc => vc.id === id)?.name ?? CLASS_LABELS[id] ?? id;
   const [tab, setTab] = useState<Tab>("vehicles");
 
   // Registered vehicles
@@ -436,7 +443,7 @@ export default function AdminFleet() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Class</span>
-                    <span>{CLASS_LABELS[vehicle.vehicleClass] ?? vehicle.vehicleClass}</span>
+                    <span>{classLabel(vehicle.vehicleClass)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Plate</span>

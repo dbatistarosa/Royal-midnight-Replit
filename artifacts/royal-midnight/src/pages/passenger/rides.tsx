@@ -9,13 +9,7 @@ import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
 import { passengerNavItems } from "@/config/portalNav";
 import { CharterBadge, CharterDetails, TripExtras, type TripExtra } from "@/components/TripExtrasAndCharter";
-
-
-function vehicleLabel(vc?: string | null) {
-  if (vc === "business") return "Business Class Sedan";
-  if (vc === "suv") return "Premium SUV";
-  return vc ?? "—";
-}
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 
 type Booking = {
   id: number;
@@ -110,6 +104,10 @@ function DriverInfoCard({ driverId }: { driverId: number }) {
 }
 
 function BookingDetailPanel({ booking }: { booking: Booking }) {
+  const { vehicleClasses } = useVehicleClasses();
+  const vehicleLabel = (vc?: string | null) =>
+    vc ? (vehicleClasses.find(c => c.id === vc)?.name ?? vc) : "—";
+
   return (
     <div className="mt-5 pt-5 border-t border-white/8 space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
