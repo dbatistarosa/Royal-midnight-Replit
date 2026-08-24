@@ -5,6 +5,9 @@ export type PassengerTrip = {
   pickupAt: string | Date;
   status: string;
   priceQuoted: number;
+  /** Post-trip overage charge on an hourly charter that ran long — same
+   *  money as priceQuoted, belongs in this row's total. */
+  extraCharge?: number;
 };
 
 export type PassengerReportData = {
@@ -147,7 +150,7 @@ export async function generatePassengerReportPdf(data: PassengerReportData): Pro
       doc.setTextColor(...muted);
       doc.text(trip.status, colStatus, y);
       doc.setTextColor(...gold);
-      doc.text(fmt$(trip.priceQuoted), colAmt, y, { align: "right" });
+      doc.text(fmt$(trip.priceQuoted + (trip.extraCharge ?? 0)), colAmt, y, { align: "right" });
       y += 18;
     }
   }

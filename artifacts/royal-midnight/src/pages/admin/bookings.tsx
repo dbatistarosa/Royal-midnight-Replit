@@ -723,7 +723,7 @@ export default function AdminBookings() {
                         )}
                       </div>
                     </td>
-                    <td className="px-5 py-4 hidden md:table-cell font-medium text-primary">${b.priceQuoted?.toFixed(2)}</td>
+                    <td className="px-5 py-4 hidden md:table-cell font-medium text-primary">${((b.priceQuoted ?? 0) + Number(b.extraCharge ?? 0)).toFixed(2)}</td>
                     <td className="px-5 py-4">
                       {b.status === "awaiting_payment" ? (
                         <div className="flex flex-wrap items-center gap-2">

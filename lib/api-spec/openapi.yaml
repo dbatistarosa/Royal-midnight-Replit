@@ -1433,8 +1433,12 @@ components:
           type: string
           format: date-time
         vehicleClass:
+          # Not an enum: vehicle classes are admin-configurable (pricing_rules),
+          # so a fixed list here would 400 on any class the admin creates that
+          # isn't one of the original five. The real check — does this class
+          # exist and is it active — already happens against the database in
+          # computeQuote(); this is just the wire shape.
           type: string
-          enum: [standard, business, first_class, suv, van]
         passengers:
           type: integer
         flightNumber:
@@ -1452,11 +1456,15 @@ components:
           type: ["string", "null"]
         discountAmount:
           type: ["number", "null"]
+        extraCharge:
+          type: ["number", "null"]
         driverId:
           type: ["integer", "null"]
         vehicleId:
           type: ["integer", "null"]
         userId:
+          type: ["integer", "null"]
+        bookedByUserId:
           type: ["integer", "null"]
         paymentType:
           type: ["string", "null"]
@@ -1484,8 +1492,9 @@ components:
         pickupAt:
           type: string
         vehicleClass:
+          # See the same field on Booking above — admin-configurable, not a
+          # fixed enum.
           type: string
-          enum: [standard, business, first_class, suv, van]
         passengers:
           type: integer
         flightNumber:
@@ -1504,6 +1513,12 @@ components:
           type: integer
           default: 0
         userId:
+          type: ["integer", "null"]
+        # Set when an executive assistant books on behalf of a traveler they
+        # manage (managed_travelers) — an audit trail of who actually made the
+        # booking, distinct from userId (who it's for). Server-derived from the
+        # caller's own session, never trusted from elsewhere in the body.
+        bookedByUserId:
           type: ["integer", "null"]
         paymentType:
           type: ["string", "null"]
@@ -1532,8 +1547,8 @@ components:
         dropoffAddress:
           type: string
         vehicleClass:
+          # See the same field on Booking — admin-configurable, not a fixed enum.
           type: string
-          enum: [standard, business, first_class, suv, van]
         passengers:
           type: integer
         pickupAt:

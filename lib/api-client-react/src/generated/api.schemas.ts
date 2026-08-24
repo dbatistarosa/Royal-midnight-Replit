@@ -295,6 +295,14 @@ export interface Booking {
   promoCode?: string | null;
   /** @nullable */
   discountAmount?: number | null;
+  /**
+   * Post-trip overage charge on an hourly charter that ran long — same money
+   * as priceQuoted. Hand-added to match the backend's actual response shape
+   * (serializeBooking always includes it) because the Director's Office
+   * total silently excluded it.
+   * @nullable
+   */
+  extraCharge?: number | null;
   /** @nullable */
   driverId?: number | null;
   /** @nullable */

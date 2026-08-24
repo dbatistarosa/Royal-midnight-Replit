@@ -1215,6 +1215,11 @@ export const GetRecentBookingsResponseItem = zod.object({
   fareSubtotal: zod.number().nullish(),
   promoCode: zod.string().nullish(),
   discountAmount: zod.number().nullish(),
+  // Hand-added (not from a codegen run — see the note on GetRevenueStatsResponse's
+  // "Extended financial breakdown" fields above for why): the Director's Office
+  // total showed priceQuoted alone, silently excluding any post-trip overage
+  // charge on a charter that ran long.
+  extraCharge: zod.number().nullish(),
   driverId: zod.number().nullish(),
   vehicleId: zod.number().nullish(),
   userId: zod.number().nullish(),

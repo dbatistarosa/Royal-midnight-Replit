@@ -20,8 +20,16 @@ type BookingRow = {
   pickupAt: string;
   status: string;
   priceQuoted: number;
+  // Post-trip overage charge on an hourly charter that ran long — same money
+  // taken from the same card as priceQuoted, so it belongs in every total
+  // below. GET /bookings returns it (serializeBooking always includes it);
+  // this type just hadn't caught up.
+  extraCharge?: number;
   createdAt: string;
 };
+
+const totalOf = (b: Pick<BookingRow, "priceQuoted" | "extraCharge">): number =>
+  (b.priceQuoted ?? 0) + (b.extraCharge ?? 0);
 
 const STATUS_COLORS: Record<string, string> = {
   completed: "text-green-400 bg-green-400/10 border-green-400/20",
@@ -89,7 +97,7 @@ export default function PassengerReports() {
   const filteredBookings = allBookings;
 
   const completedTrips = filteredBookings.filter(b => b.status === "completed");
-  const totalSpent = completedTrips.reduce((sum, b) => sum + (b.priceQuoted ?? 0), 0);
+  const totalSpent = completedTrips.reduce((sum, b) => sum + totalOf(b), 0);
   const tripCount = completedTrips.length;
   const avgCostPerTrip = tripCount > 0 ? totalSpent / tripCount : 0;
 
@@ -114,6 +122,7 @@ export default function PassengerReports() {
           pickupAt: b.pickupAt,
           status: b.status,
           priceQuoted: b.priceQuoted,
+          extraCharge: b.extraCharge,
         })),
       });
     } finally {
@@ -212,7 +221,7 @@ export default function PassengerReports() {
                             </span>
                           </td>
                           <td className="px-5 py-4 text-right tabular-nums font-medium text-primary">
-                            {fmt$(booking.priceQuoted ?? 0)}
+                            {fmt$(totalOf(booking))}
                           </td>
                         </tr>
                       ))}
