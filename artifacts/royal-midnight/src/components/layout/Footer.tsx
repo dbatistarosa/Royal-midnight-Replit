@@ -24,6 +24,12 @@ export function Footer() {
                 <Link href="/fleet" className="text-gray-400 hover:text-primary text-sm transition-colors">The Fleet</Link>
               </li>
               <li>
+                <Link href="/pricing" className="text-gray-400 hover:text-primary text-sm transition-colors">Pricing</Link>
+              </li>
+              <li>
+                <Link href="/faq" className="text-gray-400 hover:text-primary text-sm transition-colors">FAQ</Link>
+              </li>
+              <li>
                 <Link href="/book" className="text-gray-400 hover:text-primary text-sm transition-colors">Reserve Now</Link>
               </li>
             </ul>

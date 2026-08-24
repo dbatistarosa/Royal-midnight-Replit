@@ -6,6 +6,11 @@ Disallow: /passenger/
 Disallow: /passenger
 Disallow: /driver/
 Disallow: /driver
+# /driver/onboarding is the public "Drive with Us" recruiting page (linked
+# from the navbar, no auth required) — the two rules above blocked it from
+# every search engine along with the actual authenticated driver portal.
+# The longer, more specific Allow wins over the shorter Disallow.
+Allow: /driver/onboarding
 Disallow: /corporate/
 Disallow: /corporate
 Disallow: /auth/
