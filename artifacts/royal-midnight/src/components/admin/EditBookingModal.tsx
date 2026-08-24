@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { X, Save, Loader2, Lock, Mail, AlertTriangle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, Save, Loader2, Lock, Mail, AlertTriangle, CreditCard, Send, PackagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { API_BASE } from "@/lib/constants";
+import { TripExtras, type TripExtra } from "@/components/TripExtrasAndCharter";
 
 /**
  * Full reservation editing.
@@ -35,6 +36,17 @@ export type EditableBooking = {
   status: string;
   priceQuoted: number;
   stripePaymentIntentId?: string | null;
+  extras?: TripExtra[] | null;
+};
+
+type ExtraService = { id: number; name: string; category: string; price: number };
+
+type AddonPreview = {
+  extrasTotal: number;
+  taxAmount: number;
+  cardProcessingFee: number;
+  total: number;
+  hasCardOnFile: boolean;
 };
 
 const LABEL = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
@@ -71,6 +83,84 @@ export function EditBookingModal({
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const paid = looksPaid(booking);
+
+  // Add-ons on a paid reservation. Editing the itinerary is locked once money
+  // has moved (see the note above), but a passenger calling to add a car seat
+  // isn't changing the trip — it's money owed on top of it, so it goes through
+  // a separate charge-or-invoice flow instead of the price-affecting fields.
+  const [currentExtras, setCurrentExtras] = useState<TripExtra[]>(booking.extras ?? []);
+  const [availableExtras, setAvailableExtras] = useState<ExtraService[]>([]);
+  const [selectedAddon, setSelectedAddon] = useState<Record<number, number>>({});
+  const [addonPreview, setAddonPreview] = useState<AddonPreview | null>(null);
+  const [addonPreviewLoading, setAddonPreviewLoading] = useState(false);
+  const [addonSubmitting, setAddonSubmitting] = useState<"card" | "invoice" | null>(null);
+
+  useEffect(() => {
+    if (!paid) return;
+    fetch(`${API_BASE}/extras`)
+      .then(r => r.ok ? r.json() as Promise<ExtraService[]> : Promise.resolve([]))
+      .then(data => setAvailableExtras(Array.isArray(data) ? data : []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paid]);
+
+  const selectedAddonList = Object.entries(selectedAddon).filter(([, qty]) => qty > 0);
+
+  useEffect(() => {
+    if (!paid || selectedAddonList.length === 0) { setAddonPreview(null); return; }
+    setAddonPreviewLoading(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/admin/bookings/${booking.id}/extras/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ extras: selectedAddonList.map(([id, quantity]) => ({ id: Number(id), quantity })) }),
+        });
+        setAddonPreview(res.ok ? await res.json() as AddonPreview : null);
+      } catch {
+        setAddonPreview(null);
+      }
+      setAddonPreviewLoading(false);
+    }, 500);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(selectedAddon), paid, booking.id, token]);
+
+  const submitAddon = async (method: "card" | "invoice") => {
+    if (selectedAddonList.length === 0) return;
+    setAddonSubmitting(method);
+    try {
+      const res = await fetch(`${API_BASE}/admin/bookings/${booking.id}/extras`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          method,
+          extras: selectedAddonList.map(([id, quantity]) => ({ id: Number(id), quantity })),
+        }),
+      });
+      const data = await res.json().catch(() => null) as { error?: string; extras?: TripExtra[]; charge?: { total: number } } | null;
+      if (!res.ok) throw new Error(data?.error || `Could not add the extras (HTTP ${res.status}).`);
+
+      setCurrentExtras(data?.extras ?? currentExtras);
+      setSelectedAddon({});
+      setAddonPreview(null);
+      toast({
+        title: method === "card" ? "Add-ons charged" : "Invoice sent",
+        description: method === "card"
+          ? `$${(data?.charge?.total ?? 0).toFixed(2)} charged to the card on file.`
+          : `A $${(data?.charge?.total ?? 0).toFixed(2)} invoice was emailed to the passenger.`,
+      });
+      onSaved();
+    } catch (err) {
+      toast({
+        title: "Could not add the extras",
+        description: err instanceof Error ? err.message : "Unexpected error.",
+        variant: "destructive",
+      });
+    } finally {
+      setAddonSubmitting(null);
+    }
+  };
 
   const [f, setF] = useState({
     passengerName: booking.passengerName ?? "",
@@ -216,6 +306,97 @@ export function EditBookingModal({
               )}
             </div>
           </section>
+
+          {paid && (
+            <section>
+              <h3 className="text-sm uppercase tracking-widest text-primary mb-3 flex items-center gap-1.5">
+                <PackagePlus className="w-3.5 h-3.5" /> Add-ons
+              </h3>
+
+              <TripExtras extras={currentExtras} audience="admin" />
+
+              {availableExtras.length > 0 && (
+                <div className="mt-3 border border-white/10 divide-y divide-white/10">
+                  {availableExtras.map(extra => {
+                    const qty = selectedAddon[extra.id] ?? 0;
+                    return (
+                      <div key={extra.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <label className="flex items-center gap-2.5 flex-1 cursor-pointer min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={qty > 0}
+                            onChange={e => setSelectedAddon(prev => {
+                              const next = { ...prev };
+                              if (e.target.checked) next[extra.id] = 1; else delete next[extra.id];
+                              return next;
+                            })}
+                            className="accent-primary shrink-0"
+                          />
+                          <span className="text-sm text-white truncate">{extra.name}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">${extra.price.toFixed(2)}</span>
+                        </label>
+                        {qty > 0 && (
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={qty}
+                            onChange={e => setSelectedAddon(prev => ({ ...prev, [extra.id]: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            className="bg-white/5 border border-white/10 text-white text-xs h-8 w-14 text-center rounded-none"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {selectedAddonList.length > 0 && (
+                <div className="mt-3 border border-primary/30 bg-primary/5 px-4 py-3">
+                  {addonPreviewLoading ? (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" />Pricing…</p>
+                  ) : addonPreview ? (
+                    <>
+                      <p className="text-sm text-white">
+                        This will add <strong className="text-primary">${addonPreview.total.toFixed(2)}</strong>
+                        {" "}(${addonPreview.extrasTotal.toFixed(2)} + tax &amp; card fee) to the total.
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {addonPreview.hasCardOnFile ? (
+                          <Button
+                            onClick={() => void submitAddon("card")}
+                            disabled={addonSubmitting !== null}
+                            className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-4 h-9"
+                          >
+                            {addonSubmitting === "card"
+                              ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />Charging…</>
+                              : <><CreditCard className="w-3.5 h-3.5 mr-1.5" />Charge ${addonPreview.total.toFixed(2)} to card on file</>}
+                          </Button>
+                        ) : (
+                          <Button
+                            onClick={() => void submitAddon("invoice")}
+                            disabled={addonSubmitting !== null}
+                            className="bg-primary text-black hover:bg-primary/90 rounded-none text-xs uppercase tracking-widest px-4 h-9"
+                          >
+                            {addonSubmitting === "invoice"
+                              ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />Sending…</>
+                              : <><Send className="w-3.5 h-3.5 mr-1.5" />Send ${addonPreview.total.toFixed(2)} invoice by email</>}
+                          </Button>
+                        )}
+                      </div>
+                      {!addonPreview.hasCardOnFile && (
+                        <p className="text-[11px] text-amber-300/80 mt-2">
+                          No saved card on file for this passenger — this sends a one-off Stripe invoice for just the add-ons instead of charging automatically.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-red-400">Could not price these add-ons. Try again.</p>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
 
           <section>
             <h3 className="text-sm uppercase tracking-widest text-primary mb-3">Passenger</h3>

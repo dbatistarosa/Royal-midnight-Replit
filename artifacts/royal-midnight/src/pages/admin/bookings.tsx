@@ -106,6 +106,16 @@ const EMPTY_FORM: FormData = {
   flightNumber: "", specialRequests: "", priceQuoted: "", driverId: "",
 };
 
+type ExtraService = { id: number; name: string; description?: string | null; category: string; price: number; icon?: string | null };
+
+/** Base fare breakdown from POST /quote — everything computeFareBreakdown()
+ *  needs to fold selected extras into a total that matches what the server
+ *  will derive, without a second round trip per extra toggled. Mirrors the
+ *  same client-side mirror math the public booking form uses. */
+type QuoteBreakdown = { subtotal: number; taxRate: number; cardProcessingFeeRate: number };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 const VEHICLE_LIMITS = {
   business: { maxPassengers: 3, maxLuggage: 3 },
   suv:      { maxPassengers: 6, maxLuggage: 6 },
@@ -149,6 +159,11 @@ export default function AdminBookings() {
   const [createForm, setCreateForm] = useState<FormData>(EMPTY_FORM);
   const [createSaving, setCreateSaving] = useState(false);
   const [isGettingQuote, setIsGettingQuote] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteBreakdown, setQuoteBreakdown] = useState<QuoteBreakdown | null>(null);
+  const [availableExtras, setAvailableExtras] = useState<ExtraService[]>([]);
+  const [selectedExtras, setSelectedExtras] = useState<Record<number, number>>({});
+  const [sendInvoiceOnCreate, setSendInvoiceOnCreate] = useState(true);
   const [pickupAirline, setPickupAirline] = useState("");
   const [dropoffAirline, setDropoffAirline] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -311,6 +326,38 @@ export default function AdminBookings() {
       .catch(() => setDrivers([]));
   }, [refetch, token, authHdr]);
 
+  useEffect(() => {
+    fetch(`${API_BASE}/extras`)
+      .then(r => r.ok ? r.json() as Promise<ExtraService[]> : Promise.resolve([]))
+      .then(data => setAvailableExtras(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
+
+  // Selected add-ons, priced from the catalogue fetched above. Mirrors the
+  // same layering computeFareBreakdown() does server-side (extras join the
+  // taxable base, so tax and the card fee apply to them too) so the number
+  // shown here matches what the server derives when the booking is created.
+  const extrasTotal = round2(
+    Object.entries(selectedExtras).reduce((sum, [id, qty]) => {
+      const svc = availableExtras.find(e => e.id === Number(id));
+      return svc && qty > 0 ? sum + svc.price * qty : sum;
+    }, 0),
+  );
+  const taxableSubtotal = quoteBreakdown ? round2(quoteBreakdown.subtotal + extrasTotal) : 0;
+  const taxAmount = quoteBreakdown ? round2(taxableSubtotal * quoteBreakdown.taxRate) : 0;
+  const cardProcessingFee = quoteBreakdown ? round2((taxableSubtotal + taxAmount) * quoteBreakdown.cardProcessingFeeRate) : 0;
+  const computedTotal = quoteBreakdown ? round2(taxableSubtotal + taxAmount + cardProcessingFee) : null;
+
+  // Keep the price field in sync with the computed total whenever the base
+  // quote or the selected extras change, so extras always show up in the
+  // number the admin sees (and submits) rather than only affecting what the
+  // server independently re-derives.
+  useEffect(() => {
+    if (computedTotal == null) return;
+    setCreateForm(prev => prev.priceQuoted === computedTotal.toFixed(2) ? prev : { ...prev, priceQuoted: computedTotal.toFixed(2) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [computedTotal]);
+
   const handleCreate = async () => {
     if (!createForm.passengerName || !createForm.passengerEmail || !createForm.passengerPhone || !createForm.pickupAddress || !createForm.dropoffAddress || !createForm.pickupAt || !createForm.priceQuoted) {
       toast({ title: "Missing fields", description: "Name, email, phone, addresses, pickup time, and price are required.", variant: "destructive" });
@@ -331,6 +378,9 @@ export default function AdminBookings() {
         flightNumber: (pickupAirline || dropoffAirline || createForm.flightNumber) ? (createForm.flightNumber || null) : null,
         specialRequests: createForm.specialRequests || null,
         priceQuoted: parseFloat(createForm.priceQuoted),
+        extras: Object.entries(selectedExtras)
+          .filter(([, qty]) => qty > 0)
+          .map(([id, quantity]) => ({ id: Number(id), quantity })),
       };
       const res = await fetch(`${API_BASE}/bookings`, {
         method: "POST",
@@ -356,9 +406,35 @@ export default function AdminBookings() {
         }
       }
 
-      toast({ title: "Booking created", description: "The reservation has been created." });
+      // Send the payment invoice by default so the customer can enter their
+      // card — without this, a manually-created booking sat in awaiting_payment
+      // with no way for the customer to pay it unless an admin remembered to
+      // click "Send Invoice" from the table afterwards. Corporate/fully-discounted
+      // bookings skip payment entirely, so there's nothing to invoice.
+      if (sendInvoiceOnCreate && created.status === "awaiting_payment") {
+        try {
+          const invRes = await fetch(`${API_BASE}/payments/create-invoice/${created.id}`, {
+            method: "POST",
+            headers: { Authorization: authHdr },
+          });
+          if (!invRes.ok) {
+            const invErr = await invRes.json().catch(() => ({})) as { error?: string };
+            toast({ title: "Booking created, but the invoice email failed", description: invErr.error ?? "Use \"Send Invoice\" from the table to retry.", variant: "destructive" });
+          } else {
+            toast({ title: "Booking created", description: `Invoice emailed to ${created.passengerEmail}.` });
+          }
+        } catch {
+          toast({ title: "Booking created, but the invoice email failed", description: "Use \"Send Invoice\" from the table to retry.", variant: "destructive" });
+        }
+      } else {
+        toast({ title: "Booking created", description: "The reservation has been created." });
+      }
       setShowCreate(false);
       setCreateForm(EMPTY_FORM);
+      setSelectedExtras({});
+      setQuoteBreakdown(null);
+      setQuoteError(null);
+      setSendInvoiceOnCreate(true);
       refetch();
     } catch (err: unknown) {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Could not create booking.", variant: "destructive" });
@@ -618,15 +694,19 @@ export default function AdminBookings() {
   useEffect(() => { setPickupAirline(""); }, [pickupAirportCode]);
   useEffect(() => { setDropoffAirline(""); }, [dropoffAirportCode]);
 
-  // Auto-fetch price quote when required fields are filled
+  // Auto-fetch price quote when required fields are filled. Sends the admin's
+  // bearer token — POST /quote waives the 2-hour lead-time and charter-minimum
+  // rules for an admin caller (the same way booking creation always has), so a
+  // same-day walk-in trip prices instead of 400ing with nothing shown for it.
   useEffect(() => {
     if (!createForm.pickupAddress || !createForm.dropoffAddress || !createForm.pickupAt || !createForm.vehicleClass) return;
     const timeout = setTimeout(async () => {
       setIsGettingQuote(true);
+      setQuoteError(null);
       try {
         const res = await fetch(`${API_BASE}/quote`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", Authorization: authHdr },
           body: JSON.stringify({
             pickupAddress: createForm.pickupAddress,
             dropoffAddress: createForm.dropoffAddress,
@@ -635,17 +715,22 @@ export default function AdminBookings() {
             pickupAt: new Date(createForm.pickupAt).toISOString(),
           }),
         });
-        if (res.ok) {
-          const data = await res.json() as { totalWithTax?: number };
-          if (data.totalWithTax != null) {
-            setCreateForm(prev => ({ ...prev, priceQuoted: data.totalWithTax!.toFixed(2) }));
-          }
+        const data = await res.json().catch(() => null) as
+          { subtotal?: number; taxRate?: number; cardProcessingFeeRate?: number; error?: string } | null;
+        if (res.ok && data?.subtotal != null) {
+          setQuoteBreakdown({ subtotal: data.subtotal, taxRate: data.taxRate ?? 0, cardProcessingFeeRate: data.cardProcessingFeeRate ?? 0 });
+        } else {
+          setQuoteBreakdown(null);
+          setQuoteError(data?.error ?? "Could not price this route.");
         }
-      } catch {}
+      } catch {
+        setQuoteBreakdown(null);
+        setQuoteError("Could not reach the pricing service.");
+      }
       setIsGettingQuote(false);
     }, 700);
     return () => clearTimeout(timeout);
-  }, [createForm.pickupAddress, createForm.dropoffAddress, createForm.pickupAt, createForm.vehicleClass, createForm.passengers]);
+  }, [createForm.pickupAddress, createForm.dropoffAddress, createForm.pickupAt, createForm.vehicleClass, createForm.passengers, authHdr]);
 
   return (
     <PortalLayout title="Royal Admin" navItems={adminNavItems}>
@@ -1144,7 +1229,7 @@ export default function AdminBookings() {
       </div>
 
       {showCreate && (
-        <Modal title="New Booking" onClose={() => { setShowCreate(false); setCreateForm(EMPTY_FORM); setPickupAirline(""); setDropoffAirline(""); }} onSubmit={handleCreate} submitting={createSaving}>
+        <Modal title="New Booking" onClose={() => { setShowCreate(false); setCreateForm(EMPTY_FORM); setPickupAirline(""); setDropoffAirline(""); setSelectedExtras({}); setQuoteBreakdown(null); setQuoteError(null); setSendInvoiceOnCreate(true); }} onSubmit={handleCreate} submitting={createSaving}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Passenger info */}
             <div>
@@ -1236,7 +1321,47 @@ export default function AdminBookings() {
               </select>
             </div>
 
-            {/* Price quoted — auto-filled from quote API */}
+            {/* Add-ons — same catalogue and pricing the customer-facing booking form uses */}
+            {availableExtras.length > 0 && (
+              <div className="md:col-span-2">
+                <label className={LABEL}>Add-ons</label>
+                <div className="border border-white/10 divide-y divide-white/10">
+                  {availableExtras.map(extra => {
+                    const qty = selectedExtras[extra.id] ?? 0;
+                    return (
+                      <div key={extra.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <label className="flex items-center gap-2.5 flex-1 cursor-pointer min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={qty > 0}
+                            onChange={e => setSelectedExtras(prev => {
+                              const next = { ...prev };
+                              if (e.target.checked) next[extra.id] = 1; else delete next[extra.id];
+                              return next;
+                            })}
+                            className="accent-primary shrink-0"
+                          />
+                          <span className="text-sm text-white truncate">{extra.name}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">${extra.price.toFixed(2)}</span>
+                        </label>
+                        {qty > 0 && (
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={qty}
+                            onChange={e => setSelectedExtras(prev => ({ ...prev, [extra.id]: Math.max(1, parseInt(e.target.value) || 1) }))}
+                            className="bg-white/5 border border-white/10 text-white text-xs h-8 w-14 text-center rounded-none"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Price quoted — auto-filled from quote API + selected add-ons */}
             <div>
               <label className={LABEL}>
                 Price Quoted ($) *
@@ -1250,8 +1375,13 @@ export default function AdminBookings() {
                 className={INPUT}
                 placeholder={isGettingQuote ? "Calculating..." : "0.00"}
               />
-              {createForm.priceQuoted && !isGettingQuote && (
-                <p className="text-[10px] text-primary mt-1 uppercase tracking-widest">Auto-calculated from route</p>
+              {quoteError && !isGettingQuote && (
+                <p className="text-[10px] text-red-400 mt-1">{quoteError} — enter the price manually.</p>
+              )}
+              {!quoteError && createForm.priceQuoted && !isGettingQuote && (
+                <p className="text-[10px] text-primary mt-1 uppercase tracking-widest">
+                  Auto-calculated from route{extrasTotal > 0 ? ` + $${extrasTotal.toFixed(2)} add-ons` : ""}
+                </p>
               )}
             </div>
 
@@ -1274,6 +1404,16 @@ export default function AdminBookings() {
               <label className={LABEL}>Special Requests</label>
               <Input value={createForm.specialRequests} onChange={e => setField("specialRequests", e.target.value)} className={INPUT} placeholder="Any notes..." />
             </div>
+
+            <label className="md:col-span-2 flex items-start gap-3 border border-white/12 hover:border-white/25 px-4 py-3 cursor-pointer transition-colors">
+              <input type="checkbox" checked={sendInvoiceOnCreate} onChange={e => setSendInvoiceOnCreate(e.target.checked)} className="accent-primary mt-0.5" />
+              <span>
+                <span className="text-sm text-white flex items-center gap-1.5"><Send className="w-3.5 h-3.5 text-primary" />Email the customer an invoice to pay</span>
+                <span className="block text-xs text-gray-500 mt-0.5">
+                  Sends a Stripe payment link so they can enter their card. Off means you'll collect payment another way (Charge Card / Send Invoice are still available from the table).
+                </span>
+              </span>
+            </label>
           </div>
         </Modal>
       )}

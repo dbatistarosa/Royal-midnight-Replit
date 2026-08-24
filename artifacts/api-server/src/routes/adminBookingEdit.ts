@@ -67,7 +67,7 @@ const EditBookingBody = z.object({
  * corporate ride already rolled into a Net-30 invoice, all mean the amount is
  * committed somewhere outside this table.
  */
-function isPaidBooking(b: typeof bookingsTable.$inferSelect): boolean {
+export function isPaidBooking(b: typeof bookingsTable.$inferSelect): boolean {
   if (b.authorizedAt != null) return true;
   if (b.invoicedAt != null) return true;
   if (b.status === "completed") return true;

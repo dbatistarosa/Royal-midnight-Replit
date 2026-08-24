@@ -1197,3 +1197,71 @@ export async function sendExtraTimeChargedEmail(p: {
 </p>`);
   await send(p.passengerEmail, `Royal Midnight — additional time charged (${bookingRef})`, html, "extra_time_charged");
 }
+
+/** Confirms an add-on charged to the saved card after the original booking was
+ *  already paid — e.g. a pet or car seat the passenger called in to add. */
+export async function sendAddonExtrasChargedEmail(p: {
+  bookingId: number;
+  passengerName: string;
+  passengerEmail: string;
+  extraNames: string[];
+  fare: number;
+  taxAmount: number;
+  cardProcessingFee: number;
+  total: number;
+}) {
+  const bookingRef = `RM-${String(p.bookingId).padStart(4, "0")}`;
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Add-ons confirmed — ${bookingRef}</h2>
+<p style="color:#e8e0d0">Hello ${escapeHtml(String(p.passengerName ?? "").split(" ")[0] ?? "")},</p>
+<p style="color:#9ca3af;line-height:1.6">
+  We've added ${escapeHtml(p.extraNames.join(", "))} to your reservation and charged the card on file:
+</p>
+<table style="width:100%;border-collapse:collapse;margin:20px 0">
+  ${row("Add-ons", `$${p.fare.toFixed(2)}`)}
+  ${p.taxAmount > 0 ? row("Florida tax", `$${p.taxAmount.toFixed(2)}`) : ""}
+  ${p.cardProcessingFee > 0 ? row("Card processing", `$${p.cardProcessingFee.toFixed(2)}`) : ""}
+  ${row("Total charged", `<strong style="color:#c9a84c;font-size:16px">$${p.total.toFixed(2)}</strong>`)}
+</table>
+<p style="color:#6b7280;font-size:12px">
+  If anything here looks wrong, reply to this message or contact
+  <a href="mailto:${ADMIN_EMAIL}" style="color:#c9a84c">${ADMIN_EMAIL}</a> and we will look into it.
+</p>`);
+  await send(p.passengerEmail, `Royal Midnight — add-ons charged (${bookingRef})`, html, "addon_extras_charged");
+}
+
+/** Sent when an add-on is added to an already-paid booking but there is no
+ *  saved card to charge off-session — a one-off invoice for just the
+ *  difference, same collection flow as the original booking invoice. */
+export async function sendAddonInvoiceToPassenger(p: {
+  bookingId: number;
+  passengerName: string;
+  passengerEmail: string;
+  extraNames: string[];
+  total: number;
+  invoiceUrl: string;
+  invoicePdfUrl: string | null;
+}) {
+  const bookingRef = `RM-${String(p.bookingId).padStart(4, "0")}`;
+  const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Invoice for Added Extras</h2>
+<p style="color:#888;font-size:13px;margin:0 0 20px">
+  Hi ${escapeHtml(String(p.passengerName ?? "").split(" ")[0] ?? "")}, we've added ${escapeHtml(p.extraNames.join(", "))}
+  to reservation ${bookingRef}. Please pay the invoice below to confirm. Payment is due within 7 days.
+</p>
+<table style="width:100%;border-collapse:collapse">
+  ${row("Booking #", bookingRef)}
+  ${row("Add-ons", escapeHtml(p.extraNames.join(", ")))}
+  ${row("Amount Due", `<span style="color:#c9a84c;font-weight:bold">$${p.total.toFixed(2)}</span>`)}
+</table>
+<p style="margin-top:28px;text-align:center">
+  <a href="${p.invoiceUrl}" style="background:#c9a84c;color:#050505;padding:12px 32px;text-decoration:none;font-weight:bold;font-size:14px;letter-spacing:1px;display:inline-block">PAY INVOICE</a>
+</p>
+${p.invoicePdfUrl ? `<p style="margin-top:16px;text-align:center"><a href="${p.invoicePdfUrl}" style="color:#c9a84c;font-size:12px;text-decoration:underline">Download PDF</a></p>` : ""}
+<p style="margin-top:24px;color:#888;font-size:12px">
+  Questions? Reply to this email or visit <a href="${appUrl}/contact" style="color:#c9a84c">${appUrl}/contact</a>.<br>
+  <strong style="color:#c9a84c">Royal Midnight Luxury Transportation</strong>
+</p>`);
+  await send(p.passengerEmail, `Invoice for added extras — Booking ${bookingRef} — Royal Midnight`, html, "addon_extras_invoice");
+}

@@ -646,6 +646,14 @@ router.post("/quote", quoteLimiter(), optionalAuth, async (req, res): Promise<vo
   }
 
   const ext = readQuoteExtensions(req.body);
+  // Admins price bookings they take by phone, which are routinely inside the
+  // customer-facing 2-hour lead time and sometimes below the charter minimum
+  // (a shorter block agreed verbally). POST /bookings has always waived both
+  // rules for an admin caller; this endpoint answers the same question and had
+  // not, so the admin "New Booking" form's live quote 400'd on exactly the
+  // walk-in/same-day trips it exists to price, with nothing shown for it —
+  // the client swallows quote errors and just leaves the price blank.
+  const isAdmin = req.currentUser?.role === "admin";
   const outcome = await computeQuote({
     pickupAddress: parsed.data.pickupAddress,
     dropoffAddress: parsed.data.dropoffAddress,
@@ -655,6 +663,8 @@ router.post("/quote", quoteLimiter(), optionalAuth, async (req, res): Promise<vo
     charterMode: ext.charterMode,
     charterHours: ext.charterHours,
     userId: req.currentUser?.userId,
+    skipLeadTimeCheck: isAdmin,
+    skipCharterMinimumCheck: isAdmin,
   });
 
   if (!outcome.ok) {

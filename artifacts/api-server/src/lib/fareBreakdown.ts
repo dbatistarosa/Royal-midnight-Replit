@@ -109,6 +109,35 @@ export async function saveFareBreakdown(
   }
 }
 
+/**
+ * Add to (rather than overwrite) the stored breakdown when money is charged
+ * after the original quote — extras an admin adds to an already-paid booking.
+ * `saveFareBreakdown` above always overwrites all four columns from a fresh
+ * computeQuote() and would erase the airport fee and the original tax/card-fee
+ * lines if reused here for an incremental charge.
+ */
+export async function incrementFareBreakdown(
+  bookingId: number,
+  b: { extrasTotal: number; taxAmount: number; cardFee: number },
+  log?: { warn: (o: unknown, m: string) => void },
+): Promise<void> {
+  try {
+    await db.execute(sql`
+      UPDATE bookings
+         SET extras_total = coalesce(extras_total, 0) + ${b.extrasTotal},
+             tax_amount   = coalesce(tax_amount, 0)   + ${b.taxAmount},
+             card_fee     = coalesce(card_fee, 0)     + ${b.cardFee}
+       WHERE id = ${bookingId}
+    `);
+  } catch (err) {
+    if (!isMissingColumn(err)) throw err;
+    log?.warn(
+      { bookingId },
+      "fare breakdown columns missing — run migration 0012_fare_breakdown.sql; revenue report will use its legacy estimate",
+    );
+  }
+}
+
 /** Record the extra-time breakdown when an hourly charter is completed. */
 export async function saveOverageBreakdown(
   bookingId: number,
