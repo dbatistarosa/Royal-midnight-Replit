@@ -30,6 +30,7 @@ import {
   driverEarningsForBooking,
 } from "../lib/commission.js";
 import { paymentLimiter } from "../lib/rateLimit.js";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
@@ -1068,7 +1069,7 @@ router.post(
         .update(bookings)
         .set({ status: "cancelled", updatedAt: new Date() })
         .where(eq(bookings.id, bId));
-      console.log(
+      req.log.info(
         `[payments] Admin cancelled PI authorization for booking #${bId} (PI: ${booking.stripePaymentIntentId})`,
       );
       res.json({
@@ -1264,7 +1265,7 @@ async function confirmBookingFromPaymentIntent(
           updatedAt: new Date(),
         })
         .where(eq(bookings.id, bookingId));
-      console.log(
+      logger.info(
         `[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intentId})`,
       );
       // Awaited: this runs from the Stripe webhook, and Vercel can freeze the
@@ -1281,7 +1282,7 @@ async function confirmBookingFromPaymentIntent(
       try {
         const stripe = getStripe();
         await stripe.refunds.create({ payment_intent: intentId });
-        console.log(
+        logger.info(
           `[payments] Full refund issued for cancelled booking #${bookingId} (PI: ${intentId})`,
         );
       } catch (refundErr: any) {
@@ -1336,7 +1337,7 @@ async function authorizeBookingFromPaymentIntent(
           updatedAt: new Date(),
         })
         .where(eq(bookings.id, bookingId));
-      console.log(
+      logger.info(
         `[payments] PI requires_capture → Booking #${bookingId} → authorized (PI: ${intentId})`,
       );
     } else if (!current.stripePaymentIntentId) {
@@ -1385,7 +1386,7 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
     if (event.type === "payment_intent.created") {
       const intent = event.data.object as Stripe.PaymentIntent;
       const bookingId = parseInt(intent.metadata.bookingId || "0");
-      console.log(
+      req.log.info(
         `[payments] PI created: ${intent.id}${bookingId ? ` (booking #${bookingId})` : ""}`,
       );
       if (bookingId) {
@@ -1430,7 +1431,7 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
               updatedAt: new Date(),
             })
             .where(eq(bookings.id, bookingId));
-          console.log(
+          req.log.info(
             `[payments] Invoice paid → Booking #${bookingId} → pending (PI: ${piId ?? "N/A"})`,
           );
           await firePostPaymentEmails(bookingId).catch((err) =>
@@ -1500,21 +1501,21 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
 
     if (event.type === "charge.succeeded") {
       const charge = event.data.object as Stripe.Charge;
-      console.log(
+      req.log.info(
         `[payments] charge.succeeded: ${charge.id} PI: ${charge.payment_intent} amount: $${(charge.amount / 100).toFixed(2)}`,
       );
     }
 
     if (event.type === "charge.updated") {
       const charge = event.data.object as Stripe.Charge;
-      console.log(
+      req.log.info(
         `[payments] charge.updated: ${charge.id} status: ${charge.status} PI: ${charge.payment_intent}`,
       );
     }
 
     if (event.type === "charge.refunded") {
       const charge = event.data.object as Stripe.Charge;
-      console.log(
+      req.log.info(
         `[payments] charge.refunded: ${charge.id} amount_refunded: $${(charge.amount_refunded / 100).toFixed(2)}`,
       );
     }

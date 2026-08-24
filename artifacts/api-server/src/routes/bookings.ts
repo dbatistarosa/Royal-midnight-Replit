@@ -1232,7 +1232,7 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
             .update(bookingsTable)
             .set({ userId: existingUser.id })
             .where(eq(bookingsTable.id, booking.id));
-          console.log(
+          req.log.info(
             `[bookings] Linked booking #${booking.id} to existing user #${existingUser.id} (${booking.passengerEmail})`,
           );
         } else {
@@ -1242,7 +1242,7 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
             passengerEmail: booking.passengerEmail,
             bookingId: booking.id,
           });
-          console.log(
+          req.log.info(
             `[bookings] Sent account invitation to new passenger: ${booking.passengerEmail}`,
           );
         }
@@ -3238,7 +3238,7 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
           // Never charged (or only a hold placed) — cancelling the PI is the
           // whole story, there is nothing to refund.
           await stripe.paymentIntents.cancel(existing.stripePaymentIntentId!);
-          console.log(
+          req.log.info(
             `[bookings] PI cancelled on booking cancel for booking #${existing.id} (PI status was: ${pi.status})`,
           );
         } else if (pi.status === "succeeded") {
@@ -3252,16 +3252,16 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
               payment_intent: existing.stripePaymentIntentId!,
               amount: refundCents,
             });
-            console.log(
+            req.log.info(
               `[bookings] Refunded $${policy.netRefund.toFixed(2)} (tier: ${policy.tier}) for booking #${existing.id}`,
             );
           } else {
-            console.log(
+            req.log.info(
               `[bookings] No refund owed (tier: ${policy.tier}) for booking #${existing.id} — cancellation fee covers the full charge`,
             );
           }
         } else {
-          console.log(
+          req.log.info(
             `[bookings] PI in unvoidable status '${pi.status}' for booking #${existing.id} — no action taken`,
           );
         }
