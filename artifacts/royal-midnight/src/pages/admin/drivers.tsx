@@ -353,6 +353,29 @@ export default function AdminDrivers() {
   const [reviewModal, setReviewModal] = useState<ReviewModalState>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
 
+  // Drivers with a booking currently on_way/on_location/in_progress — same
+  // set the admin Dispatch map uses to show "On Duty" instead of raw status.
+  // driver.status never reflects this (it's a manual available/break/paused
+  // toggle the driver sets themselves), so without this a driver mid-trip
+  // still reads as "Available" here.
+  const [onDutyIds, setOnDutyIds] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const loadOnDuty = () => {
+      fetch(`${API_BASE}/admin/dispatch`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() as Promise<{ activeTrips: { driverId: number | null }[] }> : Promise.resolve(null))
+        .then(data => {
+          if (!data) return;
+          setOnDutyIds(new Set(data.activeTrips.map(t => t.driverId).filter((id): id is number => id != null)));
+        })
+        .catch(() => {});
+    };
+    loadOnDuty();
+    const interval = setInterval(loadOnDuty, 20000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, token]);
+
   const authHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -615,7 +638,9 @@ export default function AdminDrivers() {
                         </div>
                       </td>
                       <td className="px-5 py-4 hidden md:table-cell">
-                        {driver.isOnline ? (
+                        {onDutyIds.has(driver.id) ? (
+                          <span className="text-blue-400 text-xs">On Duty</span>
+                        ) : driver.isOnline ? (
                           <span className="text-green-400 text-xs">Online</span>
                         ) : (
                           <span className="text-muted-foreground text-xs">Offline</span>
@@ -732,7 +757,7 @@ export default function AdminDrivers() {
                               <DetailRow label="Phone" value={driver.phone} />
                               <DetailRow label="Service Area" value={driver.serviceArea} />
                               <DetailRow label="User ID" value={driver.userId} />
-                              <DetailRow label="Status" value={driver.status} />
+                              <DetailRow label="Status" value={onDutyIds.has(driver.id) ? "on_duty" : driver.status} />
                             </div>
 
                             <div>

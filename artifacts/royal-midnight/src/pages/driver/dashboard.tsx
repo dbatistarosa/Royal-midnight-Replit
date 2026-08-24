@@ -39,11 +39,16 @@ function daysUntilExpiry(expiry: string | null | undefined): number | null {
 }
 
 type DriverAvailability = "available" | "on_break" | "unavailable";
+type DisplayStatus = DriverAvailability | "on_duty";
 
-const STATUS_CONFIG: Record<DriverAvailability, { label: string; color: string; dot: string; bg: string; border: string }> = {
+// "on_duty" isn't one of the driver's own manual toggle choices — it's a
+// derived, non-selectable override shown whenever they're on_way/on_location/
+// in_progress on an active trip, same blue used for it on the admin dispatch map.
+const STATUS_CONFIG: Record<DisplayStatus, { label: string; color: string; dot: string; bg: string; border: string }> = {
   available:   { label: "Available",    color: "text-green-400",  dot: "bg-green-400",  bg: "bg-green-400/10",  border: "border-green-400/20" },
   on_break:    { label: "On a Break",   color: "text-amber-400",  dot: "bg-amber-400",  bg: "bg-amber-400/10",  border: "border-amber-400/20" },
   unavailable: { label: "Unavailable",  color: "text-gray-400",   dot: "bg-gray-400",   bg: "bg-gray-400/10",   border: "border-gray-400/20"  },
+  on_duty:     { label: "On Duty",      color: "text-blue-400",   dot: "bg-blue-400",   bg: "bg-blue-400/10",   border: "border-blue-400/20"  },
 };
 
 type BookingRow = {
@@ -96,6 +101,12 @@ type Review = {
   createdAt: string;
 };
 
+/** Mirrors the backend's /admin/dispatch definition of "physically on this
+ *  trip right now" (bookings.ts's ACTIVE_TRIP_STATUSES additionally includes
+ *  "confirmed", which just means assigned — that can be a charter booked for
+ *  next week, not the driver being on the road this second). */
+const ON_DUTY_STATUSES = ["on_way", "on_location", "in_progress"];
+
 type DashboardTab = "available" | "active_rides" | "in_progress";
 
 const TABS: { key: DashboardTab; label: string }[] = [
@@ -108,7 +119,10 @@ const fmt$ = (n: number) => `$${n.toFixed(2)}`;
 const labelClass = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const inputClass = "bg-white/5 border-white/10 text-white rounded-none h-11";
 
-function StatusToggle({ driverId, currentStatus, authHeader }: { driverId: number; currentStatus: string; authHeader: string }) {
+// "on_duty" is derived, not a manual choice — kept out of the dropdown list.
+const MANUAL_STATUSES: DriverAvailability[] = ["available", "on_break", "unavailable"];
+
+function StatusToggle({ driverId, currentStatus, authHeader, inTrip }: { driverId: number; currentStatus: string; authHeader: string; inTrip: boolean }) {
   const [open, setOpen] = useState(false);
   const [localStatus, setLocalStatus] = useState<DriverAvailability>(
     ["available", "on_break", "unavailable"].includes(currentStatus)
@@ -118,7 +132,10 @@ function StatusToggle({ driverId, currentStatus, authHeader }: { driverId: numbe
   const [saving, setSaving] = useState(false);
   const { setDriverRecord } = useDriverStatus();
 
-  const cfg = STATUS_CONFIG[localStatus];
+  // "On duty" overrides the badge while a trip is actively underway — the
+  // manual toggle keeps whatever the driver last picked underneath, in case
+  // they want a different state queued up for after the trip ends.
+  const cfg = inTrip ? STATUS_CONFIG.on_duty : STATUS_CONFIG[localStatus];
 
   async function setStatus(s: DriverAvailability) {
     if (s === localStatus) { setOpen(false); return; }
@@ -152,7 +169,9 @@ function StatusToggle({ driverId, currentStatus, authHeader }: { driverId: numbe
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border shadow-xl min-w-[160px]">
-          {(Object.entries(STATUS_CONFIG) as [DriverAvailability, typeof STATUS_CONFIG[DriverAvailability]][]).map(([key, c]) => (
+          {MANUAL_STATUSES.map(key => {
+            const c = STATUS_CONFIG[key];
+            return (
             <button
               key={key}
               onClick={() => setStatus(key)}
@@ -161,7 +180,8 @@ function StatusToggle({ driverId, currentStatus, authHeader }: { driverId: numbe
               <span className={`w-2 h-2 rounded-full ${c.dot}`} />
               {c.label}
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -1302,6 +1322,7 @@ export default function DriverDashboard() {
 
   const [earnings, setEarnings] = useState<EarningsData | null>(null);
   const [upcomingCount, setUpcomingCount] = useState<number | null>(null);
+  const [inTrip, setInTrip] = useState(false);
   const [myRidesRefreshKey, setMyRidesRefreshKey] = useState(0);
   const [compliance, setCompliance] = useState<ComplianceDocs | null>(null);
   // Profile photos live in the private bucket and need a signed URL (CN-003).
@@ -1324,22 +1345,37 @@ export default function DriverDashboard() {
       .then(data => setEarnings(data))
       .catch(() => setEarnings(null));
 
-    fetch(`${API_BASE}/bookings?driverId=${driverRecord.id}`, { headers: header })
-      .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
-      .then(data => {
-        const upcoming = Array.isArray(data)
-          ? data.filter(b => ["pending", "confirmed", "assigned", "on_way", "on_location", "in_progress"].includes(b.status)).length
-          : 0;
-        setUpcomingCount(upcoming);
-      })
-      .catch(() => setUpcomingCount(0));
-
     // Load compliance doc expiries for the warning banner
     fetch(`${API_BASE}/drivers/${driverRecord.id}/documents`, { headers: header })
       .then(r => r.ok ? r.json() as Promise<ComplianceDocs> : Promise.resolve(null))
       .then(data => setCompliance(data))
       .catch(() => setCompliance(null));
   }, [driverRecord?.id, token]);
+
+  // Polled separately (not just on mount/refreshKey) because the header's
+  // "On Duty" badge needs to flip within seconds of the driver tapping
+  // "I'm on my way" / "Arrived" / "Start Trip" inside the tabs below, and
+  // those actions don't otherwise notify this header component.
+  useEffect(() => {
+    if (!driverRecord?.id) return;
+    const header = authHeaders(token);
+
+    const loadBookingStatus = () => {
+      fetch(`${API_BASE}/bookings?driverId=${driverRecord.id}`, { headers: header })
+        .then(r => r.ok ? r.json() as Promise<BookingRow[]> : Promise.resolve([]))
+        .then(data => {
+          const list = Array.isArray(data) ? data : [];
+          const upcoming = list.filter(b => ["pending", "confirmed", "assigned", "on_way", "on_location", "in_progress"].includes(b.status)).length;
+          setUpcomingCount(upcoming);
+          setInTrip(list.some(b => ON_DUTY_STATUSES.includes(b.status)));
+        })
+        .catch(() => setUpcomingCount(0));
+    };
+
+    loadBookingStatus();
+    const interval = setInterval(loadBookingStatus, 15000);
+    return () => clearInterval(interval);
+  }, [driverRecord?.id, token, myRidesRefreshKey]);
 
   if (isLoading) {
     return (
@@ -1469,7 +1505,7 @@ export default function DriverDashboard() {
             <LocationShareToggle driverId={driverRecord.id} authHeader={authHeader} />
             <div className="flex items-center gap-2 sm:gap-3">
               <span className="text-xs text-muted-foreground uppercase tracking-widest hidden sm:block">Status</span>
-              <StatusToggle driverId={driverRecord.id} currentStatus={normalizedStatus} authHeader={authHeader} />
+              <StatusToggle driverId={driverRecord.id} currentStatus={normalizedStatus} authHeader={authHeader} inTrip={inTrip} />
             </div>
           </div>
         )}
