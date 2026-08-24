@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Text, TextInput, View } from "react-native";
+import { Alert, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { useCreateSupportTicket } from "@/api/hooks";
 import { useAuthStore } from "@/auth/store";
@@ -13,13 +13,17 @@ export default function NewTicketScreen() {
   const [message, setMessage] = useState("");
 
   async function handleSubmit() {
-    const ticket = await createTicket.mutateAsync({
-      name: user?.name ?? "",
-      email: user?.email ?? "",
-      subject,
-      message,
-    });
-    router.replace(`/(app)/account/support/${ticket.id}`);
+    try {
+      const ticket = await createTicket.mutateAsync({
+        name: user?.name ?? "",
+        email: user?.email ?? "",
+        subject,
+        message,
+      });
+      router.replace(`/(app)/account/support/${ticket.id}`);
+    } catch {
+      Alert.alert("Couldn't submit", "Please check your connection and try again.");
+    }
   }
 
   return (

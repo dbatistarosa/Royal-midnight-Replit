@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@/auth/store";
-import { useDriverVehicles, usePostDriverVehicle, useVehicleCatalog } from "@/api/hooks";
+import { useDriverVehicles, usePostDriverVehicle, usePatchDriverVehicle, useDeleteDriverVehicle, useVehicleCatalog } from "@/api/hooks";
 import { ScreenContainer } from "@/components/ScreenContainer";
 import { Card } from "@/components/Card";
 import { GoldButton } from "@/components/GoldButton";
@@ -24,8 +24,12 @@ export default function VehicleScreen() {
   const { data: vehicles, isLoading, refetch } = useDriverVehicles(driverId);
   const { data: catalog } = useVehicleCatalog();
   const postVehicle = usePostDriverVehicle(driverId ?? 0);
+  const patchVehicle = usePatchDriverVehicle(driverId ?? 0);
+  const deleteVehicle = useDeleteDriverVehicle(driverId ?? 0);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
     make: "",
     model: "",
@@ -61,25 +65,66 @@ export default function VehicleScreen() {
       Alert.alert("Missing fields", "Please fill in make, model, color, and vehicle class.");
       return;
     }
+    const body = {
+      make: make.trim(),
+      model: model.trim(),
+      year,
+      color: color.trim(),
+      regPlate: regPlate.trim() || undefined,
+      vehicleClass,
+      passengerCapacity: passengerCapacity ? parseInt(passengerCapacity) : undefined,
+      hasCarSeat: form.hasCarSeat,
+    };
     try {
-      await postVehicle.mutateAsync({
-        make: make.trim(),
-        model: model.trim(),
-        year,
-        color: color.trim(),
-        regPlate: regPlate.trim() || undefined,
-        vehicleClass,
-        passengerCapacity: passengerCapacity ? parseInt(passengerCapacity) : undefined,
-        hasCarSeat: form.hasCarSeat,
-        isDefault: true,
-      });
+      if (editingId != null) {
+        // Editing an existing vehicle — this used to always POST a new one
+        // even when the form said "Update Vehicle Info", silently piling up
+        // duplicate rows every time a driver touched this screen.
+        await patchVehicle.mutateAsync({ vehicleId: editingId, body });
+      } else {
+        // A brand new vehicle only becomes the default automatically when
+        // there wasn't one yet — adding a second vehicle shouldn't bump the
+        // one already in use without the driver asking for that.
+        await postVehicle.mutateAsync({ ...body, isDefault: !primaryVehicle });
+      }
       refetch();
       setShowForm(false);
+      setEditingId(null);
       setForm({ make: "", model: "", year: currentYear, color: "", regPlate: "", vehicleClass: "", passengerCapacity: "", hasCarSeat: false });
-      Alert.alert("Vehicle registered", "Your vehicle has been saved and sent for admin review.");
+      Alert.alert(editingId != null ? "Vehicle updated" : "Vehicle registered", "Your vehicle has been saved and sent for admin review.");
     } catch {
       Alert.alert("Error", "Could not save vehicle. Please try again.");
     }
+  }
+
+  async function handleSetDefault(vehicleId: number) {
+    try {
+      await patchVehicle.mutateAsync({ vehicleId, body: { isDefault: true } });
+      refetch();
+    } catch {
+      Alert.alert("Error", "Could not update default vehicle. Please try again.");
+    }
+  }
+
+  function handleDelete(vehicleId: number) {
+    Alert.alert("Remove vehicle?", "This can't be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          setDeletingId(vehicleId);
+          try {
+            await deleteVehicle.mutateAsync(vehicleId);
+            refetch();
+          } catch {
+            Alert.alert("Error", "Could not remove this vehicle. Please try again.");
+          } finally {
+            setDeletingId(null);
+          }
+        },
+      },
+    ]);
   }
 
   const primaryVehicle = vehicles?.find(v => v.isDefault) ?? vehicles?.[0];
@@ -131,27 +176,71 @@ export default function VehicleScreen() {
             </Card>
           )}
 
+          {/* Other registered vehicles */}
+          {!showForm && vehicles && vehicles.length > 1 ? (
+            <Card className="mb-4">
+              <Text className="text-muted text-xs uppercase mb-3">Other Vehicles</Text>
+              <View className="gap-3">
+                {vehicles.filter(v => !v.isDefault).map(v => (
+                  <View key={v.id} className="flex-row items-center justify-between">
+                    <View style={{ flex: 1 }}>
+                      <Text className="text-white text-sm">{v.year} {v.make} {v.model}</Text>
+                      <Text className="text-muted text-xs">{v.color}{v.regPlate ? ` · ${v.regPlate}` : ""}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => void handleSetDefault(v.id)} style={{ paddingHorizontal: 10, paddingVertical: 6 }}>
+                      <Text style={{ color: colors.gold, fontSize: 12 }}>Set Default</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDelete(v.id)} disabled={deletingId === v.id} style={{ paddingHorizontal: 10, paddingVertical: 6 }}>
+                      {deletingId === v.id ? (
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>...</Text>
+                      ) : (
+                        <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            </Card>
+          ) : null}
+
           {/* Add / update vehicle */}
           {!showForm ? (
-            <GoldButton
-              label={primaryVehicle ? "Update Vehicle Info" : "Register Vehicle"}
-              onPress={() => {
-                if (primaryVehicle) {
-                  setForm({
-                    make: primaryVehicle.make,
-                    model: primaryVehicle.model,
-                    // year is stored as text in the DB, so it arrives as a string
-                    year: Number(primaryVehicle.year) || currentYear,
-                    color: primaryVehicle.color,
-                    regPlate: primaryVehicle.regPlate ?? "",
-                    vehicleClass: primaryVehicle.vehicleClass ?? "",
-                    passengerCapacity: primaryVehicle.passengerCapacity?.toString() ?? "",
-                    hasCarSeat: primaryVehicle.hasCarSeat,
-                  });
-                }
-                setShowForm(true);
-              }}
-            />
+            <View className="gap-3">
+              <GoldButton
+                label={primaryVehicle ? "Update Vehicle Info" : "Register Vehicle"}
+                onPress={() => {
+                  if (primaryVehicle) {
+                    setEditingId(primaryVehicle.id);
+                    setForm({
+                      make: primaryVehicle.make,
+                      model: primaryVehicle.model,
+                      // year is stored as text in the DB, so it arrives as a string
+                      year: Number(primaryVehicle.year) || currentYear,
+                      color: primaryVehicle.color,
+                      regPlate: primaryVehicle.regPlate ?? "",
+                      vehicleClass: primaryVehicle.vehicleClass ?? "",
+                      passengerCapacity: primaryVehicle.passengerCapacity?.toString() ?? "",
+                      hasCarSeat: primaryVehicle.hasCarSeat,
+                    });
+                  } else {
+                    setEditingId(null);
+                  }
+                  setShowForm(true);
+                }}
+              />
+              {primaryVehicle ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    setEditingId(null);
+                    setForm({ make: "", model: "", year: currentYear, color: "", regPlate: "", vehicleClass: "", passengerCapacity: "", hasCarSeat: false });
+                    setShowForm(true);
+                  }}
+                  style={{ alignItems: "center", paddingVertical: 8 }}
+                >
+                  <Text style={{ color: colors.gold, fontSize: 13 }}>+ Add Another Vehicle</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           ) : (
             <Card className="gap-4">
               <Text className="text-white font-sans-medium text-base mb-1">Vehicle Details</Text>
@@ -316,11 +405,11 @@ export default function VehicleScreen() {
                   <GoldButton
                     label="Save Vehicle"
                     onPress={() => void handleSubmit()}
-                    loading={postVehicle.isPending}
+                    loading={postVehicle.isPending || patchVehicle.isPending}
                   />
                 </View>
                 <TouchableOpacity
-                  onPress={() => setShowForm(false)}
+                  onPress={() => { setShowForm(false); setEditingId(null); }}
                   style={{ paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: "#333", borderRadius: 4 }}
                 >
                   <Text style={{ color: colors.muted }}>Cancel</Text>

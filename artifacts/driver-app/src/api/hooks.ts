@@ -218,6 +218,29 @@ export function usePostDriverVehicle(driverId: number) {
   });
 }
 
+export function usePatchDriverVehicle(driverId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ vehicleId, body }: { vehicleId: number; body: Parameters<typeof api.patchDriverVehicle>[2] }) =>
+      api.patchDriverVehicle(driverId, vehicleId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", driverId, "vehicles"] });
+      qc.invalidateQueries({ queryKey: ["driver", driverId] });
+    },
+  });
+}
+
+export function useDeleteDriverVehicle(driverId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vehicleId: number) => api.deleteDriverVehicle(driverId, vehicleId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["driver", driverId, "vehicles"] });
+      qc.invalidateQueries({ queryKey: ["driver", driverId] });
+    },
+  });
+}
+
 export function useVehicleCatalog() {
   return useQuery({
     queryKey: ["vehicle-catalog"],

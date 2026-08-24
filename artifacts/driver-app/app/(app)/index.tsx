@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Pressable, RefreshControl, Switch, Text, View } from "react-native";
+import { Alert, Pressable, RefreshControl, Switch, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useAuthStore } from "@/auth/store";
 import {
@@ -35,15 +35,27 @@ export default function HomeScreen() {
   const isOnline = driver?.status === "available";
 
   async function handleToggleOnline(next: boolean) {
-    if (next) {
-      const ok = await startLocation();
-      if (!ok) return;
-      await patchStatus.mutateAsync("available");
-    } else {
-      await stopLocation();
-      await patchStatus.mutateAsync("unavailable");
+    // isOnline is bound to driver?.status, not to a separate optimistic flag —
+    // but the Switch is a native control, and on a failed mutateAsync (thrown,
+    // previously uncaught) the OS-level switch can visually settle on the
+    // position the driver dragged it to before JS ever confirms it, out of
+    // sync with the untouched server status underneath. Catching the error,
+    // alerting, and always refetching (success or failure) forces a fresh
+    // render from the real status either way.
+    try {
+      if (next) {
+        const ok = await startLocation();
+        if (!ok) return;
+        await patchStatus.mutateAsync("available");
+      } else {
+        await stopLocation();
+        await patchStatus.mutateAsync("unavailable");
+      }
+    } catch {
+      Alert.alert("Couldn't update status", "Please check your connection and try again.");
+    } finally {
+      refetchDriver();
     }
-    refetchDriver();
   }
 
   function refreshAll() {

@@ -252,6 +252,34 @@ export function postDriverVehicle(
   });
 }
 
+export function patchDriverVehicle(
+  driverId: number,
+  vehicleId: number,
+  body: Partial<{
+    make: string;
+    model: string;
+    year: number;
+    color: string;
+    regPlate: string;
+    vehicleClass: string;
+    passengerCapacity: number;
+    luggageCapacity: number;
+    hasCarSeat: boolean;
+    isDefault: boolean;
+  }>,
+): Promise<DriverVehicle> {
+  return customFetch<DriverVehicle>(`/drivers/${driverId}/vehicles/${vehicleId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteDriverVehicle(driverId: number, vehicleId: number): Promise<void> {
+  return customFetch<void>(`/drivers/${driverId}/vehicles/${vehicleId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function getVehicleCatalog(): Promise<VehicleCatalogEntry[]> {
   // The public route returns vehicleTypes as a comma-joined string — normalize.
   const rows = await customFetch<Array<Omit<VehicleCatalogEntry, "vehicleTypes"> & { vehicleTypes: string }>>(`/vehicle-catalog`);

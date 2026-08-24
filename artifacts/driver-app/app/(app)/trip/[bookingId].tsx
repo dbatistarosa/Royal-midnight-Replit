@@ -144,6 +144,16 @@ export default function TripScreen() {
         </View>
       </Card>
 
+      {booking.flightNumber ? (
+        <Card className="mb-4">
+          <View className="flex-row items-center gap-2">
+            <Ionicons name="airplane" size={16} color={colors.gold} />
+            <Text className="text-[11px] uppercase text-muted">Flight</Text>
+          </View>
+          <Text className="text-white text-sm mt-1">{booking.flightNumber}</Text>
+        </Card>
+      ) : null}
+
       {booking.passengerPreferences ? (
         <Card className="mb-4">
           <Text className="text-[11px] uppercase text-muted mb-2">Passenger Preferences</Text>

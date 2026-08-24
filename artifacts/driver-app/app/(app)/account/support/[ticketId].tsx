@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Text, TextInput, View } from "react-native";
+import { Alert, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { format } from "date-fns";
 import { useAuthStore } from "@/auth/store";
@@ -18,8 +18,12 @@ export default function TicketThreadScreen() {
 
   async function handleSend() {
     if (!reply.trim()) return;
-    await postMessage.mutateAsync(reply.trim());
-    setReply("");
+    try {
+      await postMessage.mutateAsync(reply.trim());
+      setReply("");
+    } catch {
+      Alert.alert("Couldn't send", "Please check your connection and try again.");
+    }
   }
 
   return (

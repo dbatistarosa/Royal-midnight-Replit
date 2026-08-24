@@ -15,8 +15,19 @@ export function useLocationSharing() {
       );
       return false;
     }
+    const upgrade = result.reason === "background_not_granted";
     setIsSharing(true);
-    setNeedsAlwaysUpgrade(result.reason === "background_not_granted");
+    setNeedsAlwaysUpgrade(upgrade);
+    // Computed and returned here, not read back from state: setNeedsAlwaysUpgrade
+    // above won't have committed by the time the caller's next line runs, so a
+    // caller checking the hook's own needsAlwaysUpgrade right after awaiting
+    // start() would always see the value from before this call.
+    if (upgrade) {
+      Alert.alert(
+        "Limited background tracking",
+        "Location is only shared while Royal Midnight is open. For dispatch to track you when the app is backgrounded or the screen is locked, set Location permission to \"Always\" in Settings.",
+      );
+    }
     return true;
   }, []);
 

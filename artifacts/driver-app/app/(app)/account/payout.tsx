@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Text, TextInput, View } from "react-native";
+import { Alert, Text, TextInput, View } from "react-native";
 import { useAuthStore } from "@/auth/store";
 import { useDriverPayout, usePatchDriverPayout } from "@/api/hooks";
 import { ScreenContainer } from "@/components/ScreenContainer";
@@ -46,16 +46,20 @@ export default function PayoutScreen() {
 
   async function handleSave() {
     setSaved(false);
-    await patchPayout.mutateAsync({
-      payoutLegalName: legalName || undefined,
-      payoutEmail: email || undefined,
-      payoutBankName: bankName || undefined,
-      payoutRoutingNumber: routingNumber || undefined,
-      payoutAccountNumber: accountNumber || undefined,
-    });
-    setRoutingNumber("");
-    setAccountNumber("");
-    setSaved(true);
+    try {
+      await patchPayout.mutateAsync({
+        payoutLegalName: legalName || undefined,
+        payoutEmail: email || undefined,
+        payoutBankName: bankName || undefined,
+        payoutRoutingNumber: routingNumber || undefined,
+        payoutAccountNumber: accountNumber || undefined,
+      });
+      setRoutingNumber("");
+      setAccountNumber("");
+      setSaved(true);
+    } catch {
+      Alert.alert("Couldn't save", "Please check your connection and try again.");
+    }
   }
 
   return (
