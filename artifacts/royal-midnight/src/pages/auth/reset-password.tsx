@@ -31,8 +31,9 @@ export default function ResetPassword() {
 
   async function handleReset() {
     setError("");
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
+    // Must match MIN_PASSWORD_LENGTH in the API's passwordPolicy.ts.
+    if (password.length < 12) {
+      setError("Password must be at least 12 characters.");
       return;
     }
     if (password !== confirm) {
@@ -111,7 +112,7 @@ export default function ResetPassword() {
                     <label className="text-gray-400 uppercase tracking-widest text-xs block mb-1.5">New Password</label>
                     <Input
                       type="password"
-                      placeholder="Minimum 6 characters"
+                      placeholder="Minimum 12 characters"
                       value={password}
                       onChange={e => setPassword(e.target.value)}
                       className="bg-white/5 border-white/10 text-white rounded-none h-12 focus:border-primary"

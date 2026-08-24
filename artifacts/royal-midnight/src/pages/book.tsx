@@ -721,8 +721,12 @@ export default function Book() {
       }
     }
 
-    if (!existingBookingId && !user && (!values.password || values.password.length < 6)) {
-      toast({ title: "Password required", description: "Please create a password (min 6 characters) to track your booking.", variant: "destructive" });
+    // Must match MIN_PASSWORD_LENGTH in the API's passwordPolicy.ts — a
+    // looser check here just means ensureAccount()'s /auth/register call
+    // rejects it after the whole booking form (and payment) already went
+    // through, and the passenger sees a contradictory error at checkout.
+    if (!existingBookingId && !user && (!values.password || values.password.length < 12)) {
+      toast({ title: "Password required", description: "Please create a password (min 12 characters) to track your booking.", variant: "destructive" });
       return;
     }
 
@@ -1317,7 +1321,7 @@ export default function Book() {
                           <FormItem>
                             <FormLabel className="text-gray-500 uppercase tracking-widest text-[10px]">Create Password</FormLabel>
                             <FormControl>
-                              <Input type="password" placeholder="Minimum 6 characters" className={`${inputClass} max-w-sm`} {...field} />
+                              <Input type="password" placeholder="Minimum 12 characters" className={`${inputClass} max-w-sm`} {...field} />
                             </FormControl>
                             <FormMessage className="text-red-400 text-xs" />
                           </FormItem>

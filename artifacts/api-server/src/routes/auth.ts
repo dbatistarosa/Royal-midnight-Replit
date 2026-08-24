@@ -17,15 +17,22 @@ import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/refer
 import { hasPgErrorCode, UNDEFINED_TABLE } from "../lib/pgError.js";
 import { canonicalObjectPath } from "./storage.js";
 import { createDriverVehicle } from "../lib/driverVehicles.js";
+import { formatZodError } from "../lib/zodError.js";
+import { storeFor } from "../lib/rateLimit.js";
 
 const router: IRouter = Router();
 
 // Throttle credential-guessing / account-creation abuse. Keyed by IP (express-rate-limit default).
+// store: storeFor(...) — without it this resets per Vercel instance, which
+// on the login/register endpoints is the one place that matters most; see
+// the comment on storeFor() in lib/rateLimit.ts.
 const credentialLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true,
+  store: storeFor("credential"),
   message: { error: "Too many attempts. Please try again later." },
 });
 
@@ -36,6 +43,8 @@ const otpLimiter = rateLimit({
   limit: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  passOnStoreError: true,
+  store: storeFor("otp"),
   message: { error: "Too many OTP requests. Please try again later." },
 });
 
@@ -62,7 +71,7 @@ function setSessionCookie(res: import("express").Response, token: string): void 
 router.post("/auth/register", credentialLimiter, async (req, res): Promise<void> => {
   const parsed = RegisterBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: formatZodError(parsed.error) });
     return;
   }
 
@@ -142,7 +151,7 @@ router.post("/auth/register", credentialLimiter, async (req, res): Promise<void>
 router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> => {
   const parsed = LoginBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: formatZodError(parsed.error) });
     return;
   }
 
@@ -257,7 +266,7 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
 router.post("/auth/send-otp", otpLimiter, async (req, res): Promise<void> => {
   const parsed = SendOtpBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: formatZodError(parsed.error) });
     return;
   }
 
@@ -282,7 +291,7 @@ router.post("/auth/send-otp", otpLimiter, async (req, res): Promise<void> => {
 router.post("/auth/verify-otp", otpLimiter, async (req, res): Promise<void> => {
   const parsed = VerifyOtpBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: formatZodError(parsed.error) });
     return;
   }
 
@@ -375,7 +384,7 @@ const DriverRegisterBody = z.object({
 router.post("/auth/driver-register", credentialLimiter, async (req, res): Promise<void> => {
   const parsed = DriverRegisterBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: formatZodError(parsed.error) });
     return;
   }
 
@@ -527,7 +536,7 @@ const CreateAdminBody = z.object({
 router.post("/auth/admin-register", requireAdmin, async (req, res): Promise<void> => {
   const parsed = CreateAdminBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: formatZodError(parsed.error) });
     return;
   }
 
@@ -589,7 +598,7 @@ const CreateCorporateBody = z.object({
 router.post("/auth/corporate-register", requireAdmin, async (req, res): Promise<void> => {
   const parsed = CreateCorporateBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    res.status(400).json({ error: formatZodError(parsed.error) });
     return;
   }
 

@@ -48,7 +48,11 @@ export const GetStorageObjectParams = zod.object({
  */
 export const RegisterBody = zod.object({
   name: zod.string(),
-  email: zod.string(),
+  // Hand-added (not from a codegen run — see the note on GetRecentBookingsResponseItem
+  // above): every other account-creating schema in this file validates email
+  // format except this one, so a non-web caller could create a passenger
+  // account with a syntactically invalid address and nothing would ever catch it.
+  email: zod.string().email(),
   password: zod.string(),
   phone: zod.string().nullish(),
   role: zod.enum(["passenger", "driver"]),

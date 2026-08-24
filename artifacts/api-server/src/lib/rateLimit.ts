@@ -18,8 +18,13 @@ import { RedisRateLimitStore } from "./redisRateLimitStore.js";
  * KV_REST_API_URL/TOKEN (or UPSTASH_REDIS_REST_*) is set; until then it
  * returns undefined and express-rate-limit falls back to MemoryStore exactly
  * as before, so this is safe to deploy ahead of provisioning Redis.
+ *
+ * Exported: auth.ts's credentialLimiter/otpLimiter are defined locally (they
+ * predate this file) but need the exact same store — a login/registration
+ * limiter that resets per Vercel instance is the same bug as everything else
+ * here, just on the endpoints that matter most for brute-forcing.
  */
-function storeFor(prefix: string): RedisRateLimitStore | undefined {
+export function storeFor(prefix: string): RedisRateLimitStore | undefined {
   return getRedis() ? new RedisRateLimitStore(prefix) : undefined;
 }
 

@@ -307,8 +307,9 @@ function AdminSettingsInner() {
       toast({ title: "Passwords do not match", description: "Please re-enter matching passwords.", variant: "destructive" });
       return;
     }
-    if (adminForm.password.length < 8) {
-      toast({ title: "Password too short", description: "Password must be at least 8 characters.", variant: "destructive" });
+    // Must match MIN_PASSWORD_LENGTH in the API's passwordPolicy.ts.
+    if (adminForm.password.length < 12) {
+      toast({ title: "Password too short", description: "Password must be at least 12 characters.", variant: "destructive" });
       return;
     }
     setAdminSaving(true);
@@ -337,8 +338,9 @@ function AdminSettingsInner() {
       toast({ title: "Passwords do not match", description: "Please re-enter matching passwords.", variant: "destructive" });
       return;
     }
-    if (corporateForm.password.length < 8) {
-      toast({ title: "Password too short", description: "Password must be at least 8 characters.", variant: "destructive" });
+    // Must match MIN_PASSWORD_LENGTH in the API's passwordPolicy.ts.
+    if (corporateForm.password.length < 12) {
+      toast({ title: "Password too short", description: "Password must be at least 12 characters.", variant: "destructive" });
       return;
     }
     setCorporateSaving(true);
@@ -530,7 +532,7 @@ function AdminSettingsInner() {
                 value={adminForm.password}
                 onChange={e => setAdminForm(p => ({ ...p, password: e.target.value }))}
                 className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
-                placeholder="Min. 8 characters"
+                placeholder="Min. 12 characters"
               />
             </div>
             <div>
@@ -621,7 +623,7 @@ function AdminSettingsInner() {
                 value={corporateForm.password}
                 onChange={e => setCorporateForm(p => ({ ...p, password: e.target.value }))}
                 className="bg-white/5 border-white/10 text-white rounded-none h-10 text-sm"
-                placeholder="Min. 8 characters"
+                placeholder="Min. 12 characters"
               />
             </div>
             <div>
