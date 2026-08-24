@@ -1,4 +1,4 @@
-import { customFetch, requestUploadUrl as requestUploadUrlGenerated, type LoginBody } from "@workspace/api-client-react";
+import { customFetch, type LoginBody, type UploadUrlRequest, type UploadUrlResponse } from "@workspace/api-client-react";
 import type {
   AppNotification,
   Driver,
@@ -263,8 +263,23 @@ export async function getVehicleCatalog(): Promise<VehicleCatalogEntry[]> {
 
 // ── Document/photo upload (presigned URL contract) ──────────────────────────
 
-export function requestUploadUrl(name: string, size: number, contentType: string) {
-  return requestUploadUrlGenerated({ name, size, contentType });
+// Not requestUploadUrlGenerated from @workspace/api-client-react: its URL
+// helper returns "/api/storage/uploads/request-url" (correct for the web
+// app, which never sets a base URL — its /api/* paths resolve against the
+// same origin). This app's client.ts calls setBaseUrl with
+// "https://royalmidnight.com/api" already included, so calling the
+// generated function doubled the prefix into
+// ".../api/api/storage/uploads/request-url", 404ing on every attempt.
+// Every compliance document upload — and the only way out of a
+// compliance-hold — was broken by this. Manual call instead, matching
+// every other hand-written function in this file (no leading /api; the
+// base URL already supplies it).
+export function requestUploadUrl(name: string, size: number, contentType: string): Promise<UploadUrlResponse> {
+  const body: UploadUrlRequest = { name, size, contentType };
+  return customFetch<UploadUrlResponse>("/storage/uploads/request-url", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export async function uploadFileToPresignedUrl(uploadURL: string, localUri: string, contentType: string): Promise<void> {
