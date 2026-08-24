@@ -413,7 +413,7 @@ router.delete("/users/:id/favorite-drivers/:driverId", requireAuth, async (req, 
 
 // GET /users/:id/managed-travelers — list travelers this EA can book for
 router.get("/users/:id/managed-travelers", requireAuth, async (req, res): Promise<void> => {
-  const eaUserId = parseInt(req.params["id"] ?? "", 10);
+  const eaUserId = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(eaUserId)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const caller = req.currentUser!;
@@ -429,7 +429,7 @@ router.get("/users/:id/managed-travelers", requireAuth, async (req, res): Promis
 
 // POST /users/:id/managed-travelers — add a traveler by email
 router.post("/users/:id/managed-travelers", requireAuth, async (req, res): Promise<void> => {
-  const eaUserId = parseInt(req.params["id"] ?? "", 10);
+  const eaUserId = parseInt(String(req.params["id"] ?? ""), 10);
   if (isNaN(eaUserId)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const caller = req.currentUser!;
@@ -456,8 +456,8 @@ router.post("/users/:id/managed-travelers", requireAuth, async (req, res): Promi
 
 // DELETE /users/:id/managed-travelers/:travelerId — remove a traveler link
 router.delete("/users/:id/managed-travelers/:travelerId", requireAuth, async (req, res): Promise<void> => {
-  const eaUserId = parseInt(req.params["id"] ?? "", 10);
-  const travelerId = parseInt(req.params["travelerId"] ?? "", 10);
+  const eaUserId = parseInt(String(req.params["id"] ?? ""), 10);
+  const travelerId = parseInt(String(req.params["travelerId"] ?? ""), 10);
   if (isNaN(eaUserId) || isNaN(travelerId)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const caller = req.currentUser!;

@@ -75,7 +75,10 @@ router.post("/reviews", requireAuth, async (req, res): Promise<void> => {
     await db
       .update(driversTable)
       .set({
-        rating: agg ? Math.round(agg.avgRating * 10) / 10 : null,
+        // `rating` is numeric(3,2) — drizzle represents that as a string to
+        // preserve precision, so a raw JS number here is a type (and, on the
+        // next precision-sensitive column, a real) bug.
+        rating: agg ? String(Math.round(agg.avgRating * 10) / 10) : null,
       })
       .where(eq(driversTable.id, booking.driverId));
   }
