@@ -21,3 +21,26 @@ project_id = "qpqmefenkleyzwnlleih"
 # Verified in production: anon key / no header / wrong secret all get 401, while
 # the cron gets 200.
 verify_jwt = false
+
+[functions.sent-dm-webhook]
+# An external webhook (Sent.dm) cannot present a Supabase JWT. Auth is its own
+# HMAC-SHA256 signature check inside the handler — see supabase/functions/AUDIT.md.
+verify_jwt = false
+
+[functions.send-message-via-sent]
+# Dormant: SENT_DM_API_KEY is not configured, so every call 500s before
+# sending anything. Do NOT configure that secret without first adding a caller
+# check to the handler — see supabase/functions/AUDIT.md ("Dormant" section).
+verify_jwt = true
+
+[functions.update-driver-location]
+# HIGH finding, unfixed as of this writing — see supabase/functions/AUDIT.md.
+# Nothing in this codebase calls it; recommended fix is deletion, not a
+# verify_jwt change (verify_jwt accepts the public anon key, so true here adds
+# no real protection).
+verify_jwt = true
+
+[functions.calculate-route-price]
+# MEDIUM finding, unfixed as of this writing — see supabase/functions/AUDIT.md.
+# Nothing in this codebase calls it; recommended fix is deletion.
+verify_jwt = false
