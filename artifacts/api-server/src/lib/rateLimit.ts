@@ -97,6 +97,23 @@ export function promoLimiter(): RateLimitRequestHandler {
   });
 }
 
+/** Pre-registration document uploads (driver onboarding, before an account
+ *  exists — see storage.ts's /storage/registration-uploads/request-url). This
+ *  is the one upload endpoint reachable without a session, so unlike the rest
+ *  of storage.ts it needs its own throttle rather than relying on requireAuth
+ *  plus the global limiter. A real applicant uploads at most 4 files in one
+ *  sitting; this leaves room for retries on a bad connection without leaving
+ *  the endpoint open to scripted abuse of Supabase's signed-URL calls. */
+export function registrationUploadLimiter(): RateLimitRequestHandler {
+  return rateLimit({
+    ...shared,
+    store: storeFor("registration-upload"),
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    message: { error: "Too many upload attempts. Please wait a few minutes and try again." },
+  });
+}
+
 /** Stripe-facing payment endpoints (create-intent, tips, saved cards). Every
  *  other sensitive endpoint (auth, OTP, quote, promo) already has a limiter;
  *  these fell back to globalLimiter() alone, and create-intent is reachable

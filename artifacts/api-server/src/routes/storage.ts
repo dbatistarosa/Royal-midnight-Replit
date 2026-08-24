@@ -10,6 +10,7 @@ import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage"
 import { hasPgErrorCode, UNDEFINED_TABLE } from "../lib/pgError.js";
 import { requireAuth, requireAdmin, type AuthUser } from "../middleware/auth.js";
 import { signObjectPath, verifyObjectSignature } from "../lib/signedUrl.js";
+import { registrationUploadLimiter } from "../lib/rateLimit.js";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -69,8 +70,11 @@ async function canReadObject(caller: AuthUser, objectPath: string): Promise<bool
 }
 
 /** Canonical `/objects/<key>` form, or null for anything that is not one of
- *  our storage keys (an absolute URL, or a traversal attempt). */
-function canonicalObjectPath(raw: string | null | undefined): string | null {
+ *  our storage keys (an absolute URL, or a traversal attempt). Exported for
+ *  auth.ts, which needs the same check when claiming ownership of documents
+ *  uploaded before the account that owns them existed (see
+ *  POST /storage/registration-uploads/request-url below). */
+export function canonicalObjectPath(raw: string | null | undefined): string | null {
   if (!raw || /^https?:/i.test(raw)) return null;
   const key = raw.replace(/^\/?objects\//, "").replace(/^\/+/, "");
   if (!key || key.includes("..")) return null;
@@ -217,6 +221,75 @@ router.post("/storage/uploads/request-url", requireAuth, async (req: Request, re
     );
   } catch (error) {
     req.log.error({ err: error }, "Error generating upload URL");
+    res.status(500).json({ error: "Failed to generate upload URL" });
+  }
+});
+
+/** Compliance documents (license, insurance, registration, profile photo).
+ *  Phone photos of a physical document tend to run larger than a picked
+ *  product image, hence the higher cap than MAX_PUBLIC_UPLOAD_BYTES. */
+const REGISTRATION_UPLOAD_TYPES = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf",
+]);
+const MAX_REGISTRATION_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/**
+ * POST /storage/registration/uploads/request-url
+ *
+ * Same shape as POST /storage/uploads/request-url, but reachable without a
+ * session. The driver-onboarding form collects a license, insurance
+ * certificate and registration document on its last step and submits
+ * everything (including these paths) atomically via POST /auth/driver-register
+ * — at the point of uploading, the account those documents belong to does not
+ * exist yet, so requireAuth cannot apply here the way it does everywhere else
+ * in this file.
+ *
+ * No object_owners row is written: there is no user to own it yet. The object
+ * sits unclaimed — readable by nobody but admin (canReadObject's fail-closed
+ * default) — until registration succeeds, at which point driver-register
+ * claims it for the new account. An abandoned upload (form never submitted)
+ * just stays unclaimed forever, same as any other orphaned object.
+ *
+ * What stands in for requireAuth here: registrationUploadLimiter (this is the
+ * one storage route reachable pre-auth, so it needs its own throttle) and a
+ * content-type/size allowlist matching the public upload route below, so an
+ * anonymous caller can't use this to stash arbitrary files in the private
+ * bucket.
+ */
+router.post("/storage/registration/uploads/request-url", registrationUploadLimiter(), async (req: Request, res: Response) => {
+  const parsed = RequestUploadUrlBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Missing or invalid required fields" });
+    return;
+  }
+
+  const { name, size, contentType } = parsed.data;
+  const type = contentType.split(";")[0]!.trim().toLowerCase();
+
+  if (!REGISTRATION_UPLOAD_TYPES.has(type)) {
+    res.status(400).json({ error: "Only JPG, PNG, WebP, GIF, or PDF files can be uploaded here." });
+    return;
+  }
+  if (size > MAX_REGISTRATION_UPLOAD_BYTES) {
+    res.status(400).json({
+      error: `That file is ${(size / 1_048_576).toFixed(1)} MB. The limit is ${MAX_REGISTRATION_UPLOAD_BYTES / 1_048_576} MB.`,
+    });
+    return;
+  }
+
+  try {
+    const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+    const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+
+    res.json(
+      RequestUploadUrlResponse.parse({
+        uploadURL,
+        objectPath,
+        metadata: { name, size, contentType },
+      }),
+    );
+  } catch (error) {
+    req.log.error({ err: error }, "Error generating registration upload URL");
     res.status(500).json({ error: "Failed to generate upload URL" });
   }
 });

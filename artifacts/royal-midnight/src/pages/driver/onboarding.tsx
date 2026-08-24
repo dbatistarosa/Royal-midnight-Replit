@@ -36,14 +36,28 @@ type DocUploadFieldProps = {
 function DocUploadField({ label, hint, accept = "image/*,.pdf", objectPath, onChange }: DocUploadFieldProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const { toast } = useToast();
 
   const { uploadFile, isUploading, progress } = useUpload({
-    basePath: `${API_BASE}/storage`,
+    // Not /storage — that route requires a session, and applicants don't have
+    // one until this whole form is submitted. See storage.ts's
+    // POST /storage/registration/uploads/request-url for why this one path is
+    // reachable without auth.
+    basePath: `${API_BASE}/storage/registration`,
     onSuccess: (res) => {
       onChange(res.objectPath);
     },
     onError: (err) => {
+      // Previously silent: a failed upload just reverted to the "Click to
+      // upload" button with no explanation, and the applicant only found out
+      // something was wrong from "License required" after clicking Submit.
       console.error("Upload error:", err);
+      setFileName(null);
+      toast({
+        title: "Upload failed",
+        description: err.message || "Could not upload this file. Please try again.",
+        variant: "destructive",
+      });
     },
   });
 

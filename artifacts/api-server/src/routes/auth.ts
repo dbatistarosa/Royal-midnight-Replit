@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import rateLimit from "express-rate-limit";
 import { eq } from "drizzle-orm";
-import { db, usersTable, driversTable, passwordResetTokensTable, corporateAccountsTable } from "@workspace/db";
+import { db, usersTable, driversTable, passwordResetTokensTable, corporateAccountsTable, objectOwnersTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
@@ -14,6 +14,8 @@ import { createSession, revokeSession, revokeAllSessionsForUser, SESSION_TTL_MS 
 import { validatePassword, MIN_PASSWORD_LENGTH } from "../lib/passwordPolicy.js";
 import { recordAcceptances } from "../lib/legalAcceptance.js";
 import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
+import { hasPgErrorCode, UNDEFINED_TABLE } from "../lib/pgError.js";
+import { canonicalObjectPath } from "./storage.js";
 
 const router: IRouter = Router();
 
@@ -411,6 +413,27 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
         ...driverFields,
       })
       .returning();
+
+    // The license/insurance/registration/profile-photo paths above were
+    // uploaded via POST /storage/registration-uploads/request-url before this
+    // account existed, so nothing owns them yet — canReadObject() in
+    // storage.ts denies everyone but admin until a row shows up here. Same
+    // transaction as account creation: an applicant must never end up with a
+    // driver record whose documents nobody can read.
+    const uploadedDocPaths = [driverFields.licenseDoc, driverFields.regDoc, driverFields.insuranceDoc, driverFields.profilePicture]
+      .map(canonicalObjectPath)
+      .filter((p): p is string => p !== null);
+    if (uploadedDocPaths.length > 0) {
+      try {
+        await tx
+          .insert(objectOwnersTable)
+          .values(uploadedDocPaths.map(objectPath => ({ objectPath, ownerUserId: user.id })))
+          .onConflictDoNothing({ target: objectOwnersTable.objectPath });
+      } catch (err) {
+        if (!hasPgErrorCode(err, UNDEFINED_TABLE)) throw err;
+        req.log.error("object_owners table is missing — run migration 0006_object_ownership.sql");
+      }
+    }
 
     const token = await createSession(user.id, user.role, tx);
     setSessionCookie(res, token);
