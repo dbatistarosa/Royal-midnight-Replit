@@ -694,12 +694,20 @@ export default function AdminBookings() {
   useEffect(() => { setPickupAirline(""); }, [pickupAirportCode]);
   useEffect(() => { setDropoffAirline(""); }, [dropoffAirportCode]);
 
-  // Auto-fetch price quote when required fields are filled. Sends the admin's
-  // bearer token — POST /quote waives the 2-hour lead-time and charter-minimum
-  // rules for an admin caller (the same way booking creation always has), so a
-  // same-day walk-in trip prices instead of 400ing with nothing shown for it.
+  // Auto-fetch price quote as soon as both addresses and a vehicle are picked.
+  // pickupAt is NOT required to price the route: computeQuote() only reads it
+  // for the 2-hour lead-time check, which is already waived for an admin caller
+  // below — so the fare itself never depends on it. Requiring a time before
+  // quoting just meant the price stayed blank on the most common path (address,
+  // address, THEN time) even though everything needed to price it was already
+  // there. When no time has been entered yet, a safe future placeholder is sent
+  // to the quote engine only — never written back into the form, and the actual
+  // pickup time is still required before the booking can be submitted.
   useEffect(() => {
-    if (!createForm.pickupAddress || !createForm.dropoffAddress || !createForm.pickupAt || !createForm.vehicleClass) return;
+    if (!createForm.pickupAddress || !createForm.dropoffAddress || !createForm.vehicleClass) return;
+    const pickupAtForQuote = createForm.pickupAt
+      ? new Date(createForm.pickupAt).toISOString()
+      : new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
     const timeout = setTimeout(async () => {
       setIsGettingQuote(true);
       setQuoteError(null);
@@ -712,7 +720,7 @@ export default function AdminBookings() {
             dropoffAddress: createForm.dropoffAddress,
             vehicleClass: createForm.vehicleClass,
             passengers: parseInt(createForm.passengers) || 1,
-            pickupAt: new Date(createForm.pickupAt).toISOString(),
+            pickupAt: pickupAtForQuote,
           }),
         });
         const data = await res.json().catch(() => null) as
