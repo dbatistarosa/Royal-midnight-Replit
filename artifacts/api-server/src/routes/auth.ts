@@ -11,7 +11,7 @@ import { sendPasswordResetEmail } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
 import { storeOtp, verifyOtp } from "../lib/otpStore.js";
 import { createSession, revokeSession, revokeAllSessionsForUser, SESSION_TTL_MS } from "../lib/session.js";
-import { validatePassword, MIN_PASSWORD_LENGTH } from "../lib/passwordPolicy.js";
+import { validatePassword } from "../lib/passwordPolicy.js";
 import { recordAcceptances } from "../lib/legalAcceptance.js";
 import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
 import { hasPgErrorCode, UNDEFINED_TABLE } from "../lib/pgError.js";
@@ -339,7 +339,12 @@ const DriverRegisterBody = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   phone: z.string().min(7),
-  password: z.string().min(MIN_PASSWORD_LENGTH),
+  // No .min() here on purpose — validatePassword() below is the single
+  // source of truth (see passwordPolicy.ts) and returns a message a user can
+  // actually act on. A schema-level .min() would reject first with Zod's raw
+  // "String must contain at least 12 character(s)" issue array as the error
+  // body, which is what shipped to driver applicants until this fix.
+  password: z.string(),
   serviceArea: z.string().optional(),
   vehicleYear: z.string().optional(),
   vehicleMake: z.string().optional(),
@@ -469,7 +474,12 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
 const CreateAdminBody = z.object({
   name: z.string().min(1),
   email: z.string().email(),
-  password: z.string().min(MIN_PASSWORD_LENGTH),
+  // No .min() here on purpose — validatePassword() below is the single
+  // source of truth (see passwordPolicy.ts) and returns a message a user can
+  // actually act on. A schema-level .min() would reject first with Zod's raw
+  // "String must contain at least 12 character(s)" issue array as the error
+  // body, which is what shipped to driver applicants until this fix.
+  password: z.string(),
   phone: z.string().nullish(),
 });
 
@@ -522,7 +532,12 @@ const CreateCorporateBody = z.object({
   companyName: z.string().min(1),
   contactName: z.string().min(1),
   email: z.string().email(),
-  password: z.string().min(MIN_PASSWORD_LENGTH),
+  // No .min() here on purpose — validatePassword() below is the single
+  // source of truth (see passwordPolicy.ts) and returns a message a user can
+  // actually act on. A schema-level .min() would reject first with Zod's raw
+  // "String must contain at least 12 character(s)" issue array as the error
+  // body, which is what shipped to driver applicants until this fix.
+  password: z.string(),
   phone: z.string().nullish(),
   // Billing terms for the new company account — all optional, sensible defaults.
   billingEmail: z.string().email().nullish(),

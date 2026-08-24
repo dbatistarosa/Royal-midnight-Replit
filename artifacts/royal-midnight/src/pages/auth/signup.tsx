@@ -15,7 +15,8 @@ const signupSchema = z.object({
   name: z.string().min(2, "Full name is required"),
   email: z.string().email("Invalid email address"),
   phone: z.string().min(10, "Phone number is required").optional().or(z.literal("")),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  // Must match MIN_PASSWORD_LENGTH in the API's passwordPolicy.ts.
+  password: z.string().min(12, "Password must be at least 12 characters"),
   confirmPassword: z.string(),
 }).refine((d) => d.password === d.confirmPassword, {
   message: "Passwords do not match",
@@ -132,7 +133,7 @@ export default function Signup() {
                   <FormControl>
                     <Input
                       type="password"
-                      placeholder="Min. 8 characters"
+                      placeholder="Min. 12 characters"
                       className="bg-white/5 border-white/10 text-white rounded-none h-12 focus:border-primary"
                       {...field}
                     />

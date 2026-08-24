@@ -131,7 +131,10 @@ const step1Schema = z.object({
   name: z.string().min(2, "Full name is required"),
   email: z.string().email("Valid email is required"),
   phone: z.string().min(10, "Phone number is required"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  // Must match MIN_PASSWORD_LENGTH in the API's passwordPolicy.ts — a looser
+  // client-side minimum here just means the applicant finds out their
+  // password was rejected after already filling in every other step.
+  password: z.string().min(12, "Password must be at least 12 characters"),
   confirmPassword: z.string(),
 }).refine(d => d.password === d.confirmPassword, {
   message: "Passwords do not match",
@@ -451,7 +454,7 @@ export default function DriverOnboarding() {
                     <FormField control={form1.control} name="password" render={({ field }) => (
                       <FormItem>
                         <FormLabel className={labelClass}>Create Password</FormLabel>
-                        <FormControl><Input type="password" placeholder="Min. 6 characters" className={inputClass} {...field} /></FormControl>
+                        <FormControl><Input type="password" placeholder="Min. 12 characters" className={inputClass} {...field} /></FormControl>
                         <FormMessage className="text-red-400 text-xs" />
                       </FormItem>
                     )} />
