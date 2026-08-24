@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import { db, driversTable, usersTable, geoZonesTable, driverServiceZonesTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 import { tableExists } from "../lib/schemaGuards.js";
+import { syncDriverVehicleFromLegacy } from "../lib/driverVehicles.js";
 
 /**
  * Full administrative edit of a chauffeur record.
@@ -192,11 +193,25 @@ router.patch("/admin/drivers/:id/details", requireAdmin, async (req, res): Promi
   // transaction: a driver whose drivers.email moved but whose users.email did
   // not can no longer sign in, and that must not be a state the database can
   // be left in by a mid-write failure.
+  const VEHICLE_FIELDS = [
+    "vehicleYear", "vehicleMake", "vehicleModel", "vehicleColor", "vehicleClass",
+    "passengerCapacity", "luggageCapacity", "hasCarSeat", "regPlate",
+  ] as const;
+  const vehicleFieldsChanged = VEHICLE_FIELDS.some(key => key in updates);
+
   const updated = await db.transaction(async tx => {
     let row = before;
     if (hasFieldUpdates) {
       const [r] = await tx.update(driversTable).set(updates).where(eq(driversTable.id, id)).returning();
       if (r) row = r;
+    }
+
+    // The admin form writes drivers' legacy vehicle_* columns directly, but
+    // the driver's own "My Vehicles" screen and admin Fleet read from
+    // driver_vehicles/vehicles instead — keep them in sync so an admin edit
+    // doesn't silently vanish from both.
+    if (vehicleFieldsChanged) {
+      await syncDriverVehicleFromLegacy(tx, id, row);
     }
 
     if (emailChanged && before.userId != null) {

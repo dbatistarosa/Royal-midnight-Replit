@@ -15,7 +15,7 @@ import {
 import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
 import { signedObjectDownloadPath } from "../lib/signedUrl.js";
 import { revokeAllSessionsForUser } from "../lib/session.js";
-import { createDriverVehicle } from "../lib/driverVehicles.js";
+import { createDriverVehicle, syncLegacyDriverColumns, syncFleetVehicle } from "../lib/driverVehicles.js";
 import {
   encryptField,
   lastN,
@@ -1648,6 +1648,25 @@ router.patch(
       res.status(404).json({ error: "Vehicle not found" });
       return;
     }
+
+    // Mirror createDriverVehicle's sync: the legacy drivers columns ("My
+    // Profile", admin driver-detail) track whichever vehicle is default, and
+    // Fleet tracks any plated vehicle regardless of default status. Without
+    // this, editing your default vehicle here left both showing stale data.
+    if (v.make && v.model) {
+      if (v.isDefault) {
+        await syncLegacyDriverColumns(db, driverId, {
+          make: v.make, model: v.model, year: v.year, color: v.color, vehicleClass: v.vehicleClass,
+          passengerCapacity: v.passengerCapacity, luggageCapacity: v.luggageCapacity,
+          hasCarSeat: v.hasCarSeat, regPlate: v.regPlate,
+        });
+      }
+      await syncFleetVehicle(db, driverId, {
+        year: v.year, make: v.make, model: v.model, color: v.color,
+        vehicleClass: v.vehicleClass, passengerCapacity: v.passengerCapacity, regPlate: v.regPlate,
+      });
+    }
+
     res.json(v);
   },
 );
