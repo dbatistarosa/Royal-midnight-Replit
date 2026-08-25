@@ -73,7 +73,7 @@ import {
   readQuoteExtensions,
   resolveHourlyRate,
 } from "./quote.js";
-import { evaluatePromoCode } from "./promos.js";
+import { evaluatePromoCode, releasePromoUsage } from "./promos.js";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -3477,6 +3477,12 @@ router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     feeAmount: policy.feeAmount,
     netRefund: policy.netRefund,
   });
+
+  // Release this booking's promo redemption, if any, now that it never
+  // actually completed — see releasePromoUsage's own doc comment.
+  if (cancelled && existing.promoCode) {
+    releasePromoUsage(existing.promoCode, req.log);
+  }
 
   // Fire-and-forget: settle the Stripe side of the cancellation.
   //

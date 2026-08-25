@@ -162,6 +162,17 @@ const PUBLIC_UPLOAD_TYPES = new Set([
  *  by mistake is rejected with an explanation rather than uploaded. */
 const MAX_PUBLIC_UPLOAD_BYTES = 8 * 1024 * 1024;
 
+/** Shared by both authenticated document-style uploads below (the general
+ *  POST /storage/uploads/request-url used for driver documents/photos, and
+ *  the pre-auth registration route) — same purpose (a phone photo or PDF of
+ *  a real document), same allowance. Phone photos of a physical document tend
+ *  to run larger than a picked product image, hence the higher cap than
+ *  MAX_PUBLIC_UPLOAD_BYTES. */
+const DOCUMENT_UPLOAD_TYPES = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf",
+]);
+const MAX_DOCUMENT_UPLOAD_BYTES = 10 * 1024 * 1024;
+
 function setSafePublicHeaders(res: Response, sourceHeaders: Headers): void {
   sourceHeaders.forEach((value, key) => {
     const k = key.toLowerCase();
@@ -189,9 +200,24 @@ router.post("/storage/uploads/request-url", requireAuth, async (req: Request, re
     return;
   }
 
-  try {
-    const { name, size, contentType } = parsed.data;
+  const { name, size, contentType } = parsed.data;
+  // Unlike its two siblings below, this route had no type/size allowlist at
+  // all — any signed-in account could request a URL for a file of any type or
+  // size. Same allowance as the pre-auth registration route: this is what
+  // backs driver document/photo uploads, the same kind of content.
+  const type = contentType.split(";")[0]!.trim().toLowerCase();
+  if (!DOCUMENT_UPLOAD_TYPES.has(type)) {
+    res.status(400).json({ error: "Only JPG, PNG, WebP, GIF, or PDF files can be uploaded here." });
+    return;
+  }
+  if (size > MAX_DOCUMENT_UPLOAD_BYTES) {
+    res.status(400).json({
+      error: `That file is ${(size / 1_048_576).toFixed(1)} MB. The limit is ${MAX_DOCUMENT_UPLOAD_BYTES / 1_048_576} MB.`,
+    });
+    return;
+  }
 
+  try {
     const uploadURL = await objectStorageService.getObjectEntityUploadURL();
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
@@ -227,11 +253,8 @@ router.post("/storage/uploads/request-url", requireAuth, async (req: Request, re
 
 /** Compliance documents (license, insurance, registration, profile photo).
  *  Phone photos of a physical document tend to run larger than a picked
- *  product image, hence the higher cap than MAX_PUBLIC_UPLOAD_BYTES. */
-const REGISTRATION_UPLOAD_TYPES = new Set([
-  "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf",
-]);
-const MAX_REGISTRATION_UPLOAD_BYTES = 10 * 1024 * 1024;
+ *  product image — see DOCUMENT_UPLOAD_TYPES/MAX_DOCUMENT_UPLOAD_BYTES above,
+ *  shared with the general authenticated upload route. */
 
 /**
  * POST /storage/registration/uploads/request-url
@@ -266,13 +289,13 @@ router.post("/storage/registration/uploads/request-url", registrationUploadLimit
   const { name, size, contentType } = parsed.data;
   const type = contentType.split(";")[0]!.trim().toLowerCase();
 
-  if (!REGISTRATION_UPLOAD_TYPES.has(type)) {
+  if (!DOCUMENT_UPLOAD_TYPES.has(type)) {
     res.status(400).json({ error: "Only JPG, PNG, WebP, GIF, or PDF files can be uploaded here." });
     return;
   }
-  if (size > MAX_REGISTRATION_UPLOAD_BYTES) {
+  if (size > MAX_DOCUMENT_UPLOAD_BYTES) {
     res.status(400).json({
-      error: `That file is ${(size / 1_048_576).toFixed(1)} MB. The limit is ${MAX_REGISTRATION_UPLOAD_BYTES / 1_048_576} MB.`,
+      error: `That file is ${(size / 1_048_576).toFixed(1)} MB. The limit is ${MAX_DOCUMENT_UPLOAD_BYTES / 1_048_576} MB.`,
     });
     return;
   }

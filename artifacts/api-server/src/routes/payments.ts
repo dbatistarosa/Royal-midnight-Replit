@@ -31,6 +31,7 @@ import {
 } from "../lib/commission.js";
 import { paymentLimiter } from "../lib/rateLimit.js";
 import { logger } from "../lib/logger.js";
+import { releasePromoUsage } from "./promos.js";
 
 const router: IRouter = Router();
 
@@ -1069,6 +1070,9 @@ router.post(
         .update(bookings)
         .set({ status: "cancelled", updatedAt: new Date() })
         .where(eq(bookings.id, bId));
+      if (booking.promoCode) {
+        releasePromoUsage(booking.promoCode, req.log);
+      }
       req.log.info(
         `[payments] Admin cancelled PI authorization for booking #${bId} (PI: ${booking.stripePaymentIntentId})`,
       );

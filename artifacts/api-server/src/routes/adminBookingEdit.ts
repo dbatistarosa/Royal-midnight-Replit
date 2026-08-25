@@ -211,7 +211,17 @@ router.patch("/admin/bookings/:id/details", requireAdmin, async (req, res): Prom
     note("Total", money(before.priceQuoted), money(nextPrice));
 
     updates.priceQuoted = String(nextPrice);
-    updates.fareSubtotal = String(q.subtotal);
+    // Driver commission base: base fare + billable miles (+surge) only —
+    // never the airport fee, which is company-side. `q.subtotal` (used here
+    // until now) is subtotalBeforeZone-plus-surge-minus-corporate-discount,
+    // and subtotalBeforeZone itself already folds in the airport fee, so an
+    // admin re-pricing an unpaid airport trip was silently inflating the
+    // driver's commission base by the airport fee every time. Mirrors the
+    // same formula bookings.ts uses when a booking is first created.
+    updates.fareSubtotal = String(
+      q.fixedRoutePrice ??
+        Math.round((q.baseFare + q.distanceCharge + q.surgeAdjustment) * 100) / 100,
+    );
     updates.estimatedDistanceMiles = String(q.estimatedDistance);
     updates.estimatedDurationMinutes = Math.round(q.estimatedDuration);
   }

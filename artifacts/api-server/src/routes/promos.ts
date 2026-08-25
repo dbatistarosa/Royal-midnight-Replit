@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import { db, promoCodesTable, bookingsTable } from "@workspace/db";
 import { requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { promoLimiter } from "../lib/rateLimit.js";
@@ -104,10 +104,20 @@ export async function evaluatePromoCode(
     if (userId == null) {
       return invalid("Sign in to use this promo code — it is limited per customer.");
     }
+    // Excludes cancelled bookings: this cap is meant to be "you've redeemed
+    // this code N times," not "you've ever typed this code into a booking
+    // that didn't go through" — without the status filter, a cancelled trip
+    // permanently burned one of a customer's uses with nothing to show for it.
     const [row] = await db
       .select({ used: sql<number>`count(*)::int` })
       .from(bookingsTable)
-      .where(and(eq(bookingsTable.promoCode, code), eq(bookingsTable.userId, userId)));
+      .where(
+        and(
+          eq(bookingsTable.promoCode, code),
+          eq(bookingsTable.userId, userId),
+          ne(bookingsTable.status, "cancelled"),
+        ),
+      );
     const usedByThisUser = row?.used ?? 0;
     if (usedByThisUser >= perUser) {
       return invalid(
@@ -135,6 +145,35 @@ export async function evaluatePromoCode(
     finalAmount: Math.round((bookingAmount - discountAmount) * 100) / 100,
     message: `${promo.description} applied`,
   };
+}
+
+/**
+ * Undo a promo redemption when the booking that used it is cancelled.
+ *
+ * `usedCount` is a real persistent counter (unlike the per-user cap above,
+ * which is derived live from non-cancelled bookings) — it was incremented on
+ * creation and never released, so a capped-supply code could be exhausted by
+ * cancellations alone with nothing actually redeemed. Floored at 0 with a SQL
+ * GREATEST so a decrement racing a concurrent read can never drive it
+ * negative. Never throws: called from fire-and-forget cancellation paths
+ * where a failure here must not block or fail the cancellation itself.
+ */
+export async function releasePromoUsage(
+  code: string | null | undefined,
+  log?: { warn: (obj: object, msg: string) => void },
+): Promise<void> {
+  if (!code) return;
+  try {
+    await db
+      .update(promoCodesTable)
+      .set({ usedCount: sql`greatest(${promoCodesTable.usedCount} - 1, 0)` })
+      .where(eq(promoCodesTable.code, code));
+  } catch (err) {
+    log?.warn(
+      { code, err: (err as Error).message },
+      "promo_usage_release_failed",
+    );
+  }
 }
 
 // Brute-forcing short promo codes costs the attacker nothing without this.
