@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/auth";
 import { format } from "date-fns";
 import { CheckCircle2, Loader2, Calendar, MapPin, User, Mail, CreditCard, Car, Users, Plane, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 
 type PublicBooking = {
   id: number;
@@ -43,6 +44,7 @@ export default function BookingConfirmation() {
   const [recoveredToken, setRecoveredToken] = useState("");
   const token = routeTokenIsValid ? routeToken : recoveredToken;
   const { user } = useAuth();
+  const { vehicleClasses } = useVehicleClasses();
   const viewBookingsHref = user?.role === "admin"
     ? "/admin/bookings"
     : user?.role === "driver"
@@ -273,7 +275,7 @@ export default function BookingConfirmation() {
                       <div>
                         <p className="text-gray-500 uppercase tracking-widest text-xs mb-0.5">Vehicle</p>
                         <p className="text-white capitalize">
-                          {booking.vehicleClass === "business" ? "Business Class Sedan" : booking.vehicleClass === "suv" ? "Premium SUV" : booking.vehicleClass}
+                          {vehicleClasses.find(c => c.id === booking.vehicleClass)?.name ?? booking.vehicleClass}
                         </p>
                       </div>
                     </div>

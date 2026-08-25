@@ -8,6 +8,11 @@ const SMTP_PORT = parseInt(process.env.SMTP_PORT ?? "587");
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const SMTP_FROM = process.env.SMTP_FROM ?? "Royal Midnight <noreply@royalmidnight.com>";
+// Several templates literally say "reply to this email" (support tickets,
+// invoices, extra-time charges), but nothing set Reply-To — SMTP_FROM is a
+// noreply@ address, so a reply had nowhere real to land. Support-team inbox,
+// not the sending address.
+const REPLY_TO = process.env.REPLY_TO ?? "support@royalmidnight.com";
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 export const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@royalmidnight.com";
 
@@ -53,6 +58,7 @@ async function send(to: string | string[], subject: string, html: string, type =
         to: toArr,
         subject,
         html,
+        replyTo: REPLY_TO,
       });
       await logEmail(to, subject, type, "sent");
     } catch (err: any) {
@@ -66,7 +72,7 @@ async function send(to: string | string[], subject: string, html: string, type =
     const transport = createSmtpTransport();
     if (!transport) { await logEmail(to, subject, type, "skipped", "SMTP transport creation failed"); return; }
     try {
-      await transport.sendMail({ from: SMTP_FROM, to, subject, html });
+      await transport.sendMail({ from: SMTP_FROM, to, subject, html, replyTo: REPLY_TO });
       await logEmail(to, subject, type, "sent");
     } catch (err: any) {
       console.error("[mailer] SMTP failed:", err.message);

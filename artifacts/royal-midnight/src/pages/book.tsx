@@ -257,6 +257,16 @@ export default function Book() {
     if (vehicleClass) setSelectedVehicle(vehicleClass);
   }, []);
 
+  // The three /services/* pages link here with ?service=airport|hourly|event,
+  // but this form had nothing that read it — the visitor's stated intent was
+  // silently dropped and they landed on a blank, undifferentiated form. Of the
+  // three, only "hourly" maps onto a real toggle in this form (charterMode);
+  // "airport" and "event" describe the trip, not a distinct booking mode, so
+  // there is no equivalent field to pre-set for them without inventing one.
+  useEffect(() => {
+    if (searchParams.get("service") === "hourly") setCharterMode("hourly");
+  }, []);
+
   // On mount: handle 3DS redirect return (payment_intent + redirect_status in URL)
   useEffect(() => {
     const pi = searchParams.get("payment_intent");
