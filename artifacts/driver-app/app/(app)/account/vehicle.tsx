@@ -2,19 +2,11 @@ import { useState } from "react";
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthStore } from "@/auth/store";
-import { useDriverVehicles, usePostDriverVehicle, usePatchDriverVehicle, useDeleteDriverVehicle, useVehicleCatalog } from "@/api/hooks";
+import { useDriverVehicles, usePostDriverVehicle, usePatchDriverVehicle, useDeleteDriverVehicle, useVehicleCatalog, useVehicleClasses } from "@/api/hooks";
 import { ScreenContainer } from "@/components/ScreenContainer";
 import { Card } from "@/components/Card";
 import { GoldButton } from "@/components/GoldButton";
 import { colors } from "@/theme/colors";
-
-const VEHICLE_CLASSES = [
-  { value: "standard", label: "Standard Sedan" },
-  { value: "business", label: "Business Sedan" },
-  { value: "first_class", label: "First Class Sedan" },
-  { value: "suv", label: "Premium SUV" },
-  { value: "van", label: "Van / Shuttle" },
-];
 
 const currentYear = new Date().getFullYear();
 const YEAR_OPTIONS = Array.from({ length: currentYear - 2014 }, (_, i) => currentYear - i);
@@ -23,6 +15,7 @@ export default function VehicleScreen() {
   const driverId = useAuthStore((s) => s.driverId);
   const { data: vehicles, isLoading, refetch } = useDriverVehicles(driverId);
   const { data: catalog } = useVehicleCatalog();
+  const { vehicleClasses: VEHICLE_CLASSES } = useVehicleClasses();
   const postVehicle = usePostDriverVehicle(driverId ?? 0);
   const patchVehicle = usePatchDriverVehicle(driverId ?? 0);
   const deleteVehicle = useDeleteDriverVehicle(driverId ?? 0);

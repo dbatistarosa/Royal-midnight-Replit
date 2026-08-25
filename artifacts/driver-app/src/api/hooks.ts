@@ -248,3 +248,21 @@ export function useVehicleCatalog() {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+/** Bookable vehicle classes, live from admin-configured pricing rules —
+ *  mirrors the web app's useVehicleClasses() so both surfaces agree on what
+ *  classes exist without either one hardcoding its own copy. */
+export function useVehicleClasses() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["pricing-rules"],
+    queryFn: api.getPricingRules,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const vehicleClasses = (data ?? [])
+    .filter((r): r is typeof r & { vehicleClass: string; name: string } =>
+      !!r.isActive && !!r.vehicleClass && !!r.name)
+    .map((r) => ({ value: r.vehicleClass, label: r.name }));
+
+  return { vehicleClasses, isLoading };
+}

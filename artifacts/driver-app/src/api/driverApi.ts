@@ -10,6 +10,7 @@ import type {
   DriverVehicle,
   FlightStatus,
   LoginResponse,
+  PricingRule,
   SupportTicket,
   TicketMessage,
   VehicleCatalogEntry,
@@ -278,6 +279,14 @@ export function deleteDriverVehicle(driverId: number, vehicleId: number): Promis
   return customFetch<void>(`/drivers/${driverId}/vehicles/${vehicleId}`, {
     method: "DELETE",
   });
+}
+
+/** Live vehicle classes, same source of truth the web app's useVehicleClasses()
+ *  reads (admin-configurable pricing_rules) — the account/vehicle.tsx dropdown
+ *  used to be its own hardcoded 5-value list, independent of whatever admin
+ *  actually configured at /admin/pricing. */
+export function getPricingRules(): Promise<PricingRule[]> {
+  return customFetch<PricingRule[]>(`/pricing`);
 }
 
 export async function getVehicleCatalog(): Promise<VehicleCatalogEntry[]> {

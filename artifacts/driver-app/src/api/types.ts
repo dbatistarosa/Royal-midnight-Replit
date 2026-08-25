@@ -213,3 +213,12 @@ export interface VehicleCatalogEntry {
   minYear: number;
   vehicleTypes: string[];
 }
+
+/** Admin-configurable pricing_rules row — GET /pricing. Only the fields this
+ *  app actually reads; the endpoint returns more (rates, images, etc.). */
+export interface PricingRule {
+  id: number;
+  name: string | null;
+  vehicleClass: string | null;
+  isActive: boolean;
+}
