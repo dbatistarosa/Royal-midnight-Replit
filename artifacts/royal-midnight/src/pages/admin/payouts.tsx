@@ -3,7 +3,7 @@ import { PortalLayout } from "@/components/layout/PortalLayout";
 import {
   LayoutDashboard, Calendar, Users, Car, Map, DollarSign, Tag,
   MessageSquare, BarChart, Settings, Wallet, Loader2, Send,
-  CheckCircle, AlertTriangle, Pencil, X, ChevronLeft, ChevronRight, RefreshCw, Gift, Building2,
+  CheckCircle, AlertTriangle, Pencil, X, ChevronLeft, ChevronRight, RefreshCw, Gift, Building2, Eye, EyeOff,
 } from "lucide-react";
 import { format, startOfWeek, addWeeks, subWeeks } from "date-fns";
 import { API_BASE } from "@/lib/constants";
@@ -79,8 +79,33 @@ export default function AdminPayouts() {
   const [editDriver, setEditDriver] = useState<DriverPayout | null>(null);
   const [bankForm, setBankForm] = useState<BankForm>({ legalName: "", bankName: "", routingNumber: "", accountNumber: "", payoutEmail: "" });
   const [savingBank, setSavingBank] = useState(false);
+  // Full account/routing number, fetched on demand only when the operator is
+  // actually about to place a transfer — never bulk-loaded with the board.
+  const [revealedId, setRevealedId] = useState<number | null>(null);
+  const [revealedNumbers, setRevealedNumbers] = useState<{ accountNumber: string | null; routingNumber: string | null } | null>(null);
+  const [revealing, setRevealing] = useState<number | null>(null);
 
   const authHdr = token ? `Bearer ${token}` : "";
+
+  const handleReveal = async (driverId: number) => {
+    if (revealedId === driverId) {
+      setRevealedId(null);
+      setRevealedNumbers(null);
+      return;
+    }
+    setRevealing(driverId);
+    try {
+      const res = await fetch(`${API_BASE}/admin/drivers/${driverId}/bank/reveal`, { headers: { Authorization: authHdr } });
+      const data = await res.json() as { accountNumber?: string | null; routingNumber?: string | null; error?: string };
+      if (!res.ok) throw new Error(data.error || "Could not load bank details.");
+      setRevealedId(driverId);
+      setRevealedNumbers({ accountNumber: data.accountNumber ?? null, routingNumber: data.routingNumber ?? null });
+    } catch (err: unknown) {
+      toast({ title: "Error", description: err instanceof Error ? err.message : "Could not load bank details.", variant: "destructive" });
+    } finally {
+      setRevealing(null);
+    }
+  };
 
   const currentWeekStart = getMonday(addWeeks(new Date(), weekOffset));
 
@@ -323,15 +348,47 @@ export default function AdminPayouts() {
                       {driver.bankName ? (
                         <div>
                           <div className="text-sm">{driver.bankName}</div>
-                          {driver.routingNumber && (
-                            <div className="text-xs text-muted-foreground font-mono">
-                              Routing: {driver.routingNumber}
-                            </div>
+                          {revealedId === driver.driverId && revealedNumbers ? (
+                            <>
+                              {revealedNumbers.routingNumber && (
+                                <div className="text-xs text-amber-300 font-mono">
+                                  Routing: {revealedNumbers.routingNumber}
+                                </div>
+                              )}
+                              {revealedNumbers.accountNumber && (
+                                <div className="text-xs text-amber-300 font-mono">
+                                  Acct: {revealedNumbers.accountNumber}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {driver.routingNumber && (
+                                <div className="text-xs text-muted-foreground font-mono">
+                                  Routing: {driver.routingNumber}
+                                </div>
+                              )}
+                              {driver.accountLast4 && (
+                                <div className="text-xs text-muted-foreground font-mono">
+                                  Acct: ****{driver.accountLast4}
+                                </div>
+                              )}
+                            </>
                           )}
-                          {driver.accountLast4 && (
-                            <div className="text-xs text-muted-foreground font-mono">
-                              Acct: ****{driver.accountLast4}
-                            </div>
+                          {driver.hasBankDetails && (
+                            <button
+                              onClick={() => void handleReveal(driver.driverId)}
+                              disabled={revealing === driver.driverId}
+                              className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 mt-1 uppercase tracking-widest"
+                            >
+                              {revealing === driver.driverId ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : revealedId === driver.driverId ? (
+                                <><EyeOff className="w-3 h-3" /> Hide number</>
+                              ) : (
+                                <><Eye className="w-3 h-3" /> Show full number</>
+                              )}
+                            </button>
                           )}
                         </div>
                       ) : (

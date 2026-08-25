@@ -718,6 +718,70 @@ router.patch(
   },
 );
 
+/**
+ * GET /admin/drivers/:id/bank/reveal — the full, unmasked routing + account
+ * number, on demand only.
+ *
+ * Everywhere else (the payouts board, the weekly statement email) shows only
+ * the last four digits of the account number, deliberately — that was fine
+ * for confirming which account is on file, but it means the number that
+ * actually has to be typed into a bank's wire/ACH portal to pay a driver was
+ * nowhere in the product. This endpoint exists only to let the operator
+ * placing the transfer read the real number; it is never embedded in a list
+ * response or an email. Logged on every access (there is no separate audit
+ * log table yet, so req.log is the record) since this is the one place full
+ * account numbers leave encryption.
+ */
+router.get(
+  "/admin/drivers/:id/bank/reveal",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const id = parseInt(String(req.params["id"] ?? ""), 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid driver ID" });
+      return;
+    }
+    const [driver] = await db
+      .select({
+        payoutAccountNumber: driversTable.payoutAccountNumber,
+        payoutRoutingNumber: driversTable.payoutRoutingNumber,
+      })
+      .from(driversTable)
+      .where(eq(driversTable.id, id));
+    if (!driver) {
+      res.status(404).json({ error: "Driver not found" });
+      return;
+    }
+    if (!driver.payoutAccountNumber && !driver.payoutRoutingNumber) {
+      res.status(404).json({ error: "No bank details on file for this driver" });
+      return;
+    }
+    try {
+      const accountNumber = safeDecryptField(driver.payoutAccountNumber);
+      const routingNumber = safeDecryptField(driver.payoutRoutingNumber);
+      req.log.info(
+        { driverId: id, adminUserId: req.currentUser?.userId },
+        "payout_bank_details_revealed",
+      );
+      res.json({ accountNumber, routingNumber });
+    } catch (err) {
+      if (isFieldEncryptionConfigError(err)) {
+        res.status(503).json({
+          error:
+            "Could not decrypt bank details: field encryption is misconfigured on the server. " +
+            "Set FIELD_ENCRYPTION_KEY to a 64-character hex value in the deployment environment, then redeploy.",
+        });
+        return;
+      }
+      req.log.error(
+        { err: (err as Error).message, driverId: id },
+        "payout_field_decrypt_failed",
+      );
+      res.status(500).json({ error: "Could not decrypt bank details." });
+    }
+  },
+);
+
 // ─── Vehicle Catalog ────────────────────────────────────────────────────────
 
 // GET /admin/vehicle-catalog
