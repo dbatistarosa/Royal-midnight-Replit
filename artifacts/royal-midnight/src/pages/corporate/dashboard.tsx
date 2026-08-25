@@ -119,22 +119,24 @@ function CorporateDashboardInner() {
       ) : (
         <div className="space-y-3">
           {upcoming.slice(0, 5).map(b => (
-            <div key={b.id} className="bg-card border border-border p-5 flex flex-col sm:flex-row sm:items-center gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-xs font-mono text-muted-foreground">RM-{String(b.id).padStart(6, "0")}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_COLORS[b.status] ?? "bg-gray-500/10 text-gray-400 border-gray-500/20"}`}>
-                    {b.status.replace("_", " ").toUpperCase()}
-                  </span>
+            <Link key={b.id} href={`/corporate/bookings/${b.id}`}>
+              <div className="bg-card border border-border p-5 flex flex-col sm:flex-row sm:items-center gap-4 hover:bg-white/5 transition-colors cursor-pointer">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="text-xs font-mono text-muted-foreground">RM-{String(b.id).padStart(6, "0")}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_COLORS[b.status] ?? "bg-gray-500/10 text-gray-400 border-gray-500/20"}`}>
+                      {b.status.replace("_", " ").toUpperCase()}
+                    </span>
+                  </div>
+                  <p className="font-medium text-sm mb-1">{b.passengerName}</p>
+                  <p className="text-muted-foreground text-xs truncate">{b.pickupAddress} → {b.dropoffAddress}</p>
                 </div>
-                <p className="font-medium text-sm mb-1">{b.passengerName}</p>
-                <p className="text-muted-foreground text-xs truncate">{b.pickupAddress} → {b.dropoffAddress}</p>
+                <div className="sm:text-right shrink-0">
+                  <p className="text-xs text-muted-foreground">{format(new Date(b.pickupAt), "MMM d, yyyy")}</p>
+                  <p className="text-xs text-muted-foreground">{format(new Date(b.pickupAt), "h:mm a")}</p>
+                </div>
               </div>
-              <div className="sm:text-right shrink-0">
-                <p className="text-xs text-muted-foreground">{format(new Date(b.pickupAt), "MMM d, yyyy")}</p>
-                <p className="text-xs text-muted-foreground">{format(new Date(b.pickupAt), "h:mm a")}</p>
-              </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

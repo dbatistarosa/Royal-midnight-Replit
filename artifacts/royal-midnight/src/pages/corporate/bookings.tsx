@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/auth";
 import { API_BASE } from "@/lib/constants";
 import { format } from "date-fns";
 import { Loader2, LayoutDashboard, Plus, BookOpen, User, Car } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { STATUS_COLORS } from "@/lib/constants";
 import { corporateNavItems } from "@/config/portalNav";
@@ -34,6 +34,7 @@ const CLASS_LABELS: Record<string, string> = {
 
 function CorporateBookingsInner() {
   const { token, isAuthenticated } = useAuth();
+  const [, setLocation] = useLocation();
   const { vehicleClasses } = useVehicleClasses();
   const classLabel = (id: string) => vehicleClasses.find(vc => vc.id === id)?.name ?? CLASS_LABELS[id] ?? id;
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -114,7 +115,11 @@ function CorporateBookingsInner() {
               </thead>
               <tbody className="divide-y divide-border">
                 {filtered.map(b => (
-                  <tr key={b.id} className="hover:bg-white/5 transition-colors">
+                  <tr
+                    key={b.id}
+                    onClick={() => setLocation(`/corporate/bookings/${b.id}`)}
+                    className="hover:bg-white/5 transition-colors cursor-pointer"
+                  >
                     <td className="px-5 py-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
                       RM-{String(b.id).padStart(6, "0")}
                     </td>

@@ -61,6 +61,7 @@ import DriverVehicles from "@/pages/driver/vehicles";
 import CorporateDashboard from "@/pages/corporate/dashboard";
 import CorporateBook from "@/pages/corporate/book";
 import CorporateBookings from "@/pages/corporate/bookings";
+import CorporateBookingDetail from "@/pages/corporate/booking-detail";
 import CorporateProfile from "@/pages/corporate/profile";
 
 // Admin Portal
@@ -257,6 +258,9 @@ function Router() {
       </Route>
       <Route path="/corporate/bookings">
         <CorporateRoute component={CorporateBookings} />
+      </Route>
+      <Route path="/corporate/bookings/:id">
+        <CorporateRoute component={CorporateBookingDetail} />
       </Route>
       <Route path="/corporate/profile">
         <CorporateRoute component={CorporateProfile} />
