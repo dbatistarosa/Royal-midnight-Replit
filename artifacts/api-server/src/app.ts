@@ -118,7 +118,18 @@ app.use(
       ) {
         callback(null, true);
       } else {
-        callback(new Error(`Origin "${requestOrigin}" not allowed`));
+        // Reporting an Error here (the previous behaviour) makes the `cors`
+        // package call next(err), which falls through past every route to the
+        // generic handler at the bottom of this file and answers with a flat
+        // 500 "Internal server error" — indistinguishable, from the browser,
+        // from a real server fault. That confusing 500 on login/register/
+        // booking is exactly what's happened each time a domain or subdomain
+        // variant wasn't yet in ALLOWED_ORIGINS. Passing `false` instead tells
+        // `cors` to just omit the Access-Control-Allow-Origin header and move
+        // on — the browser's own same-origin policy then blocks the response
+        // from being read, with no server-side error at all.
+        logger.warn({ origin: requestOrigin }, "cors_origin_rejected");
+        callback(null, false);
       }
     },
     credentials: true,

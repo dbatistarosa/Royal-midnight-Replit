@@ -26,14 +26,25 @@ return {current, ttl}
  * "maps", "quote" etc. never collide on the same client key.
  */
 export class RedisRateLimitStore implements Store {
-  // Named keyPrefix, not prefix: express-rate-limit's own Store type declares
-  // an optional public `prefix?: string`, and a private field of the same
-  // name makes this class structurally incompatible with that interface.
-  private readonly keyPrefix: string;
+  // Public on purpose: express-rate-limit's own anti-double-count guard
+  // (checks.singleCount) reads store.prefix specifically to tell apart two
+  // instances of the same store class that happen to see the same client key
+  // in one request — exactly our situation, since every route passes through
+  // globalLimiter() plus its own route-specific limiter, both backed by this
+  // class. Without a public prefix here, every instance looked identical to
+  // that guard, so the second limiter's increment() on a shared key (usually
+  // the caller's IP) was flagged as a duplicate and thrown as
+  // ERR_ERL_DOUBLE_COUNT, which Express turned into a flat 500 on login,
+  // register, quote, booking, autocomplete and promo-validate the moment
+  // Redis went live. A prior version of this class named the field
+  // `keyPrefix` specifically to dodge that check by staying private — that
+  // avoided a TS conflict but silently defeated the exact protection the
+  // library provides.
+  readonly prefix: string;
   private windowMs = 60_000;
 
-  constructor(keyPrefix: string) {
-    this.keyPrefix = keyPrefix;
+  constructor(prefix: string) {
+    this.prefix = prefix;
   }
 
   init(options: Options): void {
@@ -41,7 +52,7 @@ export class RedisRateLimitStore implements Store {
   }
 
   private key(key: string): string {
-    return `rl:${this.keyPrefix}:${key}`;
+    return `rl:${this.prefix}:${key}`;
   }
 
   async increment(key: string): Promise<ClientRateLimitInfo> {

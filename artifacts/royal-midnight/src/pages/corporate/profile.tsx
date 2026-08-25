@@ -61,8 +61,8 @@ function CorporateProfileInner() {
           <h2 className="font-serif text-lg border-b border-border pb-4 mb-4">Billing</h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
             Your account is set up for corporate billing. All trips are billed monthly to your account. For billing inquiries, contact us at{" "}
-            <a href="mailto:billing@royalmidnight.com" className="text-primary hover:text-primary/80 transition-colors">
-              billing@royalmidnight.com
+            <a href="mailto:support@royalmidnight.com" className="text-primary hover:text-primary/80 transition-colors">
+              support@royalmidnight.com
             </a>
             .
           </p>
@@ -72,12 +72,12 @@ function CorporateProfileInner() {
           <h2 className="font-serif text-lg border-b border-border pb-4 mb-4">Support</h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
             For account changes, password resets, or corporate inquiries, contact your Royal Midnight account manager at{" "}
-            <a href="mailto:corporate@royalmidnight.com" className="text-primary hover:text-primary/80 transition-colors">
-              corporate@royalmidnight.com
+            <a href="mailto:support@royalmidnight.com" className="text-primary hover:text-primary/80 transition-colors">
+              support@royalmidnight.com
             </a>
             {" "}or call{" "}
-            <a href="tel:+13055550100" className="text-primary hover:text-primary/80 transition-colors">
-              (305) 555-0100
+            <a href="tel:+17282304531" className="text-primary hover:text-primary/80 transition-colors">
+              +1 (728) 230-4531
             </a>
             .
           </p>

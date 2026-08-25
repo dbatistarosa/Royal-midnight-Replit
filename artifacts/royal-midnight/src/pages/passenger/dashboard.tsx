@@ -91,7 +91,11 @@ function PassengerDashboardInner() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-8 sm:mb-12">
+      {/* A third "Loyalty Status: Gold" tile used to sit here, hardcoded for
+          every passenger regardless of ride history — there is no loyalty
+          program behind it. Removed rather than left as a promise the product
+          doesn't keep; re-add once real tiers exist. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-8 sm:mb-12">
         <div className="bg-card border border-border rounded-lg p-6">
           <h3 className="text-muted-foreground text-sm font-medium mb-2">Total Rides</h3>
           <div className="text-3xl font-serif text-foreground">{bookings?.length || 0}</div>
@@ -99,10 +103,6 @@ function PassengerDashboardInner() {
         <div className="bg-card border border-border rounded-lg p-6">
           <h3 className="text-muted-foreground text-sm font-medium mb-2">Upcoming Rides</h3>
           <div className="text-3xl font-serif text-foreground">{upcomingBookings.length}</div>
-        </div>
-        <div className="bg-card border border-border rounded-lg p-6">
-          <h3 className="text-muted-foreground text-sm font-medium mb-2">Loyalty Status</h3>
-          <div className="text-3xl font-serif text-primary">Gold</div>
         </div>
       </div>
 

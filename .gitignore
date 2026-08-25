@@ -63,6 +63,11 @@ Thumbs.db
 *.pfx
 !lib/db/certs/supabase-prod-ca-2021.crt
 
+# GCP service-account credentials — GOOGLE_APPLICATION_CREDENTIALS_JSON is set
+# as an env var (see .env.example), never as a file in the repo.
+credentials.json
+service-account*.json
+
 # Agent skills installed with `npx skills add` — tooling for whoever is working
 # on the repo, not part of the product.
 .agents/
