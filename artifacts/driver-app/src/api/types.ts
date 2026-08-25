@@ -221,4 +221,9 @@ export interface PricingRule {
   name: string | null;
   vehicleClass: string | null;
   isActive: boolean;
+  /** Null/unset marks a fare-only rule (e.g. an airport surcharge row that
+   *  happens to have vehicleClass set) -- not a real customer-facing class.
+   *  Matches the web app's useVehicleClasses() filter (artifacts/royal-midnight
+   *  /src/hooks/useVehicleClasses.ts). */
+  passengers: number | null;
 }

@@ -24,7 +24,7 @@ export default function EarningsScreen() {
 
   const { data: earnings } = useDriverEarnings(driverId, range);
 
-  const maxDaily = Math.max(1, ...(earnings?.recentPayouts.map((p) => p.amount) ?? [1]));
+  const maxDaily = Math.max(1, ...(earnings?.recentPayouts?.map((p) => p.amount) ?? [1]));
 
   return (
     <ScreenContainer>

@@ -47,7 +47,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
-    await SecureStore.deleteItemAsync(STORAGE_KEY);
+    // Clear in-memory state regardless of whether the delete succeeds --
+    // every caller invokes this directly with no try/catch of its own, so a
+    // thrown SecureStore error used to leave a driver who tapped "Log Out"
+    // still logged in with no error shown. A stale stored value left behind
+    // by a failed delete is harmless; it's overwritten on the next login.
+    try {
+      await SecureStore.deleteItemAsync(STORAGE_KEY);
+    } catch {
+      // ignore — see above
+    }
     set({ user: null, token: null, driverId: null });
   },
 }));

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Linking, Text, View } from "react-native";
+import { Linking, Platform, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -25,26 +25,47 @@ const STEP_LABELS: Record<string, string> = {
 };
 
 function callPassenger(phone: string) {
-  Linking.openURL(`tel:${phone}`);
+  Linking.openURL(`tel:${phone}`).catch(() => {});
 }
 
+// Platform.OS branch, not a .catch() fallback: Linking.openURL resolves for
+// any https:// URL as long as some browser can open it, which is true on
+// virtually every Android device -- the Apple Maps URL "succeeds" by opening
+// a webpage instead of failing over to Google Maps, so the fallback never
+// actually ran on the platform this app ships on.
 function openNavigation(address: string) {
   const encoded = encodeURIComponent(address);
-  Linking.openURL(`https://maps.apple.com/?daddr=${encoded}`).catch(() =>
-    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encoded}`),
-  );
+  const url =
+    Platform.OS === "ios"
+      ? `https://maps.apple.com/?daddr=${encoded}`
+      : `https://www.google.com/maps/dir/?api=1&destination=${encoded}`;
+  Linking.openURL(url).catch(() => {});
 }
 
 export default function TripScreen() {
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
   const id = Number(bookingId);
-  const { data: booking } = useBooking(id);
+  const { data: booking, isError, refetch, isRefetching } = useBooking(id);
   const checklist = useTripChecklist(id);
   const onWay = useTripOnWay(id);
   const onLocation = useTripOnLocation(id);
   const start = useTripStart(id);
   const complete = useTripComplete(id);
   const [error, setError] = useState<string | null>(null);
+
+  // isError, not just "!booking": without this, a failed fetch (network blip,
+  // a stale bookingId) looked identical to "still loading" forever -- on the
+  // one screen that advances an active, paying trip through its stages.
+  if (isError) {
+    return (
+      <ScreenContainer scroll={false}>
+        <View className="flex-1 items-center justify-center px-4">
+          <Text className="text-danger text-sm mb-4 text-center">Could not load this trip. Check your connection.</Text>
+          <GoldButton label="Retry" variant="outline" onPress={() => void refetch()} loading={isRefetching} />
+        </View>
+      </ScreenContainer>
+    );
+  }
 
   if (!booking) {
     return (

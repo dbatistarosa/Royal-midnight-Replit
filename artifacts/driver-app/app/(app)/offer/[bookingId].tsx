@@ -14,7 +14,7 @@ const OFFER_WINDOW_SECONDS = 25;
 export default function OfferScreen() {
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
   const id = Number(bookingId);
-  const { data: booking, isLoading } = useBooking(id);
+  const { data: booking, isLoading, isError, refetch, isRefetching } = useBooking(id);
   const acceptBooking = useAcceptBooking();
   const driverId = useAuthStore((s) => s.driverId);
   const { data: vehicles } = useDriverVehicles(driverId);
@@ -22,7 +22,12 @@ export default function OfferScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showVehiclePicker, setShowVehiclePicker] = useState(false);
 
+  // Paused while an accept is in flight: without this, the countdown could
+  // hit 0 and call router.back() right as acceptWithVehicle's still-pending
+  // mutation was about to router.replace() to the trip screen on top of
+  // whatever the pop-back revealed underneath -- a flicker/double-navigation.
   useEffect(() => {
+    if (acceptBooking.isPending) return;
     const interval = setInterval(() => {
       setSecondsLeft((s) => {
         if (s <= 1) {
@@ -33,7 +38,7 @@ export default function OfferScreen() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [acceptBooking.isPending]);
 
   async function acceptWithVehicle(vehicleId?: number) {
     setError(null);
@@ -56,6 +61,17 @@ export default function OfferScreen() {
       return;
     }
     void acceptWithVehicle(vehicles?.[0]?.id);
+  }
+
+  if (isError) {
+    return (
+      <ScreenContainer scroll={false}>
+        <View className="flex-1 items-center justify-center px-4">
+          <Text className="text-danger text-sm mb-4 text-center">Could not load this offer. Check your connection.</Text>
+          <GoldButton label="Retry" variant="outline" onPress={() => void refetch()} loading={isRefetching} />
+        </View>
+      </ScreenContainer>
+    );
   }
 
   if (isLoading || !booking) {

@@ -34,6 +34,7 @@ export default function NewTicketScreen() {
           <TextInput
             value={subject}
             onChangeText={setSubject}
+            placeholder="Brief summary of the issue"
             placeholderTextColor="#9ca3af"
             className="rounded-md border border-border bg-surface px-4 py-3 text-white"
           />
@@ -45,6 +46,7 @@ export default function NewTicketScreen() {
             onChangeText={setMessage}
             multiline
             numberOfLines={6}
+            placeholder="What happened? Include the trip or screen involved if relevant."
             placeholderTextColor="#9ca3af"
             className="rounded-md border border-border bg-surface px-4 py-3 text-white"
             style={{ minHeight: 120, textAlignVertical: "top" }}

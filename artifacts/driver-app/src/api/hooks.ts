@@ -260,8 +260,13 @@ export function useVehicleClasses() {
   });
 
   const vehicleClasses = (data ?? [])
+    // passengers != null, matching the web app's equivalent filter: a rule
+    // with vehicleClass set but passengers left empty is fare-only (e.g. an
+    // airport surcharge row), not a real selectable class. Without this, a
+    // driver registering a vehicle could pick a non-bookable pricing row as
+    // their vehicleClass.
     .filter((r): r is typeof r & { vehicleClass: string; name: string } =>
-      !!r.isActive && !!r.vehicleClass && !!r.name)
+      !!r.isActive && !!r.vehicleClass && !!r.name && r.passengers != null)
     .map((r) => ({ value: r.vehicleClass, label: r.name }));
 
   return { vehicleClasses, isLoading };
