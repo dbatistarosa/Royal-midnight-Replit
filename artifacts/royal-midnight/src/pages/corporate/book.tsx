@@ -137,7 +137,7 @@ function CorporateBookInner() {
         headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({
           passengerName: form.passengerName,
-          passengerEmail: form.passengerEmail || user?.email || "corporate@royalmidnight.com",
+          passengerEmail: form.passengerEmail || user?.email || "support@royalmidnight.com",
           passengerPhone: form.passengerPhone || user?.phone || "N/A",
           pickupAddress: form.pickupAddress,
           dropoffAddress: form.dropoffAddress,
