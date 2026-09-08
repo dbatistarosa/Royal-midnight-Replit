@@ -61,7 +61,7 @@ Dark midnight/champagne gold branding. Playfair Display headings, Inter body. No
 ### DB Commands
 ```bash
 pnpm --filter @workspace/db run push   # Push schema changes
-pnpm --filter @workspace/db run seed   # Seed sample data
+pnpm db:check   # Verify versioned migrations (requires DATABASE_URL)
 ```
 
 ## API Routes
@@ -165,8 +165,8 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - `artifacts/mockup-sandbox: Component Preview Server` — Canvas component previews
 
 ## Auth System
-- Custom SHA-256 password hashing with salt "royal_midnight_salt"
-- Token-based auth (SHA-256 of userId + timestamp) stored in localStorage
+- Passwords use bcrypt; legacy hashes are upgraded during login.
+- Random session tokens are stored hashed in PostgreSQL; web uses HttpOnly cookies and mobile uses SecureStore.
 - `AuthProvider` context (`src/contexts/auth.tsx`) wraps the entire app
 - `AuthGuard` component redirects unauthenticated users to /auth/login
 - Role-based access: passenger, driver, admin, corporate
@@ -175,14 +175,8 @@ pnpm --filter @workspace/db run seed   # Seed sample data
 - Corporate accounts created by admin only via POST /api/auth/corporate-register
 - Navbar shows "SIGN IN" button when logged out; user name dropdown when logged in
 
-## Seed Data
-- 5 vehicles (standard through van)
-- 3 active drivers (Marcus Williams, Sofia Rodriguez, James Carter)
-- 6 bookings in various statuses
-- 5 pricing rules (one per vehicle class)
-- 3 promo codes (ROYAL10/10% off, WELCOME25/$25 off, CORPORATE15/15% off)
-- Test passenger: alex@example.com / password123 (userId=1, role=passenger)
-- Test admin: admin@royalmidnight.com / admin2024! (userId=2, role=admin)
+## Initial Data
+No accounts or sample data are created at startup. See docs/OPERATIONS.md.
 
 ## Booking Flow Features
 - 3-step booking: Route & Vehicle → Passenger Details → Review & Confirm

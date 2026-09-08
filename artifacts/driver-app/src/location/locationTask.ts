@@ -2,6 +2,7 @@ import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { useAuthStore } from "@/auth/store";
 import { patchDriverLocation } from "@/api/driverApi";
+import { configureApiClient } from "@/api/client";
 
 export const LOCATION_TASK_NAME = "royal-midnight-driver-location";
 
@@ -14,15 +15,23 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
     console.error("[location-task] error:", error.message);
     return;
   }
+  if (!useAuthStore.getState().isHydrated)
+    await useAuthStore.getState().hydrate();
+  configureApiClient();
   const { driverId } = useAuthStore.getState();
   if (!driverId) return;
 
-  const locations = (data as { locations?: Location.LocationObject[] })?.locations;
+  const locations = (data as { locations?: Location.LocationObject[] })
+    ?.locations;
   const latest = locations?.[locations.length - 1];
   if (!latest) return;
 
   try {
-    await patchDriverLocation(driverId, latest.coords.latitude, latest.coords.longitude);
+    await patchDriverLocation(
+      driverId,
+      latest.coords.latitude,
+      latest.coords.longitude,
+    );
   } catch (err) {
     console.error("[location-task] failed to report location:", err);
   }
@@ -30,17 +39,24 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 
 const LOCATION_INTERVAL_MS = 30_000;
 
-export async function startLocationSharing(): Promise<{ ok: boolean; reason?: string }> {
-  const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+export async function startLocationSharing(): Promise<{
+  ok: boolean;
+  reason?: string;
+}> {
+  const { status: fgStatus } =
+    await Location.requestForegroundPermissionsAsync();
   if (fgStatus !== "granted") {
     return { ok: false, reason: "foreground_denied" };
   }
 
   // Only ask for background access at the moment the driver actually goes
   // online — never pre-emptively on first launch.
-  const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+  const { status: bgStatus } =
+    await Location.requestBackgroundPermissionsAsync();
 
-  const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => false);
+  const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(
+    LOCATION_TASK_NAME,
+  ).catch(() => false);
   if (!alreadyStarted) {
     await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
       accuracy: Location.Accuracy.High,
@@ -54,11 +70,16 @@ export async function startLocationSharing(): Promise<{ ok: boolean; reason?: st
     });
   }
 
-  return { ok: true, reason: bgStatus !== "granted" ? "background_not_granted" : undefined };
+  return {
+    ok: true,
+    reason: bgStatus !== "granted" ? "background_not_granted" : undefined,
+  };
 }
 
 export async function stopLocationSharing(): Promise<void> {
-  const started = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => false);
+  const started = await Location.hasStartedLocationUpdatesAsync(
+    LOCATION_TASK_NAME,
+  ).catch(() => false);
   if (started) {
     await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
   }

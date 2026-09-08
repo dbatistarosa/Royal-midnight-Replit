@@ -4,7 +4,13 @@ import Stripe from "stripe";
 import { bookingAction, withLock, rows, setActor } from "../lib/durability.js";
 import { tripConflicts, vehicleFits } from "../lib/scheduling.js";
 import { z } from "zod/v4";
-import { db, bookingsTable, bookingExtrasTable, vehiclesTable, driverVehiclesTable } from "@workspace/db";
+import {
+  db,
+  bookingsTable,
+  bookingExtrasTable,
+  vehiclesTable,
+  driverVehiclesTable,
+} from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 import { computeQuote } from "./quote.js";
 import { sendBookingUpdatedPassenger } from "../lib/mailer.js";
@@ -36,30 +42,39 @@ const router: IRouter = Router();
 
 /** Fields whose value feeds into computeQuote(). Changing any of them changes
  *  what the ride costs, which is why they are locked once money has moved. */
-const PRICE_AFFECTING = ["pickupAddress", "dropoffAddress", "vehicleClass", "charterMode", "charterHours", "waypoints"] as const;
+const PRICE_AFFECTING = [
+  "pickupAddress",
+  "dropoffAddress",
+  "vehicleClass",
+  "charterMode",
+  "charterHours",
+  "waypoints",
+] as const;
 
-const EditBookingBody = z.object({
-  // Contact / manifest — never affects price.
-  passengerName: z.string().trim().min(1).max(200).optional(),
-  passengerEmail: z.string().trim().email().max(320).optional(),
-  passengerPhone: z.string().trim().min(3).max(40).optional(),
-  flightNumber: z.string().trim().max(40).nullable().optional(),
-  specialRequests: z.string().trim().max(2000).nullable().optional(),
-  passengers: z.number().int().min(1).max(20).optional(),
-  luggageCount: z.number().int().min(0).max(50).optional(),
-  // Scheduling. Not price-affecting: the fare has no time-of-day component, and
-  // the lead-time rule is already waived for admins.
-  pickupAt: z.string().datetime().optional(),
-  // Itinerary and vehicle — price-affecting.
-  pickupAddress: z.string().trim().min(1).max(500).optional(),
-  dropoffAddress: z.string().trim().min(1).max(500).optional(),
-  vehicleClass: z.string().trim().min(1).max(50).optional(),
-  charterMode: z.enum(["route", "hourly"]).optional(),
-  charterHours: z.number().int().min(1).max(24).nullable().optional(),
-  waypoints: z.array(z.string().trim().max(500)).max(10).optional(),
-  // Whether to email the passenger a diff of what changed.
-  notifyPassenger: z.boolean().optional(),
-}).strict();
+const EditBookingBody = z
+  .object({
+    // Contact / manifest — never affects price.
+    passengerName: z.string().trim().min(1).max(200).optional(),
+    passengerEmail: z.string().trim().email().max(320).optional(),
+    passengerPhone: z.string().trim().min(3).max(40).optional(),
+    flightNumber: z.string().trim().max(40).nullable().optional(),
+    specialRequests: z.string().trim().max(2000).nullable().optional(),
+    passengers: z.number().int().min(1).max(20).optional(),
+    luggageCount: z.number().int().min(0).max(50).optional(),
+    // Scheduling. Not price-affecting: the fare has no time-of-day component, and
+    // the lead-time rule is already waived for admins.
+    pickupAt: z.string().datetime().optional(),
+    // Itinerary and vehicle — price-affecting.
+    pickupAddress: z.string().trim().min(1).max(500).optional(),
+    dropoffAddress: z.string().trim().min(1).max(500).optional(),
+    vehicleClass: z.string().trim().min(1).max(50).optional(),
+    charterMode: z.enum(["route", "hourly"]).optional(),
+    charterHours: z.number().int().min(1).max(24).nullable().optional(),
+    waypoints: z.array(z.string().trim().max(500)).max(10).optional(),
+    // Whether to email the passenger a diff of what changed.
+    notifyPassenger: z.boolean().optional(),
+  })
+  .strict();
 
 /**
  * Has money moved on this booking?
@@ -74,14 +89,20 @@ export function isPaidBooking(b: typeof bookingsTable.$inferSelect): boolean {
   if (b.authorizedAt != null) return true;
   if (b.invoicedAt != null) return true;
   if (b.status === "completed") return true;
-  return b.stripePaymentIntentId != null && b.status !== "awaiting_payment" && b.status !== "cancelled";
+  return (
+    b.stripePaymentIntentId != null &&
+    b.status !== "awaiting_payment" &&
+    b.status !== "cancelled"
+  );
 }
 
 function parseWaypoints(stored: string | null): string[] {
   if (!stored) return [];
   try {
     const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed.filter((w): w is string => typeof w === "string") : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((w): w is string => typeof w === "string")
+      : [];
   } catch {
     return [];
   }
@@ -91,237 +112,402 @@ const money = (v: string | number | null | undefined) =>
   v == null ? "—" : `$${Number(v).toFixed(2)}`;
 
 const when = (iso: string | Date) =>
-  new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" });
-
-router.patch("/admin/bookings/:id/details", requireAdmin, bookingAction(async (req, res): Promise<void> => {
-  const id = parseInt(String(req.params["id"] ?? ""), 10);
-  if (!Number.isFinite(id) || id <= 0) {
-    res.status(400).json({ error: "Invalid booking id" });
-    return;
-  }
-
-  const parsed = EditBookingBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: z.prettifyError(parsed.error) });
-    return;
-  }
-  const body = parsed.data;
-
-  const [before] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
-  if (!before) {
-    res.status(404).json({ error: "Booking not found" });
-    return;
-  }
-  if (["cancelled", "completed", "in_progress"].includes(before.status)) {
-    res.status(409).json({error:"This trip can no longer be edited."}); return;
-  }
-
-  // Which price-affecting fields is the caller actually changing? Sending a
-  // field back unchanged is what a form does on every submit, and must not be
-  // mistaken for an attempt to change it.
-  const currentWaypoints = parseWaypoints(before.waypoints);
-  const changedPriceFields = PRICE_AFFECTING.filter(field => {
-    const incoming = body[field];
-    if (incoming === undefined) return false;
-    if (field === "waypoints") {
-      return JSON.stringify(incoming) !== JSON.stringify(currentWaypoints);
-    }
-    const currentValue = before[field as keyof typeof before];
-    return String(incoming ?? "") !== String(currentValue ?? "");
+  new Date(iso).toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    dateStyle: "medium",
+    timeStyle: "short",
   });
 
-  if (changedPriceFields.length > 0 && isPaidBooking(before)) {
-    res.status(409).json({
-      error:
-        "This reservation has already been paid, so the fields that change the fare are locked. " +
-        "Cancel and rebook if the trip itself has to change — everything else on this form can still be edited.",
-      code: "PAID_BOOKING_PRICE_LOCKED",
-      lockedFields: changedPriceFields,
-    });
-    return;
-  }
-
-  const updates: Partial<typeof bookingsTable.$inferInsert> = {};
-  const changes: Array<{ label: string; from: string; to: string }> = [];
-  const note = (label: string, from: unknown, to: unknown) => {
-    const f = String(from ?? "—");
-    const t = String(to ?? "—");
-    if (f !== t) changes.push({ label, from: f, to: t });
-  };
-
-  if (body.passengerName !== undefined) { note("Passenger", before.passengerName, body.passengerName); updates.passengerName = body.passengerName; }
-  if (body.passengerEmail !== undefined) { note("Email", before.passengerEmail, body.passengerEmail); updates.passengerEmail = body.passengerEmail; }
-  if (body.passengerPhone !== undefined) { note("Phone", before.passengerPhone, body.passengerPhone); updates.passengerPhone = body.passengerPhone; }
-  if (body.flightNumber !== undefined) { note("Flight", before.flightNumber, body.flightNumber); updates.flightNumber = body.flightNumber || null; }
-  if (body.specialRequests !== undefined) { note("Special requests", before.specialRequests, body.specialRequests); updates.specialRequests = body.specialRequests || null; }
-  if (body.passengers !== undefined) { note("Passengers", before.passengers, body.passengers); updates.passengers = body.passengers; }
-  if (body.luggageCount !== undefined) { note("Luggage", before.luggageCount, body.luggageCount); updates.luggageCount = body.luggageCount; }
-
-  if (body.pickupAt !== undefined) {
-    const next = new Date(body.pickupAt);
-    if (Number.isNaN(next.getTime())) {
-      res.status(400).json({ error: "pickupAt is not a valid date" });
+router.patch(
+  "/admin/bookings/:id/details",
+  requireAdmin,
+  bookingAction(async (req, res): Promise<void> => {
+    const id = parseInt(String(req.params["id"] ?? ""), 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid booking id" });
       return;
     }
-    if (next.getTime() !== before.pickupAt.getTime()) {
-      changes.push({ label: "Date & time", from: when(before.pickupAt), to: when(next) });
-    }
-    updates.pickupAt = next;
-  }
 
-  if (body.pickupAddress !== undefined) { note("Pick-up", before.pickupAddress, body.pickupAddress); updates.pickupAddress = body.pickupAddress; }
-  if (body.dropoffAddress !== undefined) { note("Drop-off", before.dropoffAddress, body.dropoffAddress); updates.dropoffAddress = body.dropoffAddress; }
-  if (body.vehicleClass !== undefined) { note("Vehicle", before.vehicleClass, body.vehicleClass); updates.vehicleClass = body.vehicleClass; }
-  if (body.charterMode !== undefined) { note("Charter mode", before.charterMode, body.charterMode); updates.charterMode = body.charterMode; }
-  if (body.charterHours !== undefined) { note("Charter hours", before.charterHours, body.charterHours); updates.charterHours = body.charterHours; }
-  if (body.waypoints !== undefined) {
-    const cleaned = body.waypoints.filter(w => w.trim());
-    if (JSON.stringify(cleaned) !== JSON.stringify(currentWaypoints)) {
-      changes.push({ label: "Stops", from: currentWaypoints.join(" → ") || "none", to: cleaned.join(" → ") || "none" });
-    }
-    updates.waypoints = cleaned.length ? JSON.stringify(cleaned) : null;
-  }
-
-  // Re-price when the trip itself moved. Only reachable on unpaid bookings —
-  // the paid case returned 409 above.
-  let repricedFrom: number | null = null;
-  let breakdown: {taxAmount:number;cardProcessingFee:number;airportFee:number;extrasTotal:number}|null=null;
-  if (changedPriceFields.length > 0) {
-    const [invoice] = rows<{stripe_invoice_id:string|null}>(await db.execute(sql`SELECT stripe_invoice_id FROM bookings WHERE id=${id}`));
-    if (invoice?.stripe_invoice_id) {res.status(409).json({error:"Void the existing invoice before changing the fare."});return;}
-    const extras=await db.select().from(bookingExtrasTable).where(eq(bookingExtrasTable.bookingId,id));
-    const quoteOutcome = await computeQuote({
-      extrasTotal:extras.reduce((sum,extra)=>sum+Number(extra.priceAtBooking)*extra.quantity,0),
-      pickupAddress: body.pickupAddress ?? before.pickupAddress,
-      dropoffAddress: body.dropoffAddress ?? before.dropoffAddress,
-      vehicleClass: body.vehicleClass ?? before.vehicleClass,
-      pickupAt: (updates.pickupAt ?? before.pickupAt).toISOString(),
-      waypoints: body.waypoints ?? currentWaypoints,
-      charterMode: body.charterMode ?? before.charterMode ?? "route",
-      charterHours: (body.charterHours ?? before.charterHours) ?? undefined,
-      userId: before.userId ?? undefined,
-      // An admin editing an existing reservation is subject to neither rule,
-      // for the same reasons they are exempt when creating one.
-      skipLeadTimeCheck: true,
-      skipCharterMinimumCheck: true,
-    });
-    if (!quoteOutcome.ok) {
-      res.status(quoteOutcome.status).json(quoteOutcome.body);
+    const parsed = EditBookingBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: z.prettifyError(parsed.error) });
       return;
     }
-    const q = quoteOutcome.quote;
-    breakdown=q;
+    const body = parsed.data;
 
-    // The discount already applied to this booking is preserved rather than
-    // re-evaluated: the promo was accepted at booking time and re-checking it
-    // could fail now (expired, usage exhausted) and quietly raise the price on
-    // a customer who did nothing wrong.
-    const discount = before.discountAmount != null ? parseFloat(before.discountAmount) : 0;
-    const nextPrice = Math.max(0, Math.round((q.totalWithTax - discount) * 100) / 100);
-
-    repricedFrom = parseFloat(String(before.priceQuoted));
-    note("Total", money(before.priceQuoted), money(nextPrice));
-
-    updates.priceQuoted = String(nextPrice);
-    // Driver commission base: base fare + billable miles (+surge) only —
-    // never the airport fee, which is company-side. `q.subtotal` (used here
-    // until now) is subtotalBeforeZone-plus-surge-minus-corporate-discount,
-    // and subtotalBeforeZone itself already folds in the airport fee, so an
-    // admin re-pricing an unpaid airport trip was silently inflating the
-    // driver's commission base by the airport fee every time. Mirrors the
-    // same formula bookings.ts uses when a booking is first created.
-    updates.fareSubtotal = String(
-      q.fixedRoutePrice ??
-        Math.round((q.baseFare + q.distanceCharge + q.surgeAdjustment) * 100) / 100,
-    );
-    updates.estimatedDistanceMiles = String(q.estimatedDistance);
-    updates.estimatedDurationMinutes = Math.round(q.estimatedDuration);
-  }
-
-  if (Object.keys(updates).length === 0) {
-    res.status(400).json({ error: "No fields to update" });
-    return;
-  }
-
-  updates.updatedAt = new Date();
-
-  const updated = await withLock('driver-schedule:'+(before.driverId??'unassigned'),async tx=>{
-    await setActor(tx,req.currentUser!.userId);
-    const candidate={...before,...updates};
-    if(before.driverId){
-      const otherTrips=await tx.select().from(bookingsTable).where(and(eq(bookingsTable.driverId,before.driverId),ne(bookingsTable.id,id),inArray(bookingsTable.status,['pending','authorized','confirmed','on_way','on_location','in_progress'])));
-      if(tripConflicts(candidate,otherTrips))throw Object.assign(new Error('Driver schedule conflict'),{status:409});
+    const [before] = await db
+      .select()
+      .from(bookingsTable)
+      .where(eq(bookingsTable.id, id));
+    if (!before) {
+      res.status(404).json({ error: "Booking not found" });
+      return;
     }
-    if(before.selectedVehicleId){
-      const [vehicle]=await tx.select().from(driverVehiclesTable).where(eq(driverVehiclesTable.id,before.selectedVehicleId));
-      if(!vehicle||!vehicleFits(vehicle,candidate))throw Object.assign(new Error('Assigned vehicle does not fit this reservation'),{status:409});
-    }else if(before.vehicleId){
-      const [vehicle]=await tx.select().from(vehiclesTable).where(eq(vehiclesTable.id,before.vehicleId));
-      if(!vehicle||vehicle.vehicleClass!==candidate.vehicleClass||vehicle.capacity<candidate.passengers)throw Object.assign(new Error('Assigned vehicle does not fit this reservation'),{status:409});
+    if (["cancelled", "completed", "in_progress"].includes(before.status)) {
+      res.status(409).json({ error: "This trip can no longer be edited." });
+      return;
     }
-    if(breakdown&&before.stripePaymentIntentId){
-      if(!process.env.STRIPE_SECRET_KEY)throw new Error('Stripe is not configured');
-      const stripe=new Stripe(process.env.STRIPE_SECRET_KEY);
-      const intent=await stripe.paymentIntents.retrieve(before.stripePaymentIntentId);
-      if(['succeeded','processing','requires_capture'].includes(intent.status))throw Object.assign(new Error('Payment received or processing; fare changes are locked'),{status:409});
-      if(intent.status!=='canceled')await stripe.paymentIntents.cancel(intent.id,{}, {idempotencyKey:'reprice-cancel-'+intent.id});
-      // Keep the cancelled intent ID so the next checkout gets a new idempotency key.
-    }
-    const [saved]=await tx.update(bookingsTable).set(updates).where(and(eq(bookingsTable.id,id),eq(bookingsTable.status,before.status))).returning();
-    if(saved&&breakdown)await tx.execute(sql`UPDATE bookings SET tax_amount=${breakdown.taxAmount},card_fee=${breakdown.cardProcessingFee},airport_fee=${breakdown.airportFee},extras_total=${breakdown.extrasTotal} WHERE id=${id}`);
-    return saved;
-  });
 
-  if (!updated) {
-    res.status(404).json({ error: "Booking not found" });
-    return;
-  }
-
-  req.log.info(
-    { bookingId: id, adminUserId: req.currentUser?.userId, fields: Object.keys(updates), repriced: repricedFrom != null },
-    "admin_booking_edited",
-  );
-
-  const response = {
-    ok: true,
-    booking: {
-      ...updated,
-      priceQuoted: parseFloat(updated.priceQuoted ?? "0"),
-      pickupAt: updated.pickupAt.toISOString(),
-      createdAt: updated.createdAt.toISOString(),
-      updatedAt: updated.updatedAt.toISOString(),
-    },
-    changes,
-    repricedFrom,
-  };
-
-  // Fire-and-forget: the edit is already committed, and a mail failure must not
-  // make the admin think the save did not happen.
-  if (body.notifyPassenger && changes.length > 0) {
-    await (async () => {
-      try {
-        await sendBookingUpdatedPassenger(
-          {
-            id: updated.id,
-            passengerName: updated.passengerName,
-            passengerEmail: updated.passengerEmail,
-            pickupAddress: updated.pickupAddress,
-            dropoffAddress: updated.dropoffAddress,
-            pickupAt: updated.pickupAt.toISOString(),
-            vehicleClass: updated.vehicleClass,
-            passengers: updated.passengers,
-            priceQuoted: parseFloat(updated.priceQuoted ?? "0"),
-            flightNumber: updated.flightNumber,
-            specialRequests: updated.specialRequests,
-          },
-          changes,
-        );
-      } catch (err) {
-        req.log.error({ err: (err as Error).message, bookingId: id }, "booking_updated_email_failed");
+    // Which price-affecting fields is the caller actually changing? Sending a
+    // field back unchanged is what a form does on every submit, and must not be
+    // mistaken for an attempt to change it.
+    const currentWaypoints = parseWaypoints(before.waypoints);
+    const changedPriceFields = PRICE_AFFECTING.filter((field) => {
+      const incoming = body[field];
+      if (incoming === undefined) return false;
+      if (field === "waypoints") {
+        return JSON.stringify(incoming) !== JSON.stringify(currentWaypoints);
       }
-    })();
-  }
-  res.json(response);
-}));
+      const currentValue = before[field as keyof typeof before];
+      return String(incoming ?? "") !== String(currentValue ?? "");
+    });
+
+    if (changedPriceFields.length > 0 && isPaidBooking(before)) {
+      res.status(409).json({
+        error:
+          "This reservation has already been paid, so the fields that change the fare are locked. " +
+          "Cancel and rebook if the trip itself has to change — everything else on this form can still be edited.",
+        code: "PAID_BOOKING_PRICE_LOCKED",
+        lockedFields: changedPriceFields,
+      });
+      return;
+    }
+
+    const updates: Partial<typeof bookingsTable.$inferInsert> = {};
+    const changes: Array<{ label: string; from: string; to: string }> = [];
+    const note = (label: string, from: unknown, to: unknown) => {
+      const f = String(from ?? "—");
+      const t = String(to ?? "—");
+      if (f !== t) changes.push({ label, from: f, to: t });
+    };
+
+    if (body.passengerName !== undefined) {
+      note("Passenger", before.passengerName, body.passengerName);
+      updates.passengerName = body.passengerName;
+    }
+    if (body.passengerEmail !== undefined) {
+      note("Email", before.passengerEmail, body.passengerEmail);
+      updates.passengerEmail = body.passengerEmail;
+    }
+    if (body.passengerPhone !== undefined) {
+      note("Phone", before.passengerPhone, body.passengerPhone);
+      updates.passengerPhone = body.passengerPhone;
+    }
+    if (body.flightNumber !== undefined) {
+      note("Flight", before.flightNumber, body.flightNumber);
+      updates.flightNumber = body.flightNumber || null;
+    }
+    if (body.specialRequests !== undefined) {
+      note("Special requests", before.specialRequests, body.specialRequests);
+      updates.specialRequests = body.specialRequests || null;
+    }
+    if (body.passengers !== undefined) {
+      note("Passengers", before.passengers, body.passengers);
+      updates.passengers = body.passengers;
+    }
+    if (body.luggageCount !== undefined) {
+      note("Luggage", before.luggageCount, body.luggageCount);
+      updates.luggageCount = body.luggageCount;
+    }
+
+    if (body.pickupAt !== undefined) {
+      const next = new Date(body.pickupAt);
+      if (Number.isNaN(next.getTime())) {
+        res.status(400).json({ error: "pickupAt is not a valid date" });
+        return;
+      }
+      if (next.getTime() !== before.pickupAt.getTime()) {
+        changes.push({
+          label: "Date & time",
+          from: when(before.pickupAt),
+          to: when(next),
+        });
+      }
+      updates.pickupAt = next;
+    }
+
+    if (body.pickupAddress !== undefined) {
+      note("Pick-up", before.pickupAddress, body.pickupAddress);
+      updates.pickupAddress = body.pickupAddress;
+    }
+    if (body.dropoffAddress !== undefined) {
+      note("Drop-off", before.dropoffAddress, body.dropoffAddress);
+      updates.dropoffAddress = body.dropoffAddress;
+    }
+    if (body.vehicleClass !== undefined) {
+      note("Vehicle", before.vehicleClass, body.vehicleClass);
+      updates.vehicleClass = body.vehicleClass;
+    }
+    if (body.charterMode !== undefined) {
+      note("Charter mode", before.charterMode, body.charterMode);
+      updates.charterMode = body.charterMode;
+    }
+    if (body.charterHours !== undefined) {
+      note("Charter hours", before.charterHours, body.charterHours);
+      updates.charterHours = body.charterHours;
+    }
+    if (body.waypoints !== undefined) {
+      const cleaned = body.waypoints.filter((w) => w.trim());
+      if (JSON.stringify(cleaned) !== JSON.stringify(currentWaypoints)) {
+        changes.push({
+          label: "Stops",
+          from: currentWaypoints.join(" → ") || "none",
+          to: cleaned.join(" → ") || "none",
+        });
+      }
+      updates.waypoints = cleaned.length ? JSON.stringify(cleaned) : null;
+    }
+
+    // Re-price when the trip itself moved. Only reachable on unpaid bookings —
+    // the paid case returned 409 above.
+    let repricedFrom: number | null = null;
+    let breakdown: {
+      taxAmount: number;
+      cardProcessingFee: number;
+      airportFee: number;
+      extrasTotal: number;
+    } | null = null;
+    if (changedPriceFields.length > 0) {
+      const [invoice] = rows<{ stripe_invoice_id: string | null }>(
+        await db.execute(
+          sql`SELECT stripe_invoice_id FROM bookings WHERE id=${id}`,
+        ),
+      );
+      if (invoice?.stripe_invoice_id) {
+        res
+          .status(409)
+          .json({
+            error: "Void the existing invoice before changing the fare.",
+          });
+        return;
+      }
+      const extras = await db
+        .select()
+        .from(bookingExtrasTable)
+        .where(eq(bookingExtrasTable.bookingId, id));
+      const quoteOutcome = await computeQuote({
+        extrasTotal: extras.reduce(
+          (sum, extra) => sum + Number(extra.priceAtBooking) * extra.quantity,
+          0,
+        ),
+        pickupAddress: body.pickupAddress ?? before.pickupAddress,
+        dropoffAddress: body.dropoffAddress ?? before.dropoffAddress,
+        vehicleClass: body.vehicleClass ?? before.vehicleClass,
+        pickupAt: (updates.pickupAt ?? before.pickupAt).toISOString(),
+        waypoints: body.waypoints ?? currentWaypoints,
+        charterMode: body.charterMode ?? before.charterMode ?? "route",
+        charterHours: body.charterHours ?? before.charterHours ?? undefined,
+        userId: before.userId ?? undefined,
+        // An admin editing an existing reservation is subject to neither rule,
+        // for the same reasons they are exempt when creating one.
+        skipLeadTimeCheck: true,
+        skipCharterMinimumCheck: true,
+      });
+      if (!quoteOutcome.ok) {
+        res.status(quoteOutcome.status).json(quoteOutcome.body);
+        return;
+      }
+      const q = quoteOutcome.quote;
+      breakdown = q;
+
+      // The discount already applied to this booking is preserved rather than
+      // re-evaluated: the promo was accepted at booking time and re-checking it
+      // could fail now (expired, usage exhausted) and quietly raise the price on
+      // a customer who did nothing wrong.
+      const discount =
+        before.discountAmount != null ? parseFloat(before.discountAmount) : 0;
+      const nextPrice = Math.max(
+        0,
+        Math.round((q.totalWithTax - discount) * 100) / 100,
+      );
+
+      repricedFrom = parseFloat(String(before.priceQuoted));
+      note("Total", money(before.priceQuoted), money(nextPrice));
+
+      updates.priceQuoted = String(nextPrice);
+      // Driver commission base: base fare + billable miles (+surge) only —
+      // never the airport fee, which is company-side. `q.subtotal` (used here
+      // until now) is subtotalBeforeZone-plus-surge-minus-corporate-discount,
+      // and subtotalBeforeZone itself already folds in the airport fee, so an
+      // admin re-pricing an unpaid airport trip was silently inflating the
+      // driver's commission base by the airport fee every time. Mirrors the
+      // same formula bookings.ts uses when a booking is first created.
+      updates.fareSubtotal = String(
+        q.fixedRoutePrice ??
+          Math.round(
+            (q.baseFare + q.distanceCharge + q.surgeAdjustment) * 100,
+          ) / 100,
+      );
+      updates.estimatedDistanceMiles = String(q.estimatedDistance);
+      updates.estimatedDurationMinutes = Math.round(q.estimatedDuration);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "No fields to update" });
+      return;
+    }
+
+    updates.updatedAt = new Date();
+
+    const updated = await withLock(
+      "driver-schedule:" + (before.driverId ?? "unassigned"),
+      async (tx) => {
+        await setActor(tx, req.currentUser!.userId);
+        const candidate = { ...before, ...updates };
+        if (before.driverId) {
+          const otherTrips = await tx
+            .select()
+            .from(bookingsTable)
+            .where(
+              and(
+                eq(bookingsTable.driverId, before.driverId),
+                ne(bookingsTable.id, id),
+                inArray(bookingsTable.status, [
+                  "pending",
+                  "authorized",
+                  "confirmed",
+                  "on_way",
+                  "on_location",
+                  "in_progress",
+                ]),
+              ),
+            );
+          if (tripConflicts(candidate, otherTrips))
+            throw Object.assign(new Error("Driver schedule conflict"), {
+              status: 409,
+            });
+        }
+        if (before.selectedVehicleId) {
+          const [vehicle] = await tx
+            .select()
+            .from(driverVehiclesTable)
+            .where(eq(driverVehiclesTable.id, before.selectedVehicleId));
+          if (!vehicle || !vehicleFits(vehicle, candidate))
+            throw Object.assign(
+              new Error("Assigned vehicle does not fit this reservation"),
+              { status: 409 },
+            );
+        } else if (before.vehicleId) {
+          const [vehicle] = await tx
+            .select()
+            .from(vehiclesTable)
+            .where(eq(vehiclesTable.id, before.vehicleId));
+          if (
+            !vehicle ||
+            vehicle.vehicleClass !== candidate.vehicleClass ||
+            vehicle.capacity < candidate.passengers
+          )
+            throw Object.assign(
+              new Error("Assigned vehicle does not fit this reservation"),
+              { status: 409 },
+            );
+        }
+        if (breakdown && before.stripePaymentIntentId) {
+          if (!process.env.STRIPE_SECRET_KEY)
+            throw new Error("Stripe is not configured");
+          const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+            timeout: 10000,
+            maxNetworkRetries: 0,
+          });
+          const intent = await stripe.paymentIntents.retrieve(
+            before.stripePaymentIntentId,
+          );
+          if (
+            ["succeeded", "processing", "requires_capture"].includes(
+              intent.status,
+            )
+          )
+            throw Object.assign(
+              new Error(
+                "Payment received or processing; fare changes are locked",
+              ),
+              { status: 409 },
+            );
+          if (intent.status !== "canceled")
+            await stripe.paymentIntents.cancel(
+              intent.id,
+              {},
+              { idempotencyKey: "reprice-cancel-" + intent.id },
+            );
+          // Keep the cancelled intent ID so the next checkout gets a new idempotency key.
+        }
+        const [saved] = await tx
+          .update(bookingsTable)
+          .set(updates)
+          .where(
+            and(
+              eq(bookingsTable.id, id),
+              eq(bookingsTable.status, before.status),
+            ),
+          )
+          .returning();
+        if (saved && breakdown)
+          await tx.execute(
+            sql`UPDATE bookings SET tax_amount=${breakdown.taxAmount},card_fee=${breakdown.cardProcessingFee},airport_fee=${breakdown.airportFee},extras_total=${breakdown.extrasTotal} WHERE id=${id}`,
+          );
+        return saved;
+      },
+    );
+
+    if (!updated) {
+      res.status(404).json({ error: "Booking not found" });
+      return;
+    }
+
+    req.log.info(
+      {
+        bookingId: id,
+        adminUserId: req.currentUser?.userId,
+        fields: Object.keys(updates),
+        repriced: repricedFrom != null,
+      },
+      "admin_booking_edited",
+    );
+
+    const response = {
+      ok: true,
+      booking: {
+        ...updated,
+        priceQuoted: parseFloat(updated.priceQuoted ?? "0"),
+        pickupAt: updated.pickupAt.toISOString(),
+        createdAt: updated.createdAt.toISOString(),
+        updatedAt: updated.updatedAt.toISOString(),
+      },
+      changes,
+      repricedFrom,
+    };
+
+    // Fire-and-forget: the edit is already committed, and a mail failure must not
+    // make the admin think the save did not happen.
+    if (body.notifyPassenger && changes.length > 0) {
+      await (async () => {
+        try {
+          await sendBookingUpdatedPassenger(
+            {
+              id: updated.id,
+              passengerName: updated.passengerName,
+              passengerEmail: updated.passengerEmail,
+              pickupAddress: updated.pickupAddress,
+              dropoffAddress: updated.dropoffAddress,
+              pickupAt: updated.pickupAt.toISOString(),
+              vehicleClass: updated.vehicleClass,
+              passengers: updated.passengers,
+              priceQuoted: parseFloat(updated.priceQuoted ?? "0"),
+              flightNumber: updated.flightNumber,
+              specialRequests: updated.specialRequests,
+            },
+            changes,
+          );
+        } catch (err) {
+          req.log.error(
+            { err: (err as Error).message, bookingId: id },
+            "booking_updated_email_failed",
+          );
+        }
+      })();
+    }
+    res.json(response);
+  }),
+);
 
 export default router;

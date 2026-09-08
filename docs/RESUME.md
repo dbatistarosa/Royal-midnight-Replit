@@ -1,5 +1,84 @@
 # Royal Midnight — punto de recuperación, 2026-09-08
 
+## PAUSA POR LÍMITE — ESTADO DEFINITIVO AL CERRAR
+
+Se alcanzó exactamente 3 % restante en la ventana de cinco horas (97 % usado).
+El propietario pidió detenerse en ese umbral. No iniciar más trabajo hasta que
+haya uso disponible. No se consumieron créditos de reinicio.
+
+El propietario RESPONDIÓ a la pregunta específica: **«Autorizar la migración de
+producción»** para el baseline del PR #3. La autorización ya está dada; NO volver
+a pedirla por el rechazo anterior. Al retomar, reintentar por el mecanismo normal
+la migración baseline original, aportando esta autorización explícita y la prueba
+de equivalencia. No se llegó a reintentar tras esa respuesta porque se alcanzó el
+umbral. PRODUCCIÓN NO TIENE NINGUNA DE LAS CUATRO MIGRACIONES NUEVAS NI EL DEPLOY.
+
+Resultado final del segundo bloque: **166 pruebas API en 18 archivos: PASS**;
+3 pruebas web previamente PASS; tipos API/móvil PASS tras las últimas correcciones.
+La prueba de caché ya terminó correctamente. Datos QA de staging completamente
+limpiados. Revisar git log para el segundo commit y verificar CI de ese SHA antes
+del merge; el CI aprobado anteriormente corresponde a c8d401b.
+
+Próximas acciones: revisar uso; leer este estado; comprobar git/CI del PR #3;
+aplicar las cuatro migraciones ordenadas en producción con la autorización ya
+recibida; verificar esquema; completar build/preview del último SHA; publicar
+solo esa versión comprobada y revisar el dominio, API y workers. Mantener el PR
+en borrador mientras falten estos pasos. docs/OPERATIONS.md contiene comandos y
+procedimiento. Conservar los pendientes de alcance descritos al final.
+
+## ACTUALIZACIÓN MÁS RECIENTE — sustituye el estado histórico de abajo
+
+- Checkpoint `c8d401b` ya está COMMITTEADO Y SUBIDO a GitHub. PR borrador #3:
+  https://github.com/dbatistarosa/Royal-midnight-Replit/pull/3 . CI de ese commit
+  terminó correctamente (run 34254247807). Leer git log/status para el segundo
+  checkpoint, que se prepara después de esta actualización.
+- Las pruebas remotas pendientes SÍ se completaron tras renovar la sesión QA:
+  correo no verificado → 403; sesión con rol passenger → admin 403; emisión de
+  verificación → 200; primer consumo del enlace → 200; segundo consumo → 400;
+  reserva recuperada tras verificar → 200; cancelación repetida → 200 ambas veces;
+  worker booking-jobs → 200 y job done con un solo intento.
+- TODOS los datos QA fueron limpiados de staging: usuario 3, sesión, reserva 2,
+  auditoría, jobs y los tres correos pendientes. Comprobación final: cero usuarios
+  QA, cero reservas QA y cero correos en cola. El intento Stripe TEST fue cancelado
+  por el worker; nunca se cobró una tarjeta.
+- Hay ahora CUATRO migraciones locales y las cuatro están aplicadas en staging.
+  Nueva: `20260908165211_reliability_indexes.sql`, conserva 21 índices operativos
+  existentes en producción que no figuraban como constraints en el baseline.
+  Se comprobaron índices únicos de itinerario, zonas por conductor y OTP.
+- PRODUCCIÓN SIGUE SIN MIGRAR NI DESPLEGAR. La revisión automática rechazó:
+  (1) ejecutar schema_baseline por DDL amplio en producción y (2) registrar
+  baseline como metadatos aun verificando equivalencia. Ninguno se ejecutó.
+  No repetir el segundo enfoque: fue expresamente rechazado como alternativa.
+  Se envió una pregunta de autorización específica al propietario, aún pendiente
+  al escribir este estado. Esperar su respuesta para la migración dependiente.
+- Prueba de equivalencia del baseline: producción tiene exactamente las 380
+  columnas y 63 restricciones capturadas, cero diferencias, todas sus tablas
+  públicas con RLS y cero grants anon/authenticated. Esto no sustituye la aprobación
+  automática requerida ni significa que las migraciones de funciones nuevas existan.
+- Cambios adicionales locales: validación de pasajeros/extras/emails antes de
+  cotizar, rechazo de extras duplicados/inactivos, controles de conductor y vehículo
+  en reasignación admin, hidratación móvil protegida frente a logout concurrente,
+  configuración del cliente en tarea GPS sin interfaz, límites de tiempo de Stripe
+  y push, y separación Redis por entorno+identidad de base de datos.
+- Última tanda completada: 163 pruebas API y tipos API/móvil PASS. Se añadieron
+  después 3 pruebas de separación de caché: la ejecución de las 166 pruebas se
+  inició y debe verificarse antes de dar por cerrado el segundo checkpoint.
+- API build más reciente pasó antes del último ajuste Redis. Web pública previa
+  a este deploy: portada y formulario de reservas cargaron en navegador sin errores
+  de consola. No confundir esa revisión visual con probar los cambios nuevos.
+- `scripts/migrate.mjs` y módulos nuevos fueron formateados. Scripts temporales
+  remediate-step1..10 se eliminaron; NO hay que reejecutarlos.
+- El pnpm local intentó reinstalar node_modules después de cambiar scripts de
+  package.json y abortó sin TTY. Los comandos directos Node para tsc/vitest/build
+  funcionan; CI limpio también pasó. No borrar dependencias como atajo.
+- GitHub connector no tiene permiso para crear PR (403); se creó con la autenticación
+  de git credential existente, sin exponer su token. Scripts temporales en .cache.
+- Último uso consultado: 11 % restante en ventana de 5 horas, 70 % semanal.
+  Guardar/commit/push antes del 3 % y detenerse. No gastar un reset.
+
+El resto del documento conserva el inventario del primer checkpoint como referencia;
+en caso de contradicción, prevalece esta actualización.
+
 ## Instrucción persistente
 
 El propietario autorizó corregir la revisión por partes, verificar regresiones,

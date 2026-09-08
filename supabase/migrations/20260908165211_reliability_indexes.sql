@@ -1,0 +1,22 @@
+-- Preserve operational indexes outside pg_constraint when bootstrapping from baseline.
+CREATE UNIQUE INDEX IF NOT EXISTS booking_driver_blocks_booking_driver_unique ON public.booking_driver_blocks (booking_id, driver_id);
+CREATE INDEX IF NOT EXISTS booking_driver_blocks_driver_idx ON public.booking_driver_blocks (driver_id);
+CREATE INDEX IF NOT EXISTS booking_itinerary_stops_booking_progress_idx ON public.booking_itinerary_stops (booking_id, arrived_at);
+CREATE UNIQUE INDEX IF NOT EXISTS booking_itinerary_stops_booking_sequence_unique ON public.booking_itinerary_stops (booking_id, sequence);
+CREATE INDEX IF NOT EXISTS bookings_promo_code_user_idx ON public.bookings (promo_code, user_id) WHERE promo_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS bookings_reminder_24h_pending_idx ON public.bookings (pickup_at) WHERE reminder_24h_sent_at IS NULL;
+CREATE INDEX IF NOT EXISTS bookings_reminder_2h_pending_idx ON public.bookings (pickup_at) WHERE reminder_2h_sent_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS bookings_tracking_token_key ON public.bookings (tracking_token);
+CREATE INDEX IF NOT EXISTS driver_locations_booking_id_idx ON public.driver_locations (booking_id);
+CREATE INDEX IF NOT EXISTS driver_locations_driver_id_idx ON public.driver_locations (driver_id, recorded_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS driver_service_zones_driver_zone_unique ON public.driver_service_zones (driver_id, zone_id);
+CREATE INDEX IF NOT EXISTS driver_service_zones_zone_idx ON public.driver_service_zones (zone_id);
+CREATE INDEX IF NOT EXISTS driver_warnings_driver_idx ON public.driver_warnings (driver_id);
+CREATE INDEX IF NOT EXISTS legal_acceptances_booking_idx ON public.legal_acceptances (booking_id);
+CREATE INDEX IF NOT EXISTS legal_acceptances_driver_idx ON public.legal_acceptances (driver_id);
+CREATE INDEX IF NOT EXISTS legal_acceptances_user_idx ON public.legal_acceptances (user_id);
+CREATE INDEX IF NOT EXISTS message_events_event_type_idx ON public.message_events (event_type);
+CREATE INDEX IF NOT EXISTS message_events_message_id_idx ON public.message_events (message_id);
+CREATE UNIQUE INDEX IF NOT EXISTS object_owners_object_path_unique ON public.object_owners (object_path);
+CREATE INDEX IF NOT EXISTS object_owners_owner_idx ON public.object_owners (owner_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS otp_codes_phone_unique ON public.otp_codes (phone);

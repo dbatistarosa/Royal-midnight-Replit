@@ -1,4 +1,5 @@
 import { getRedis } from "./redis.js";
+import {cacheNamespace} from './cacheNamespace.js';
 
 /**
  * Read-through cache for data that is identical for every caller — pricing
@@ -19,6 +20,7 @@ export async function getOrSetCache<T>(
 ): Promise<T> {
   const redis = getRedis();
   if (!redis) return fetcher();
+  key=cacheNamespace()+':'+key;
 
   try {
     const cached = await redis.get<T>(key);
@@ -41,6 +43,7 @@ export async function getOrSetCache<T>(
 export async function invalidateCache(key: string): Promise<void> {
   const redis = getRedis();
   if (!redis) return;
+  key=cacheNamespace()+':'+key;
   try {
     await redis.del(key);
   } catch (err) {

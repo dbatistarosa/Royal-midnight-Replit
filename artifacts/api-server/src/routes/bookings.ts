@@ -1,4 +1,5 @@
 import { enqueueBookingNotification } from "../lib/bookingJobs.js";
+import { ValidatedBookingBody } from "../lib/bookingInput.js";
 import { bookingAction, withLock, setActor, rows } from "../lib/durability.js";
 import { tripConflicts, tripDurationMinutes, vehicleFits, type TripWindowInput } from "../lib/scheduling.js";
 import { Router, type IRouter } from "express";
@@ -17,6 +18,7 @@ import {
   extraServicesTable,
   bookingExtrasTable,
   driverVehiclesTable,
+  vehiclesTable,
   managedTravelersTable,
   bookingDriverBlocksTable,
   bookingItineraryStopsTable,
@@ -279,7 +281,7 @@ const getCommissionPct = fetchCommissionPct;
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("STRIPE_SECRET_KEY is not configured");
-  return new Stripe(key, { apiVersion: "2024-06-20" as const });
+  return new Stripe(key, { apiVersion: "2024-06-20" as const, timeout:10000,maxNetworkRetries:0 });
 }
 
 /**
@@ -877,7 +879,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
 router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promise<void> => {
   // Public endpoint — allows anonymous booking creation from the booking form.
   // Corporate account paymentType is restricted: caller must be authenticated as role=corporate (or admin).
-  const parsed = CreateBookingBody.safeParse(req.body);
+  const parsed = ValidatedBookingBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
@@ -976,6 +978,7 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
         price: parseFloat(String(s.price)) || 0,
       });
     }
+    if(services.length!==requestedExtras.length){res.status(400).json({error:'An extra service is unavailable. Refresh your selection.'});return;}
   }
   const extrasTotal =
     Math.round(
@@ -1732,9 +1735,27 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
   if(parsed.data.status==='cancelled'){res.status(409).json({error:'Use the cancellation action so refunds are recorded.'});return;}
   const booking=await withLock('driver-schedule:'+(updateData.driverId??before.driverId??'unassigned'),async tx=>{
     await setActor(tx,req.currentUser!.userId);
-    if(updateData.driverId!=null&&updateData.driverId!==before.driverId){
-      const windows=await getDriverBusyWindows(Number(updateData.driverId),tx);
+    const assigning=parsed.data.driverId!==undefined||parsed.data.vehicleId!==undefined;
+    const nextDriverId=parsed.data.driverId!==undefined?parsed.data.driverId:before.driverId;
+    if(assigning&&['cancelled','completed','in_progress'].includes(before.status))throw Object.assign(new Error('This trip cannot be reassigned'),{status:409});
+    if(assigning&&nextDriverId!=null){
+      const [driver]=await tx.select().from(driversTable).where(eq(driversTable.id,nextDriverId));
+      if(!driver||driver.approvalStatus!=='approved'||driver.complianceHold)throw Object.assign(new Error('Select an approved, compliant driver'),{status:409});
+      const windows=await tx.select().from(bookingsTable).where(and(eq(bookingsTable.driverId,nextDriverId),ne(bookingsTable.id,before.id),inArray(bookingsTable.status,[...ACTIVE_TRIP_STATUSES])));
       if(hasConflict(before,windows))throw Object.assign(new Error('Driver schedule conflict'),{status:409});
+      if(parsed.data.vehicleId!=null){
+        const [vehicle]=await tx.select().from(vehiclesTable).where(eq(vehiclesTable.id,parsed.data.vehicleId));
+        if(!vehicle||vehicle.driverId!==nextDriverId||!vehicle.isAvailable||vehicle.vehicleClass!==before.vehicleClass||vehicle.capacity<before.passengers)throw Object.assign(new Error('The vehicle does not belong to this driver or cannot serve this trip'),{status:409});
+        updateData.selectedVehicleId=null;
+      }else if(nextDriverId!==before.driverId){
+        const candidates=await tx.select().from(driverVehiclesTable).where(eq(driverVehiclesTable.driverId,nextDriverId));
+        const vehicle=candidates.find(candidate=>vehicleFits(candidate,before));
+        if(!vehicle)throw Object.assign(new Error('Driver has no vehicle with the required class and capacity'),{status:409});
+        updateData.selectedVehicleId=vehicle.id;updateData.vehicleId=null;
+      }
+    }else if(assigning){
+      if(parsed.data.vehicleId!=null)throw Object.assign(new Error('Assign a driver before selecting a vehicle'),{status:409});
+      updateData.selectedVehicleId=null;updateData.vehicleId=null;
     }
     const [updated]=await tx.update(bookingsTable).set(updateData).where(and(eq(bookingsTable.id,params.data.id),eq(bookingsTable.status,before.status))).returning();return updated;
   });
@@ -1764,7 +1785,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
     if (parsed.data.status === "completed") {
       // Increment driver's totalRides counter
       if (booking.driverId) {
-        db.update(driversTable)
+        await db.update(driversTable)
           .set({ totalRides: sql`${driversTable.totalRides} + 1` })
           .where(eq(driversTable.id, booking.driverId))
           .catch((err) =>
@@ -1794,7 +1815,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
         }
       })();
       if (booking.userId) {
-        maybeRewardReferrerForCompletedRide(booking.userId).catch((err) =>
+        await maybeRewardReferrerForCompletedRide(booking.userId).catch((err) =>
           console.error("[bookings] referral reward error:", err),
         );
       }

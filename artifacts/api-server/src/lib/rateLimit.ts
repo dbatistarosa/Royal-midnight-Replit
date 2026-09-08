@@ -1,6 +1,7 @@
 import rateLimit, { ipKeyGenerator, type RateLimitRequestHandler } from "express-rate-limit";
 import { getRedis } from "./redis.js";
 import { RedisRateLimitStore } from "./redisRateLimitStore.js";
+import {cacheNamespace} from './cacheNamespace.js';
 
 /**
  * Rate limiting beyond /auth/*.
@@ -25,7 +26,7 @@ import { RedisRateLimitStore } from "./redisRateLimitStore.js";
  * here, just on the endpoints that matter most for brute-forcing.
  */
 export function storeFor(prefix: string): RedisRateLimitStore | undefined {
-  return getRedis() ? new RedisRateLimitStore(prefix) : undefined;
+  return getRedis() ? new RedisRateLimitStore(cacheNamespace()+':'+prefix) : undefined;
 }
 
 const shared = {
