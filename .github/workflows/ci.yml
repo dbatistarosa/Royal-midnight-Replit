@@ -37,14 +37,11 @@ jobs:
       # changing or anyone reviewing it.
       - run: pnpm install --frozen-lockfile
 
-      # Informational only, not gating: the repo has ~70 pre-existing type
-      # errors (mostly Express's req.params typed as string | string[]) that
-      # predate this workflow and aren't part of this change. Surfacing the
-      # trend here without blocking merges until that backlog is triaged.
       - run: pnpm run typecheck
-        continue-on-error: true
 
       - run: pnpm run test
+
+      - run: pnpm --filter @workspace/royal-midnight run build
 
       # Fails the build on a known-vulnerable production dependency. There was
       # no dependency gate at all before this, so an advisory could sit in the

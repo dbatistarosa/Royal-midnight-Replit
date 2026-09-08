@@ -1,3 +1,5 @@
+import { businessDate, businessMidnight, addBusinessDays } from "./businessTime.js";
+import { withMailScope } from "./mailOutbox.js";
 import { eq, and, gt, isNull, gte, or } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 // `pool` went unused when the reminder body moved out to tripReminders.ts.
@@ -60,11 +62,11 @@ export async function sendReviewRequests(): Promise<void> {
 export async function runWeeklyPayoutIfNeeded(): Promise<void> {
   try {
     const now = new Date();
-    if (now.getDay() !== 1) return;
-    if (now.getHours() < 8 || now.getHours() > 10) return;
+    const localDay=businessDate(now);
+    if(new Date(localDay+'T12:00:00Z').getUTCDay()!==1)return;
 
     const { emailLogsTable, driversTable, bookingsTable } = await import("@workspace/db");
-    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = businessMidnight(localDay);
 
     const recent = await db.select({ id: emailLogsTable.id })
       .from(emailLogsTable)
@@ -86,8 +88,7 @@ export async function runWeeklyPayoutIfNeeded(): Promise<void> {
     // The scheduled run covers the seven days ending today, not the current
     // Monday-anchored week — it fires on a Monday morning for the week just
     // finished.
-    const weekStartRaw = new Date(now); weekStartRaw.setDate(now.getDate() - 7); weekStartRaw.setHours(0, 0, 0, 0);
-    const week = resolvePayoutWeek(weekStartRaw.toISOString());
+    const week = resolvePayoutWeek(addBusinessDays(localDay,-7));
     const { weekLabel } = week;
 
     const { commissionPct, byDriver } = await computeWeeklyEarnings(week);
@@ -109,14 +110,14 @@ export async function runWeeklyPayoutIfNeeded(): Promise<void> {
     });
 
     for (const p of payouts) {
-      try { await sendWeeklyDriverPayout(p); }
+      try { await withMailScope('weekly:'+week.weekStart.toISOString()+':driver:'+p.driverId,()=>sendWeeklyDriverPayout(p)); }
       catch (err) { logger.error({ err, driverId: p.driverId }, "Failed to send weekly payout email to driver"); }
     }
-    await sendWeeklyPayoutAdminReport({
+    await withMailScope("weekly:"+week.weekStart.toISOString()+":admin",()=>sendWeeklyPayoutAdminReport({
       weekLabel, payouts, commissionPct,
       totalGross: Math.round(payouts.reduce((s, p) => s + p.grossEarnings, 0) * 100) / 100,
       totalDriverNet: Math.round(payouts.reduce((s, p) => s + p.driverNet, 0) * 100) / 100,
-    });
+    }));
     logger.info({ driverCount: drivers.length, weekLabel }, "Weekly payout emails sent");
   } catch (err) {
     logger.error({ err }, "Weekly payout scheduler error (non-fatal)");

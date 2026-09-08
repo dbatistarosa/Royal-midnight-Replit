@@ -1,15 +1,20 @@
+import { drainBookingJobs } from "../lib/bookingJobs.js";
+import { db } from "@workspace/db";
+import { sql } from "drizzle-orm";
+import { drainMailOutbox } from "../lib/mailOutbox.js";
 import { Router } from "express";
 import type { RequestHandler } from "express";
 import crypto from "crypto";
 import { sendTripReminders, runWeeklyPayoutIfNeeded, runComplianceEnforcement, sendReviewRequests } from "../lib/cron-jobs.js";
+import { publishDueSocialPosts } from "../lib/social-scheduler.js";
 import { logger } from "../lib/logger";
 
 const router = Router();
 
 function verifyCronRequest(req: import("express").Request, res: import("express").Response): boolean {
-  const cronSecret = process.env.CRON_SECRET;
+  const cronSecrets = [process.env.CRON_SECRET, process.env.CRON_WORKER_SECRET].filter((value): value is string => !!value);
 
-  if (!cronSecret) {
+  if (!cronSecrets.length) {
     // Fail closed. This used to key on VERCEL_ENV === "production", but that
     // variable only exists on Vercel — so on Railway, on preview deploys and on
     // any self-hosted run the guard returned true and every cron endpoint was
@@ -31,9 +36,10 @@ function verifyCronRequest(req: import("express").Request, res: import("express"
 
   // Constant-time compare so the secret cannot be recovered byte by byte.
   const provided = Buffer.from(auth);
-  const expected = Buffer.from(`Bearer ${cronSecret}`);
-  const matches =
-    provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  const matches = cronSecrets.reduce((matched, secret) => {
+    const expected = Buffer.from(`Bearer ${secret}`);
+    return (provided.length === expected.length && crypto.timingSafeEqual(provided, expected)) || matched;
+  }, false);
 
   if (!matches) {
     const extra = { ip: req.ip, path: req.path };
@@ -58,9 +64,12 @@ function registerCron(path: string, name: string, job: () => Promise<void>): voi
     if (!verifyCronRequest(req, res)) return;
     logger.info(`Cron: ${name} triggered`);
     try {
+      await db.execute(sql`INSERT INTO cron_runs(name,status,started_at) VALUES(${name},'running',now()) ON CONFLICT(name) DO UPDATE SET status='running',started_at=now(),last_error=NULL`);
       await job();
+      await db.execute(sql`UPDATE cron_runs SET status='success',finished_at=now() WHERE name=${name}`);
       res.json({ ok: true });
     } catch (err) {
+      await db.execute(sql`UPDATE cron_runs SET status='failed',finished_at=now(),last_error=${String((err as Error).message).slice(0,500)} WHERE name=${name}`).catch(()=>{});
       logger.error({ err }, `Cron ${name} failed`);
       res.status(500).json({ error: "Cron job failed" });
     }
@@ -73,5 +82,9 @@ registerCron("/cron/trip-reminders", "trip-reminders", sendTripReminders);
 registerCron("/cron/weekly-payouts", "weekly-payouts", runWeeklyPayoutIfNeeded);
 registerCron("/cron/compliance-check", "compliance-check", runComplianceEnforcement);
 registerCron("/cron/review-requests", "review-requests", sendReviewRequests);
+registerCron("/cron/social-publish", "social-publish", publishDueSocialPosts);
 
+registerCron("/cron/mail-outbox", "mail-outbox", drainMailOutbox);
+
+registerCron("/cron/booking-jobs", "booking-jobs", drainBookingJobs);
 export default router;

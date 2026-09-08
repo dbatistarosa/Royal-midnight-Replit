@@ -1,7 +1,10 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq, ne, inArray, sql } from "drizzle-orm";
+import Stripe from "stripe";
+import { bookingAction, withLock, rows, setActor } from "../lib/durability.js";
+import { tripConflicts, vehicleFits } from "../lib/scheduling.js";
 import { z } from "zod/v4";
-import { db, bookingsTable } from "@workspace/db";
+import { db, bookingsTable, bookingExtrasTable, vehiclesTable, driverVehiclesTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 import { computeQuote } from "./quote.js";
 import { sendBookingUpdatedPassenger } from "../lib/mailer.js";
@@ -90,7 +93,7 @@ const money = (v: string | number | null | undefined) =>
 const when = (iso: string | Date) =>
   new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "medium", timeStyle: "short" });
 
-router.patch("/admin/bookings/:id/details", requireAdmin, async (req, res): Promise<void> => {
+router.patch("/admin/bookings/:id/details", requireAdmin, bookingAction(async (req, res): Promise<void> => {
   const id = parseInt(String(req.params["id"] ?? ""), 10);
   if (!Number.isFinite(id) || id <= 0) {
     res.status(400).json({ error: "Invalid booking id" });
@@ -108,6 +111,9 @@ router.patch("/admin/bookings/:id/details", requireAdmin, async (req, res): Prom
   if (!before) {
     res.status(404).json({ error: "Booking not found" });
     return;
+  }
+  if (["cancelled", "completed", "in_progress"].includes(before.status)) {
+    res.status(409).json({error:"This trip can no longer be edited."}); return;
   }
 
   // Which price-affecting fields is the caller actually changing? Sending a
@@ -179,8 +185,13 @@ router.patch("/admin/bookings/:id/details", requireAdmin, async (req, res): Prom
   // Re-price when the trip itself moved. Only reachable on unpaid bookings —
   // the paid case returned 409 above.
   let repricedFrom: number | null = null;
+  let breakdown: {taxAmount:number;cardProcessingFee:number;airportFee:number;extrasTotal:number}|null=null;
   if (changedPriceFields.length > 0) {
+    const [invoice] = rows<{stripe_invoice_id:string|null}>(await db.execute(sql`SELECT stripe_invoice_id FROM bookings WHERE id=${id}`));
+    if (invoice?.stripe_invoice_id) {res.status(409).json({error:"Void the existing invoice before changing the fare."});return;}
+    const extras=await db.select().from(bookingExtrasTable).where(eq(bookingExtrasTable.bookingId,id));
     const quoteOutcome = await computeQuote({
+      extrasTotal:extras.reduce((sum,extra)=>sum+Number(extra.priceAtBooking)*extra.quantity,0),
       pickupAddress: body.pickupAddress ?? before.pickupAddress,
       dropoffAddress: body.dropoffAddress ?? before.dropoffAddress,
       vehicleClass: body.vehicleClass ?? before.vehicleClass,
@@ -199,6 +210,7 @@ router.patch("/admin/bookings/:id/details", requireAdmin, async (req, res): Prom
       return;
     }
     const q = quoteOutcome.quote;
+    breakdown=q;
 
     // The discount already applied to this booking is preserved rather than
     // re-evaluated: the promo was accepted at booking time and re-checking it
@@ -233,11 +245,32 @@ router.patch("/admin/bookings/:id/details", requireAdmin, async (req, res): Prom
 
   updates.updatedAt = new Date();
 
-  const [updated] = await db
-    .update(bookingsTable)
-    .set(updates)
-    .where(eq(bookingsTable.id, id))
-    .returning();
+  const updated = await withLock('driver-schedule:'+(before.driverId??'unassigned'),async tx=>{
+    await setActor(tx,req.currentUser!.userId);
+    const candidate={...before,...updates};
+    if(before.driverId){
+      const otherTrips=await tx.select().from(bookingsTable).where(and(eq(bookingsTable.driverId,before.driverId),ne(bookingsTable.id,id),inArray(bookingsTable.status,['pending','authorized','confirmed','on_way','on_location','in_progress'])));
+      if(tripConflicts(candidate,otherTrips))throw Object.assign(new Error('Driver schedule conflict'),{status:409});
+    }
+    if(before.selectedVehicleId){
+      const [vehicle]=await tx.select().from(driverVehiclesTable).where(eq(driverVehiclesTable.id,before.selectedVehicleId));
+      if(!vehicle||!vehicleFits(vehicle,candidate))throw Object.assign(new Error('Assigned vehicle does not fit this reservation'),{status:409});
+    }else if(before.vehicleId){
+      const [vehicle]=await tx.select().from(vehiclesTable).where(eq(vehiclesTable.id,before.vehicleId));
+      if(!vehicle||vehicle.vehicleClass!==candidate.vehicleClass||vehicle.capacity<candidate.passengers)throw Object.assign(new Error('Assigned vehicle does not fit this reservation'),{status:409});
+    }
+    if(breakdown&&before.stripePaymentIntentId){
+      if(!process.env.STRIPE_SECRET_KEY)throw new Error('Stripe is not configured');
+      const stripe=new Stripe(process.env.STRIPE_SECRET_KEY);
+      const intent=await stripe.paymentIntents.retrieve(before.stripePaymentIntentId);
+      if(['succeeded','processing','requires_capture'].includes(intent.status))throw Object.assign(new Error('Payment received or processing; fare changes are locked'),{status:409});
+      if(intent.status!=='canceled')await stripe.paymentIntents.cancel(intent.id,{}, {idempotencyKey:'reprice-cancel-'+intent.id});
+      // Keep the cancelled intent ID so the next checkout gets a new idempotency key.
+    }
+    const [saved]=await tx.update(bookingsTable).set(updates).where(and(eq(bookingsTable.id,id),eq(bookingsTable.status,before.status))).returning();
+    if(saved&&breakdown)await tx.execute(sql`UPDATE bookings SET tax_amount=${breakdown.taxAmount},card_fee=${breakdown.cardProcessingFee},airport_fee=${breakdown.airportFee},extras_total=${breakdown.extrasTotal} WHERE id=${id}`);
+    return saved;
+  });
 
   if (!updated) {
     res.status(404).json({ error: "Booking not found" });
@@ -249,7 +282,7 @@ router.patch("/admin/bookings/:id/details", requireAdmin, async (req, res): Prom
     "admin_booking_edited",
   );
 
-  res.json({
+  const response = {
     ok: true,
     booking: {
       ...updated,
@@ -260,12 +293,12 @@ router.patch("/admin/bookings/:id/details", requireAdmin, async (req, res): Prom
     },
     changes,
     repricedFrom,
-  });
+  };
 
   // Fire-and-forget: the edit is already committed, and a mail failure must not
   // make the admin think the save did not happen.
   if (body.notifyPassenger && changes.length > 0) {
-    (async () => {
+    await (async () => {
       try {
         await sendBookingUpdatedPassenger(
           {
@@ -288,6 +321,7 @@ router.patch("/admin/bookings/:id/details", requireAdmin, async (req, res): Prom
       }
     })();
   }
-});
+  res.json(response);
+}));
 
 export default router;

@@ -1,3 +1,5 @@
+import Constants from "expo-constants";
+import { queryClient } from "@/api/queryClient";
 import { create } from "zustand";
 import * as SecureStore from "expo-secure-store";
 import type { AuthUser } from "@/api/types";
@@ -20,7 +22,7 @@ interface AuthState {
   logout: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   driverId: null,
@@ -31,32 +33,36 @@ export const useAuthStore = create<AuthState>((set) => ({
       const raw = await SecureStore.getItemAsync(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as StoredAuth;
-        set({ user: parsed.user, token: parsed.token, driverId: parsed.driverId, isHydrated: true });
+        if(!parsed?.token||!parsed.user?.id)throw new Error('Invalid stored session');
+        const base=Constants.expoConfig?.extra?.apiBaseUrl??'https://www.royalmidnight.com/api';
+        const response=await fetch(base+'/auth/me',{headers:{Authorization:'Bearer '+parsed.token},signal:AbortSignal.timeout(10000)});
+        if(!response.ok)throw new Error('Session could not be verified');
+        const current=await response.json();
+        set({ user: current.user, token: parsed.token, driverId: current.driverId??null, isHydrated: true });
         return;
       }
     } catch {
       // corrupt stored value — fall through to a clean logged-out state
     }
-    set({ isHydrated: true });
+    set({ user:null,token:null,driverId:null,isHydrated: true });
   },
 
   login: async (user, token, driverId) => {
     const stored: StoredAuth = { user, token, driverId };
     await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(stored));
+    await queryClient.cancelQueries();queryClient.clear();
     set({ user, token, driverId });
   },
 
   logout: async () => {
-    // Clear in-memory state regardless of whether the delete succeeds --
-    // every caller invokes this directly with no try/catch of its own, so a
-    // thrown SecureStore error used to leave a driver who tapped "Log Out"
-    // still logged in with no error shown. A stale stored value left behind
-    // by a failed delete is harmless; it's overwritten on the next login.
-    try {
-      await SecureStore.deleteItemAsync(STORAGE_KEY);
-    } catch {
-      // ignore — see above
-    }
-    set({ user: null, token: null, driverId: null });
+    const token=get().token;
+    set({user:null,token:null,driverId:null});
+    await queryClient.cancelQueries();queryClient.clear();
+    const {stopLocationSharing}=await import('@/location/locationTask');
+    await stopLocationSharing().catch(()=>{});
+    try{await SecureStore.deleteItemAsync(STORAGE_KEY);}
+    catch{await SecureStore.setItemAsync(STORAGE_KEY,'null').catch(()=>{});}
+    const base=Constants.expoConfig?.extra?.apiBaseUrl??'https://www.royalmidnight.com/api';
+    if(token)await fetch(base+'/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)}).catch(()=>{});
   },
 }));

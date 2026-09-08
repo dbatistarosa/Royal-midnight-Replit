@@ -1,7 +1,4 @@
-import nodemailer from "nodemailer";
-import { Resend } from "resend";
-import { db } from "@workspace/db";
-import { emailLogsTable } from "@workspace/db/schema";
+import { enqueueMail } from "./mailOutbox.js";
 
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = parseInt(process.env.SMTP_PORT ?? "587");
@@ -30,59 +27,8 @@ export function getMailerStatus() {
   return { configured: false, provider: "none" as const };
 }
 
-function createSmtpTransport() {
-  if (!isSmtpConfigured()) return null;
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_PORT === 465,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-  });
-}
-
-async function logEmail(to: string | string[], subject: string, type: string, status: "sent" | "skipped" | "failed", error?: string) {
-  try {
-    const toStr = Array.isArray(to) ? to.join(", ") : to;
-    await db.insert(emailLogsTable).values({ to: toStr, subject, type, status, error: error ?? null });
-  } catch {}
-}
-
 async function send(to: string | string[], subject: string, html: string, type = "general") {
-  const toArr = Array.isArray(to) ? to : [to];
-
-  if (isResendConfigured()) {
-    try {
-      const resend = new Resend(RESEND_API_KEY);
-      await resend.emails.send({
-        from: SMTP_FROM,
-        to: toArr,
-        subject,
-        html,
-        replyTo: REPLY_TO,
-      });
-      await logEmail(to, subject, type, "sent");
-    } catch (err: any) {
-      console.error("[mailer] Resend failed:", err.message);
-      await logEmail(to, subject, type, "failed", err.message);
-    }
-    return;
-  }
-
-  if (isSmtpConfigured()) {
-    const transport = createSmtpTransport();
-    if (!transport) { await logEmail(to, subject, type, "skipped", "SMTP transport creation failed"); return; }
-    try {
-      await transport.sendMail({ from: SMTP_FROM, to, subject, html, replyTo: REPLY_TO });
-      await logEmail(to, subject, type, "sent");
-    } catch (err: any) {
-      console.error("[mailer] SMTP failed:", err.message);
-      await logEmail(to, subject, type, "failed", err.message);
-    }
-    return;
-  }
-
-  console.log(`[mailer] No email provider configured — would send to ${Array.isArray(to) ? to.join(", ") : to}: ${subject}`);
-  await logEmail(to, subject, type, "skipped", "No email provider configured (set RESEND_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS)");
+  await enqueueMail(to, subject, html, type);
 }
 
 // Royal Midnight email templates interpolate user-supplied strings (names, addresses,

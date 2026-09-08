@@ -72,3 +72,7 @@ service-account*.json
 # on the repo, not part of the product.
 .agents/
 skills-lock.json
+
+# Local Supabase CLI metadata and agent scratch files
+supabase/.temp/
+.claude/

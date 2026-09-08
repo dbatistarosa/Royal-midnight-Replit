@@ -1,17 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { isTripVisibleToDriver, type ZoneCoverage, type ServiceZone } from "./serviceZones";
+import { isPickupServiceable, isTripVisibleToDriver, type ZoneCoverage, type ServiceZone } from "./serviceZones";
 import { pointInZone } from "./pricing";
 
 /**
  * The service-area rule, as chosen by the operator:
  *
  *   A trip is offered only to drivers whose assigned zones contain its pickup
- *   point — EXCEPT when no driver covers that point, in which case it goes to
- *   everyone rather than disappearing.
- *
- * The exception is the part worth pinning down: a hard filter with no fallback
- * loses bookings silently, and "nobody saw it" looks identical to "nobody
- * wanted it" from the admin panel.
+ *   point. Unknown, unstaffed, and out-of-area pickups fail closed.
  */
 
 const circle = (id: number, name: string, lat: number, lng: number, radiusKm: number): ServiceZone => ({
@@ -79,25 +74,23 @@ describe("isTripVisibleToDriver", () => {
     expect(isTripVisibleToDriver(TPA, coverage())).toBe(false);
   });
 
-  it("shows a trip that falls in no zone at all, rather than losing it", () => {
-    expect(isTripVisibleToDriver(PENSACOLA, coverage())).toBe(true);
+  it("hides a trip that falls in no service zone", () => {
+    expect(isTripVisibleToDriver(PENSACOLA, coverage())).toBe(false);
   });
 
-  it("shows a trip whose zone exists but has no drivers assigned", () => {
-    // Orlando is drawn, but nobody works it. The South Florida driver still
-    // sees the trip so dispatch is not the only path to covering it.
+  it("hides a trip whose zone exists but has no eligible drivers assigned", () => {
     const c = coverage({ staffedZoneIds: new Set([1]) });
-    expect(isTripVisibleToDriver(MCO, c)).toBe(true);
+    expect(isTripVisibleToDriver(MCO, c)).toBe(false);
   });
 
-  it("shows a trip with no coordinates — unknown location is not out-of-area", () => {
-    expect(isTripVisibleToDriver(null, coverage())).toBe(true);
+  it("hides a trip with no verified coordinates", () => {
+    expect(isTripVisibleToDriver(null, coverage())).toBe(false);
   });
 
-  it("shows everything when the feature is off (no zones, or migration not run)", () => {
+  it("fails closed when service areas are unavailable", () => {
     const off = coverage({ enabled: false, zones: [], staffedZoneIds: new Set(), driverZoneIds: new Set() });
-    expect(isTripVisibleToDriver(MCO, off)).toBe(true);
-    expect(isTripVisibleToDriver(PENSACOLA, off)).toBe(true);
+    expect(isTripVisibleToDriver(MCO, off)).toBe(false);
+    expect(isTripVisibleToDriver(PENSACOLA, off)).toBe(false);
   });
 
   it("shows a trip in an overlapping zone when the driver covers either one", () => {
@@ -114,5 +107,18 @@ describe("isTripVisibleToDriver", () => {
   it("hides a trip from a driver assigned to no zones at all while others are staffed", () => {
     const c = coverage({ driverZoneIds: new Set() });
     expect(isTripVisibleToDriver(FLL, c)).toBe(false);
+  });
+});
+
+describe("isPickupServiceable", () => {
+  it("accepts only a verified pickup in a staffed service area", () => {
+    expect(isPickupServiceable(FLL, coverage())).toBe(true);
+    expect(isPickupServiceable(MCO, coverage({ staffedZoneIds: new Set([1]) }))).toBe(false);
+    expect(isPickupServiceable(PENSACOLA, coverage())).toBe(false);
+    expect(isPickupServiceable(null, coverage())).toBe(false);
+  });
+
+  it("fails closed when service-area configuration is unavailable", () => {
+    expect(isPickupServiceable(FLL, coverage({ enabled: false }))).toBe(false);
   });
 });

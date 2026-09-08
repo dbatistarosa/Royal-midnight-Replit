@@ -251,6 +251,7 @@ export async function loadBookingReceipts(bookingIds: number[]): Promise<Map<num
 
 /** One completed trip's chauffeur-side extras, for the earnings screen. */
 export type DriverEarningRow = {
+  commissionPct:number|null;
   createdAt: Date;
   /** Pre-tax extra-time charge on this trip. */
   overageFare: number;
@@ -275,7 +276,7 @@ async function runDriverExtraQuery(where: ReturnType<typeof sql>): Promise<Recor
     const overageCol = opts.overage ? sql`coalesce(b.overage_fare, 0)` : sql`0`;
     const paidFilter = opts.paidFlag ? sql`es.paid_to_driver` : sql`false`;
     const result = await db.execute(sql`
-      SELECT b.id, b.driver_id, b.created_at,
+      SELECT b.id, b.driver_id, b.pickup_at AS created_at, b.commission_pct,
              ${overageCol} AS overage_fare,
              coalesce((
                SELECT sum(be.price_at_booking * be.quantity)
@@ -310,6 +311,7 @@ export async function loadDriverEarningRows(driverId: number): Promise<DriverEar
   );
   return rows.map(r => ({
     createdAt: new Date(String(r["created_at"])),
+    commissionPct:r["commission_pct"]==null?null:Number(r["commission_pct"]),
     overageFare: num(r["overage_fare"]),
     driverExtras: num(r["driver_extras"]),
   }));

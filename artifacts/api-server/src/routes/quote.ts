@@ -12,6 +12,7 @@ import {
   normalizePercentRate,
   computeFareBreakdown,
 } from "../lib/pricing";
+import { isPickupServiceable, loadZoneCoverage } from "../lib/serviceZones.js";
 
 const router: IRouter = Router();
 
@@ -367,6 +368,17 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
     }
   }
 
+  if (charterMode === "hourly" && waypoints.length === 0) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: "Hourly chauffeur service requires at least one intermediate stop.",
+        code: "HOURLY_STOP_REQUIRED",
+      },
+    };
+  }
+
   // Get Florida tax rate from settings (stored as decimal: 0.07 = 7%, or as a
   // whole percent like 7 — normalizePercentRate() handles both forms)
   const taxRateStr = await getSetting("florida_tax_rate", "0.07");
@@ -387,9 +399,32 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
     const hourlyRate = ruleHourlyRate ?? HOURLY_RATES[vc] ?? baseFare * 1.5;
     distanceCharge = Math.round((hourlyRate * charterHours - baseFare) * 100) / 100;
     if (distanceCharge < 0) distanceCharge = 0;
-    // For display purposes, estimate ~25 mph average city speed
-    estimatedDistance = charterHours * 25;
-    estimatedDuration = charterHours * 60;
+    const mapsResult = await getDirectionsDistance(pickupAddress, dropoffAddress, waypoints);
+    if (!mapsResult) {
+      return {
+        ok: false,
+        status: 422,
+        body: {
+          error: "We could not verify the complete hourly itinerary. Please select valid pickup, stop, and destination addresses.",
+          code: "HOURLY_ROUTE_UNVERIFIED",
+        },
+      };
+    }
+    estimatedDistance = mapsResult.distance;
+    estimatedDuration = mapsResult.duration;
+    const allowedMiles = charterHours * DEFAULT_MAX_MILES_PER_HOUR;
+    if (estimatedDistance > allowedMiles) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: `This itinerary is ${estimatedDistance.toFixed(1)} miles, above the ${allowedMiles}-mile allowance for ${charterHours} hours. Add hours or shorten the route.`,
+          code: "HOURLY_MILEAGE_LIMIT",
+          estimatedDistance,
+          allowedMiles,
+        },
+      };
+    }
     includedMiles = 0;
     billableMiles = 0;
   } else {
@@ -415,6 +450,18 @@ export async function computeQuote(input: QuoteInput): Promise<QuoteOutcome> {
   // the driver service-area filter.
   const { multiplier: zoneMultiplier, points: routePoints } = await getZoneMultiplier(allAddresses.map(resolveAddress));
   const pickupPoint = routePoints[0] ?? null;
+
+  const coverage = await loadZoneCoverage(0);
+  if (!isPickupServiceable(pickupPoint, coverage)) {
+    return {
+      ok: false,
+      status: 422,
+      body: {
+        error: "Pickup is outside our currently staffed service area. Destinations and intermediate stops may still be anywhere.",
+        code: "PICKUP_OUTSIDE_SERVICE_AREA",
+      },
+    };
+  }
 
   // Card processing fee, passed through to the customer and shown as its
   // own line item (admin-configurable via the `cc_fee_pct` setting).

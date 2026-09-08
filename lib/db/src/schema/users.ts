@@ -7,6 +7,7 @@ export const usersTable = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   phone: text("phone"),
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   role: text("role").notNull().default("passenger"),
   passwordHash: text("password_hash"),
   stripeCustomerId: text("stripe_customer_id"),

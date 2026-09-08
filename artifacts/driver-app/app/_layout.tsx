@@ -1,7 +1,8 @@
 import "../global.css";
+import { queryClient } from "@/api/queryClient";
 import "@/location/locationTask";
 import { useEffect, useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useFonts } from "expo-font";
@@ -13,9 +14,7 @@ import { configureApiClient } from "@/api/client";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 10_000 } },
-});
+
 
 export default function RootLayout() {
   const hydrate = useAuthStore((s) => s.hydrate);

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Loader2, Clock, XCircle } from "lucide-react";
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { Analytics } from "@vercel/analytics/react";
@@ -17,8 +18,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Home from "@/pages/home";
 import Fleet from "@/pages/fleet";
 import Book from "@/pages/book";
-import BookingConfirmation from "@/pages/booking-confirmation";
-import Track from "@/pages/track";
+const BookingConfirmation = lazy(() => import("@/pages/booking-confirmation"));
+const Track = lazy(() => import("@/pages/track"));
 import About from "@/pages/about";
 import Services from "@/pages/services";
 import AirportTransfers from "@/pages/services/airport-transfers";
@@ -35,53 +36,54 @@ import Pricing from "@/pages/pricing";
 import Login from "@/pages/auth/login";
 import Signup from "@/pages/auth/signup";
 import ResetPassword from "@/pages/auth/reset-password";
+import VerifyEmail from "@/pages/auth/verify-email";
 
 // Passenger Portal
-import PassengerDashboard from "@/pages/passenger/dashboard";
-import PassengerRides from "@/pages/passenger/rides";
-import PassengerRideDetail from "@/pages/passenger/ride-detail";
-import PassengerAddresses from "@/pages/passenger/addresses";
-import PassengerProfile from "@/pages/passenger/profile";
-import PassengerSupport from "@/pages/passenger/support";
-import PassengerReports from "@/pages/passenger/reports";
+const PassengerDashboard = lazy(() => import("@/pages/passenger/dashboard"));
+const PassengerRides = lazy(() => import("@/pages/passenger/rides"));
+const PassengerRideDetail = lazy(() => import("@/pages/passenger/ride-detail"));
+const PassengerAddresses = lazy(() => import("@/pages/passenger/addresses"));
+const PassengerProfile = lazy(() => import("@/pages/passenger/profile"));
+const PassengerSupport = lazy(() => import("@/pages/passenger/support"));
+const PassengerReports = lazy(() => import("@/pages/passenger/reports"));
 
 // Driver Portal
-import DriverOnboarding from "@/pages/driver/onboarding";
-import DriverDashboard from "@/pages/driver/dashboard";
-import DriverHistory from "@/pages/driver/history";
-import DriverEarnings from "@/pages/driver/earnings";
-import DriverStats from "@/pages/driver/stats";
-import DriverProfile from "@/pages/driver/profile";
-import DriverPayout from "@/pages/driver/payout";
+const DriverOnboarding = lazy(() => import("@/pages/driver/onboarding"));
+const DriverDashboard = lazy(() => import("@/pages/driver/dashboard"));
+const DriverHistory = lazy(() => import("@/pages/driver/history"));
+const DriverEarnings = lazy(() => import("@/pages/driver/earnings"));
+const DriverStats = lazy(() => import("@/pages/driver/stats"));
+const DriverProfile = lazy(() => import("@/pages/driver/profile"));
+const DriverPayout = lazy(() => import("@/pages/driver/payout"));
 import DriverAgreement from "@/pages/driver-agreement";
-import DriverDocuments from "@/pages/driver/documents";
-import DriverVehicles from "@/pages/driver/vehicles";
+const DriverDocuments = lazy(() => import("@/pages/driver/documents"));
+const DriverVehicles = lazy(() => import("@/pages/driver/vehicles"));
 
 // Corporate Portal
-import CorporateDashboard from "@/pages/corporate/dashboard";
-import CorporateBook from "@/pages/corporate/book";
-import CorporateBookings from "@/pages/corporate/bookings";
-import CorporateBookingDetail from "@/pages/corporate/booking-detail";
-import CorporateProfile from "@/pages/corporate/profile";
+const CorporateDashboard = lazy(() => import("@/pages/corporate/dashboard"));
+const CorporateBook = lazy(() => import("@/pages/corporate/book"));
+const CorporateBookings = lazy(() => import("@/pages/corporate/bookings"));
+const CorporateBookingDetail = lazy(() => import("@/pages/corporate/booking-detail"));
+const CorporateProfile = lazy(() => import("@/pages/corporate/profile"));
 
 // Admin Portal
-import AdminDashboard from "@/pages/admin";
-import AdminBookings from "@/pages/admin/bookings";
-import AdminPassengers from "@/pages/admin/passengers";
-import AdminDrivers from "@/pages/admin/drivers";
-import AdminFleet from "@/pages/admin/fleet";
-import AdminDispatch from "@/pages/admin/dispatch";
-import AdminDriverApp from "@/pages/admin/driver-app";
-import AdminPricing from "@/pages/admin/pricing";
-import AdminPromos from "@/pages/admin/promos";
-import AdminExtras from "@/pages/admin/extras";
-import AdminAffiliates from "@/pages/admin/affiliates";
-import AdminCorporateAccounts from "@/pages/admin/corporate-accounts";
-import AdminSupport from "@/pages/admin/support";
-import AdminReports from "@/pages/admin/reports";
-import AdminSettings from "@/pages/admin/settings";
-import AdminPayouts from "@/pages/admin/payouts";
-import AdminGeoZones from "@/pages/admin/geo-zones";
+const AdminDashboard = lazy(() => import("@/pages/admin"));
+const AdminBookings = lazy(() => import("@/pages/admin/bookings"));
+const AdminPassengers = lazy(() => import("@/pages/admin/passengers"));
+const AdminDrivers = lazy(() => import("@/pages/admin/drivers"));
+const AdminFleet = lazy(() => import("@/pages/admin/fleet"));
+const AdminDispatch = lazy(() => import("@/pages/admin/dispatch"));
+const AdminDriverApp = lazy(() => import("@/pages/admin/driver-app"));
+const AdminPricing = lazy(() => import("@/pages/admin/pricing"));
+const AdminPromos = lazy(() => import("@/pages/admin/promos"));
+const AdminExtras = lazy(() => import("@/pages/admin/extras"));
+const AdminAffiliates = lazy(() => import("@/pages/admin/affiliates"));
+const AdminCorporateAccounts = lazy(() => import("@/pages/admin/corporate-accounts"));
+const AdminSupport = lazy(() => import("@/pages/admin/support"));
+const AdminReports = lazy(() => import("@/pages/admin/reports"));
+const AdminSettings = lazy(() => import("@/pages/admin/settings"));
+const AdminPayouts = lazy(() => import("@/pages/admin/payouts"));
+const AdminGeoZones = lazy(() => import("@/pages/admin/geo-zones"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -218,6 +220,7 @@ function PassengerRoute({ component: Component }: { component: React.ComponentTy
 function Router() {
   return (
     <Switch>
+      <Route path="/auth/verify-email"><PortalWrapper><VerifyEmail /></PortalWrapper></Route>
       {/* Auth (no footer, minimal layout) */}
       <Route path="/auth/login">
         <PortalWrapper><Login /></PortalWrapper>
@@ -433,7 +436,7 @@ function App({ ssrPath }: AppProps = {}) {
             <TooltipProvider>
               <ErrorBoundary>
                 <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")} ssrPath={ssrPath}>
-                  <Router />
+                  <Suspense fallback={<div role="status" className="min-h-screen grid place-items-center">Loading…</div>}><Router /></Suspense>
                 </WouterRouter>
               </ErrorBoundary>
               <Toaster />
