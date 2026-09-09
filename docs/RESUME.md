@@ -1,14 +1,32 @@
 # Royal Midnight — punto de recuperación, 2026-09-09
 
-## Bloque en curso: cierre de viajes y premios por referido
+## Estado más reciente: PR #5 publicado; separación de pagos adicionales en curso
+
+PR #5 MERGED y producción verificada en f0164dd3f5f0c396dcb4ef50093ca469b4f38122.
+CI main 34370136413 y Post-Deploy Smoke Test 34370315788 PASS. CI del PR 34369647853
+también PASS (173 pruebas API y 3 web). Prueba REAL de staging: POST complete dos
+veces → 200/200; total_rides pasó de 1 a 2; un job trip-completion. Tras ejecutar
+worker y forzar un reintento: dos intentos done, solo un recibo, un correo de
+referido y un código premio. Se eliminaron los usuarios QA 4/5, conductor 1,
+reservas 3/4, sesión, job, auditorías, premio y dos correos pendientes de staging.
+No se enviaron correos ni se hicieron cobros. Las credenciales QA ya no son válidas.
+
+Siguiente parche preparado: webhooks con metadata.type tip/extra_time/addon_extras
+se registran en financial_events y no se comparan con el precio principal ni
+modifican su intent/factura/estado o reenvían confirmaciones. 11 pruebas nuevas
+PASS y tipos API PASS. Falta CI y publicación de este segundo bloque.
+No requiere DDL. Quedan pendientes cargos adicionales idempotentes, facturas,
+respuesta Stripe perdida y completar también la ruta de cierre manual admin.
+
+### Detalle del bloque de cierre (ya publicado)
 
 Cambios locales preparados: transición completed, contador y desglose en una
 transacción con job trip-completion; worker encola recibo con deduplicación.
 Reintento de complete devuelve el viaje existente. Premio por referido usa lock
 por usuario y transacción común para promo, marca de recompensa y mail_outbox;
 tolera ejecución tardía después de una segunda reserva. 7 pruebas nuevas PASS
-de rollback/reintento, tipos API PASS. Pendiente CI/preview, prueba real de staging,
-limpieza QA y publicación. No requiere migración: usa las tablas ya aplicadas.
+de rollback/reintento, tipos API PASS. CI/preview, staging, limpieza QA y publicación
+completados según la evidencia superior. No requiere migración: usa las tablas ya aplicadas.
 La referencia de cobro extra se espera antes de responder, pero aún quedan por
 resolver la reconciliación de respuesta Stripe perdida y extras/facturas.
 La información de producción anterior sigue vigente hasta completar el deploy.
