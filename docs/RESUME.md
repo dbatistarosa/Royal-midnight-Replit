@@ -2,6 +2,36 @@
 
 ## REANUDACIÓN 2026-09-09 — prevalece sobre las pausas históricas
 
+### Cierre verificado del despliegue
+
+PR #4 también MERGED. Producción sirve ahora **6fcde93baa2ff22a156de0ddc3caadefc3d4888f**,
+deployment **dpl_6DwxVgLFGJdgGPEmGgthAyar62Gn**. CI de main **34319163545 PASS**
+y Post-Deploy Smoke Test **34319282616 PASS**. El fallo de auditoría del merge
+anterior queda resuelto por este parche; no se desactivó ninguna validación.
+Verificación FINAL: healthz 200 con SHA exacto, admin/system-health sin sesión
+401, payments/config 200 TEST y quote 200/40.62 USD. Workers comprobados 200 en
+el primer despliegue y sus dos registros en cron_runs de producción son success.
+No se enviaron correos de prueba a clientes ni se cobró ninguna tarjeta.
+Expo config SDK 56 y serialización local Nodemailer también PASS. Builds locales
+web/API e import del bundle terminaron correctamente (esbuild requiere ejecución
+normal: el sandbox Windows deniega lectura al resolver directorios ascendentes).
+
+GitHub: https://github.com/dbatistarosa/Royal-midnight-Replit/pull/3 y /pull/4.
+El checkpoint documental posterior se guarda en fix/royal-midnight-reliability;
+es normal que su SHA difiera de producción, porque solo añade esta evidencia.
+
+**Siguiente bloque concreto, todavía NO corregido:** bookings.ts conserva
+efectos después de res.json al finalizar viaje y cobrar extras (guardar desglose,
+incrementar totalRides, recibos y recompensa por referido). No basta reemplazar
+void por await: hacer transaccionales los registros locales y persistir los
+efectos reintentables antes de responder; probar caída/reintento sin duplicar
+cobros, extras, contadores o recibos. Referencias de esta revisión: secciones
+end-trip ~2670–2760, collect-extra-time ~2890–2920 y add-extras ~3120–3185.
+Mantener el bloqueo de pago por reserva y claves idempotentes en cualquier arreglo.
+Después completar E2E TEST (tarjeta/3DS/webhooks) con configuración propia de
+staging, push móvil/dispositivo, conciliación corporativa, MFA y restauración.
+No declarar cerrado todo el informe RM-01–20 ni repetir migraciones ya aplicadas.
+
 Las CUATRO migraciones ya se aplicaron correctamente en PRODUCCIÓN con la
 autorización específica recibida. Versiones remotas: schema_baseline 20260909061016,
 reliability_foundation 20260909061032, reliability_settlement 20260909061038 y
@@ -25,7 +55,7 @@ Auditoría local ahora exit 0: 1 moderate (decode-uri-component bajo Expo) y
 2 high previamente exceptuadas (image-size/Metro). No se añadieron excepciones.
 El parche sugerido decode-uri-component 0.4.3 no existe en npm; 0.5 implica
 revisión de compatibilidad aparte. Tipos PASS; API 166/18 y web 3/1 PASS.
-Pendiente al escribir: terminar build web, subir parche y verificar CI/deploy.
+Estas pruebas y publicación quedaron completadas; ver cierre verificado arriba.
 
 Supabase security advisor: 42 INFO RLS sin policies (tablas privadas de API;
 sin acceso anon/authenticated) y 1 WARN extensión en public, sin errores.
