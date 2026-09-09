@@ -1,4 +1,5 @@
 import { settleBookingCancellation } from "../lib/cancellationSettlement.js";
+import { recordSupplementalPayment } from "../lib/supplementalPayments.js";
 import { withMailScope } from "../lib/mailOutbox.js";
 import { withLock, rows, bookingAction, setActor } from "../lib/durability.js";
 import { enqueueBookingNotification } from "../lib/bookingJobs.js";
@@ -867,6 +868,10 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
     if(receipt?.status==='done')return;
     await db.execute(sql`INSERT INTO payment_events(id,event_type,booking_id) VALUES(${event.id},${event.type},${bookingId||null})
       ON CONFLICT(id) DO UPDATE SET status='processing',attempts=payment_events.attempts+1,last_error=NULL`);
+    if (await recordSupplementalPayment(event)) {
+      await db.execute(sql`UPDATE payment_events SET status='done',processed_at=now(),last_error=NULL WHERE id=${event.id}`);
+      return;
+    }
     if(event.type==='payment_intent.succeeded'||event.type==='payment_intent.amount_capturable_updated'){
       const intent=event.data.object as Stripe.PaymentIntent;
       if(bookingId){
