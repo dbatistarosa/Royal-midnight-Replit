@@ -79,6 +79,14 @@ type BookingRow = {
   extraCharge?: number | string | null;
   passengerPreferences?: PassengerPreferences | null;
   checklistCompletedAt?: string | null;
+  itinerary?: Array<{
+    id: number;
+    sequence: number;
+    kind: "stop" | "final";
+    address: string;
+    arrivedAt?: string | null;
+    departedAt?: string | null;
+  }>;
 };
 
 type EarningsData = {
@@ -417,6 +425,22 @@ function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; sh
           preview — same component, so the two can never drift apart. */}
       <PassengerPreferencesPanel preferences={booking.passengerPreferences} />
       <CharterDetails booking={booking} audience="driver" />
+      {booking.charterMode === "hourly" && (booking.itinerary?.length ?? 0) > 0 && (
+        <div className="border border-white/10 bg-white/[0.02] p-3 space-y-2">
+          <p className="text-[10px] uppercase tracking-widest text-primary">Hourly itinerary</p>
+          {[...(booking.itinerary ?? [])].sort((a, b) => a.sequence - b.sequence).map(item => (
+            <div key={item.id} className="flex items-start gap-2 text-xs">
+              <span className={item.arrivedAt ? "text-green-400" : "text-gray-500"}>{item.arrivedAt ? "✓" : "○"}</span>
+              <div>
+                <span className="text-gray-500 uppercase tracking-wider mr-2">
+                  {item.kind === "final" ? "Final" : `Stop ${item.sequence + 1}`}
+                </span>
+                <span className="text-gray-200">{item.address}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <TripExtras extras={booking.extras} audience="driver" />
       {/* Only once the passenger is actually aboard: the clock the customer is
           billed from starts at pickup, not at assignment. */}
@@ -452,6 +476,7 @@ function TripActionButton({
   currentStatus,
   pickupAt,
   checklistCompletedAt,
+  itinerary = [],
   onRefresh,
 }: {
   bookingId: number;
@@ -459,6 +484,7 @@ function TripActionButton({
   currentStatus: string;
   pickupAt: string;
   checklistCompletedAt?: string | null;
+  itinerary?: BookingRow["itinerary"];
   onRefresh: () => void;
 }) {
   const { toast } = useToast();
@@ -499,6 +525,25 @@ function TripActionButton({
       onRefresh();
     } catch {
       toast({ title: "Network error", description: "Could not reach the server. Please try again.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const callItineraryAction = async (sequence: number, action: "arrive" | "depart") => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${bookingId}/trip/itinerary/${sequence}/${action}`, {
+        method: "POST",
+        headers: { Authorization: authHeader },
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) {
+        toast({ title: "Error", description: body.error ?? "Could not update the itinerary.", variant: "destructive" });
+        return;
+      }
+      toast({ title: action === "arrive" ? "Arrival recorded" : "Trip resumed", description: "The hourly timer is still running." });
+      onRefresh();
     } finally {
       setLoading(false);
     }
@@ -620,6 +665,32 @@ function TripActionButton({
   }
 
   if (currentStatus === "in_progress") {
+    const ordered = [...itinerary].sort((a, b) => a.sequence - b.sequence);
+    const currentStop = ordered.find(stop => !stop.departedAt);
+    if (currentStop && !currentStop.arrivedAt) {
+      return (
+        <button
+          onClick={() => void callItineraryAction(currentStop.sequence, "arrive")}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-widest bg-violet-600 text-white font-semibold hover:bg-violet-500 transition-colors disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPinCheck className="w-3.5 h-3.5" />}
+          {currentStop.kind === "final" ? "Arrived at Final Destination" : `Arrived at Stop ${currentStop.sequence + 1}`}
+        </button>
+      );
+    }
+    if (currentStop?.kind === "stop" && currentStop.arrivedAt && !currentStop.departedAt) {
+      return (
+        <button
+          onClick={() => void callItineraryAction(currentStop.sequence, "depart")}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-widest bg-blue-600 text-white font-semibold hover:bg-blue-500 transition-colors disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PlayCircle className="w-3.5 h-3.5" />}
+          Passenger Back in Vehicle — Continue
+        </button>
+      );
+    }
     return (
       <button
         onClick={() => void callEndpoint("complete")}
@@ -689,6 +760,7 @@ function BookingCard({ booking, authHeader, onRefresh }: { booking: BookingRow; 
             currentStatus={booking.status}
             pickupAt={booking.pickupAt}
             checklistCompletedAt={(booking as BookingRow).checklistCompletedAt}
+            itinerary={booking.itinerary}
             onRefresh={onRefresh}
           />
         </div>

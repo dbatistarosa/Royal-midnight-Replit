@@ -1,3 +1,7 @@
+import { settleBookingCancellation } from "../lib/cancellationSettlement.js";
+import { withMailScope } from "../lib/mailOutbox.js";
+import { withLock, rows, bookingAction, setActor } from "../lib/durability.js";
+import { enqueueBookingNotification } from "../lib/bookingJobs.js";
 import { Router, type IRouter } from "express";
 import crypto from "node:crypto";
 import Stripe from "stripe";
@@ -8,7 +12,7 @@ import {
   settingsTable,
   usersTable,
 } from "@workspace/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -76,7 +80,7 @@ const WEBHOOK_URL =
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("STRIPE_SECRET_KEY is not configured");
-  return new Stripe(key, { apiVersion: "2024-06-20" as const });
+  return new Stripe(key, { apiVersion: "2024-06-20" as const,timeout:10000,maxNetworkRetries:1 });
 }
 
 async function getWebhookSecret(): Promise<string | null> {
@@ -97,12 +101,12 @@ async function getWebhookSecret(): Promise<string | null> {
 /** Third copy of this lookup, folded into the shared one. */
 const getCommissionPct = fetchCommissionPct;
 
-async function firePostPaymentEmails(bookingId: number): Promise<void> {
+export async function firePostPaymentEmails(bookingId: number): Promise<void> {
   const [booking] = await db
     .select()
     .from(bookings)
     .where(eq(bookings.id, bookingId));
-  if (!booking) return;
+  if (!booking || !["pending","authorized","confirmed","on_way","on_location","in_progress","completed"].includes(booking.status)) return;
 
   const commissionPct = await getCommissionPct();
   const priceQuoted = parseFloat(String(booking.priceQuoted));
@@ -233,224 +237,69 @@ router.get("/payments/config", async (_req, res): Promise<void> => {
   res.json({ publishableKey });
 });
 
-router.post(
-  "/payments/create-intent",
-  paymentLimiter(),
-  optionalAuth,
-  async (req, res): Promise<void> => {
-    // A PaymentIntent is always tied to a booking, and the amount always comes
-    // from that booking's stored price — never from the request body (CN-002).
-    // Accepting a body-supplied amount let a caller pay an arbitrary sum and then
-    // apply the resulting PI to someone else's reservation.
-    const { bookingId, trackingToken } = req.body as {
-      bookingId?: number;
-      trackingToken?: string;
-    };
-    const bId = Number(bookingId);
-    if (!Number.isFinite(bId) || bId <= 0) {
-      res.status(400).json({ error: "bookingId is required" });
-      return;
+router.post('/payments/create-intent',paymentLimiter(),optionalAuth,async(req,res):Promise<void>=>{
+ const bId=Number(req.body?.bookingId);
+ if(!Number.isInteger(bId)||bId<=0){res.status(400).json({error:'Valid bookingId required'});return;}
+ try{
+  const result=await withLock('payment:'+bId,async tx=>{
+   const stripe=getStripe();
+   const [booking]=await tx.select().from(bookings).where(eq(bookings.id,bId));
+   if(!booking)return {status:404,body:{error:'Booking not found'}};
+   const caller=req.currentUser;
+   let authorized=caller?.role==='admin'||(!!caller && booking.userId===caller.userId)||matchesTrackingToken(booking.trackingToken,req.body?.trackingToken);
+   if(!authorized && caller){
+    const [u]=rows<{email:string}>(await tx.execute(sql`SELECT email FROM users WHERE id=${caller.userId} AND email_verified_at IS NOT NULL`));
+    authorized=!!u && booking.userId==null && u.email===booking.passengerEmail;
+   }
+   if(!authorized)return {status:403,body:{error:'Access denied'}};
+   if(booking.status!=='awaiting_payment')return {status:409,body:{error:'This booking is not awaiting payment'}};
+   const [invoiceRow]=rows<{stripe_invoice_id:string|null}>(await tx.execute(sql`SELECT stripe_invoice_id FROM bookings WHERE id=${bId}`));
+   if(invoiceRow?.stripe_invoice_id){
+    const invoice=await stripe.invoices.retrieve(invoiceRow.stripe_invoice_id);
+    if(invoice.status!=='void'&&invoice.status!=='uncollectible')return {status:409,body:{error:'Use the invoice payment link for this reservation'}};
+   }
+   const amount=Math.round(Number(booking.priceQuoted)*100);
+   if(!Number.isSafeInteger(amount)||amount<50)return {status:400,body:{error:'Invalid payable amount'}};
+   let previous:Stripe.PaymentIntent|null=null;
+   if(booking.stripePaymentIntentId){
+    // Do not create another charge when retrieval fails: the previous charge may exist.
+    previous=await stripe.paymentIntents.retrieve(booking.stripePaymentIntentId);
+    if(['succeeded','processing','requires_capture'].includes(previous.status)){
+     if(previous.status==='succeeded'){
+      await tx.update(bookings).set({status:'pending'}).where(and(eq(bookings.id,bId),eq(bookings.status,'awaiting_payment')));
+      await enqueueBookingNotification(bId,tx);
+     }
+     return {status:409,body:{error:'Payment already received or processing. Refresh your reservation.'}};
     }
-    try {
-      const stripe = getStripe();
-      const [booking] = await db
-        .select()
-        .from(bookings)
-        .where(eq(bookings.id, bId));
-      if (!booking) {
-        res.status(404).json({ error: "Booking not found" });
-        return;
-      }
-
-      // Authorisation. Booking without an account is a legitimate flow, so this
-      // cannot simply require a session — but it had no check at all, and booking
-      // ids are serial. Anyone could walk them to learn which exist, mint Stripe
-      // customers and PaymentIntents on this account without limit, and (the part
-      // that actually costs money) repoint an already-authorised booking's
-      // stripePaymentIntentId at a PI of their own. "Release authorisation" in
-      // the admin panel would then cancel the attacker's PI, report success, and
-      // leave the real hold sitting on the customer's card.
-      //
-      // The trackingToken issued at booking time is the same bearer credential
-      // GET /bookings/track/:token already trusts for exactly this situation.
-      const caller = req.currentUser;
-      const isAdmin = caller?.role === "admin";
-      let authorised =
-        isAdmin ||
-        (caller != null &&
-          booking.userId != null &&
-          booking.userId === caller.userId) ||
-        matchesTrackingToken(booking.trackingToken, trackingToken);
-
-      // A booking created by an admin is linked to the passenger by email only.
-      if (!authorised && caller != null && booking.passengerEmail) {
-        const [callerUser] = await db
-          .select({ email: usersTable.email })
-          .from(usersTable)
-          .where(eq(usersTable.id, caller.userId));
-        authorised =
-          !!callerUser?.email &&
-          callerUser.email.toLowerCase() ===
-            booking.passengerEmail.toLowerCase();
-      }
-
-      if (!authorised) {
-        req.log.warn(
-          {
-            ip: req.ip,
-            path: req.path,
-            userId: caller?.userId ?? null,
-            bookingId: bId,
-          },
-          "authorization_failed",
-        );
-        res.status(403).json({ error: "Access denied" });
-        return;
-      }
-
-      // Never repoint the PI of a booking that already moved past payment. Admin
-      // is exempt: the "Charge Card" path deliberately mints a replacement, and
-      // only after confirming with Stripe that the previous PI is dead.
-      if (!isAdmin && booking.status !== "awaiting_payment") {
-        res
-          .status(409)
-          .json({ error: "This booking is not awaiting payment." });
-        return;
-      }
-
-      const amountCents = Math.round(
-        parseFloat(String(booking.priceQuoted)) * 100,
-      );
-      if (!Number.isFinite(amountCents) || amountCents <= 0) {
-        res.status(400).json({ error: "This booking has no payable amount." });
-        return;
-      }
-
-      const metadata: Record<string, string> = {
-        bookingId: String(bId),
-        passengerName: booking.passengerName,
-        pickupAddress: booking.pickupAddress,
-        dropoffAddress: booking.dropoffAddress,
-      };
-      const description = `Royal Midnight — Booking #RM-${String(bId).padStart(4, "0")}`;
-      let customerId: string | undefined;
-
-      // Find or create a Stripe customer so the card can be saved for future use.
-      // Wrapped in its own try-catch: if the DB column is missing or Stripe fails,
-      // we degrade gracefully and skip setup_future_usage rather than blocking payment.
-      if (booking.userId) {
-        try {
-          const [user] = await db
-            .select({
-              id: usersTable.id,
-              email: usersTable.email,
-              name: usersTable.name,
-              stripeCustomerId: usersTable.stripeCustomerId,
-            })
-            .from(usersTable)
-            .where(eq(usersTable.id, booking.userId));
-          if (user) {
-            if (user.stripeCustomerId) {
-              customerId = user.stripeCustomerId;
-            } else {
-              // Create a new Stripe customer and persist it
-              const customer = await stripe.customers.create({
-                email: user.email,
-                name: user.name,
-                metadata: { userId: String(user.id) },
-              });
-              customerId = customer.id;
-              await db
-                .update(usersTable)
-                .set({ stripeCustomerId: customer.id })
-                .where(eq(usersTable.id, user.id));
-            }
-          }
-        } catch (customerErr: any) {
-          // Non-fatal: log and continue without customer/setup_future_usage.
-          // The payment still works; saved-card feature is unavailable for this booking.
-          console.warn(
-            "[payments] customer setup skipped:",
-            customerErr?.message,
-          );
-          customerId = undefined;
-        }
-      }
-
-      // Always use automatic capture — charge the card immediately when the passenger pays.
-      // Do NOT use setup_future_usage on the PaymentIntent: it triggers stronger 3DS
-      // requirements on real cards and can break the payment flow. Cards are saved to the
-      // customer record via the webhook after payment succeeds instead.
-      const piParams = {
-        amount: amountCents,
-        currency: "usd" as const,
-        capture_method: "automatic" as const,
-        payment_method_types: ["card"],
-        metadata,
-        description,
-      };
-
-      let paymentIntent;
-      try {
-        paymentIntent = await stripe.paymentIntents.create({
-          ...piParams,
-          ...(customerId ? { customer: customerId } : {}),
-        });
-      } catch (err) {
-        // A stored customer id from a previous Stripe account (or the other mode)
-        // still looks valid but resolves to nothing, and it took the entire
-        // payment down with it. The customer record is only a convenience for
-        // saved cards — drop the dead id and let the payment through.
-        if (!customerId || !isMissingCustomerError(err)) throw err;
-        req.log.warn(
-          { bookingId: bId, customerId, userId: booking.userId },
-          "stripe_customer_missing_retrying",
-        );
-        if (booking.userId)
-          await forgetStaleStripeCustomer(booking.userId, req.log);
-        paymentIntent = await stripe.paymentIntents.create(piParams);
-      }
-
-      // Persist the PI ID on the booking immediately so that:
-      //  1. "Sync Payment" can locate it even before confirm is called
-      //  2. "Charge Card" reuses the same PI on retry instead of creating duplicates
-      // The status is repeated in the WHERE clause so a booking that got paid
-      // between the read above and this write keeps pointing at the PI that
-      // actually holds the money.
-      try {
-        await db
-          .update(bookings)
-          .set({
-            stripePaymentIntentId: paymentIntent.id,
-            updatedAt: new Date(),
-          })
-          .where(
-            isAdmin
-              ? eq(bookings.id, bId)
-              : and(
-                  eq(bookings.id, bId),
-                  eq(bookings.status, "awaiting_payment"),
-                ),
-          );
-      } catch (err: any) {
-        // Non-fatal: the PI carries bookingId in its metadata, so the webhook can
-        // still reconcile. Payment must not be blocked on a bookkeeping write.
-        req.log.error(
-          { err, bookingId: bId },
-          "could not pre-save PaymentIntent id",
-        );
-      }
-
-      res.json({
-        clientSecret: paymentIntent.client_secret,
-        paymentIntentId: paymentIntent.id,
-      });
-    } catch (err: any) {
-      // Surface the real Stripe error message so the frontend can show it to the user.
-      sendStripeError(req, res, err, "Stripe error — please try again.");
+    if(previous.amount===amount && previous.currency==='usd' && previous.status!=='canceled')
+      return {status:200,body:{clientSecret:previous.client_secret,paymentIntentId:previous.id}};
+    if(previous.status!=='canceled')await stripe.paymentIntents.cancel(previous.id,{}, {idempotencyKey:'cancel-repriced-'+previous.id});
+   }
+   let customerId:string|undefined;
+   if(booking.userId){
+    const [user]=await tx.select().from(usersTable).where(eq(usersTable.id,booking.userId));
+    if(user){
+     customerId=user.stripeCustomerId??undefined;
+     const staleId=customerId;
+     if(customerId){try{const customer=await stripe.customers.retrieve(customerId);if(customer.deleted)customerId=undefined;}
+       catch(err){if(isMissingCustomerError(err))customerId=undefined;else throw err;}}
+     if(!customerId){
+      const customer=await stripe.customers.create({email:user.email,name:user.name,metadata:{userId:String(user.id)}},{idempotencyKey:'customer-user-'+user.id+'-'+(staleId??'initial')});
+      customerId=customer.id;await tx.update(usersTable).set({stripeCustomerId:customerId}).where(eq(usersTable.id,user.id));
+     }
     }
-  },
-);
+   }
+   const intent=await stripe.paymentIntents.create({amount,currency:'usd',capture_method:'automatic',
+     automatic_payment_methods:{enabled:true,allow_redirects:'never'},
+     metadata:{bookingId:String(bId)},description:'Royal Midnight — Reservation '+bId,
+     ...(customerId?{customer:customerId,setup_future_usage:'off_session' as const}:{})},
+     {idempotencyKey:'booking-'+bId+'-amount-'+amount+'-after-'+(previous?.id??'initial')});
+   await tx.update(bookings).set({stripePaymentIntentId:intent.id,updatedAt:new Date()}).where(eq(bookings.id,bId));
+   return {status:200,body:{clientSecret:intent.client_secret,paymentIntentId:intent.id}};
+  });
+  res.status(result.status).json(result.body);
+ }catch(err){sendStripeError(req,res,err,'Unable to initialize payment. Please retry.');}
+});
 
 // Lookup which booking a PaymentIntent belongs to (via PI metadata) — used by
 // the frontend 3DS recovery path when sessionStorage is unavailable.
@@ -536,168 +385,24 @@ router.get(
   },
 );
 
-router.post(
-  "/payments/confirm/:bookingId",
-  paymentLimiter(),
-  async (req, res): Promise<void> => {
-    const { bookingId } = req.params;
-    const { paymentIntentId } = req.body as { paymentIntentId: string };
-    const bId = parseInt(String(bookingId ?? ""), 10);
-    if (!bId || !paymentIntentId) {
-      res.status(400).json({ error: "bookingId and paymentIntentId required" });
-      return;
-    }
-    try {
-      const stripe = getStripe();
-      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
-
-      const [current] = await db
-        .select({
-          status: bookings.status,
-          stripePaymentIntentId: bookings.stripePaymentIntentId,
-          priceQuoted: bookings.priceQuoted,
-        })
-        .from(bookings)
-        .where(eq(bookings.id, bId));
-      if (!current) {
-        res.status(404).json({ error: "Booking not found" });
-        return;
-      }
-
-      // Enforce PI-to-booking binding (CN-002). Previously a PI with no metadata
-      // skipped this check entirely, which let anyone pay a token amount on an
-      // unbound PI and then apply it to someone else's reservation. A PI is now
-      // accepted only when its metadata names this booking, or when this booking
-      // already holds that PI id — which only our own create-intent can arrange.
-      const metaId = intent.metadata.bookingId;
-      const boundByMetadata = metaId === String(bId);
-      const boundByBooking = current.stripePaymentIntentId === paymentIntentId;
-      if (!boundByMetadata && !boundByBooking) {
-        res
-          .status(403)
-          .json({ error: "PaymentIntent does not belong to this booking" });
-        return;
-      }
-
-      // Reject underpayment — the PI must cover the booking's stored price.
-      const expectedCents = Math.round(
-        parseFloat(String(current.priceQuoted)) * 100,
-      );
-      const paidCents = intent.amount_received || intent.amount || 0;
-      if (
-        Number.isFinite(expectedCents) &&
-        expectedCents > 0 &&
-        paidCents < expectedCents
-      ) {
-        res
-          .status(402)
-          .json({ error: "Payment does not cover the booking total." });
-        return;
-      }
-
-      if (
-        intent.status === "succeeded" ||
-        intent.status === "requires_capture" ||
-        intent.status === "processing"
-      ) {
-        if (
-          intent.status === "requires_capture" &&
-          current.status === "awaiting_payment"
-        ) {
-          // Manual-capture flow — card authorized, hold placed. Do NOT charge yet.
-          // Charge happens when a driver accepts the booking.
-          await db
-            .update(bookings)
-            .set({
-              status: "authorized",
-              stripePaymentIntentId: paymentIntentId,
-              authorizedAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(bookings.id, bId));
-          // No post-payment emails here — they fire after capture (driver accept).
-          res.json({
-            success: true,
-            status: "authorized",
-            paymentIntentId,
-            paymentStatus: intent.status,
-          });
-        } else if (
-          intent.status === "succeeded" &&
-          current.status === "awaiting_payment"
-        ) {
-          // Direct success (legacy / non-manual-capture path) — promote to pending immediately.
-          await db
-            .update(bookings)
-            .set({
-              status: "pending",
-              stripePaymentIntentId: paymentIntentId,
-              updatedAt: new Date(),
-            })
-            .where(eq(bookings.id, bId));
-          firePostPaymentEmails(bId).catch((err) =>
-            console.error("[payments] post-confirm email error:", err),
-          );
-          res.json({
-            success: true,
-            status: "pending",
-            paymentIntentId,
-            paymentStatus: intent.status,
-          });
-        } else if (
-          intent.status === "processing" &&
-          current.status === "awaiting_payment"
-        ) {
-          // Async payment method (e.g. ACH/bank transfer) — store the PI ID now.
-          // The booking stays awaiting_payment; the payment_intent.succeeded webhook
-          // will promote it once the charge settles.
-          await db
-            .update(bookings)
-            .set({
-              stripePaymentIntentId: paymentIntentId,
-              updatedAt: new Date(),
-            })
-            .where(eq(bookings.id, bId));
-          res.json({
-            success: true,
-            status: "awaiting_payment",
-            paymentIntentId,
-            paymentStatus: "processing",
-          });
-        } else if (!current.stripePaymentIntentId) {
-          // Store PI ID even if booking was already moved past awaiting_payment (e.g. by webhook)
-          await db
-            .update(bookings)
-            .set({
-              stripePaymentIntentId: paymentIntentId,
-              updatedAt: new Date(),
-            })
-            .where(eq(bookings.id, bId));
-          res.json({
-            success: true,
-            status: current.status,
-            paymentIntentId,
-            paymentStatus: intent.status,
-          });
-        } else {
-          res.json({
-            success: true,
-            status: current.status,
-            paymentIntentId,
-            paymentStatus: intent.status,
-          });
-        }
-      } else {
-        // Definitive failure statuses (canceled, requires_payment_method, etc.)
-        res
-          .status(400)
-          .json({ error: "Payment not completed", status: intent.status });
-      }
-    } catch (err: any) {
-      sendStripeError(req, res, err);
-    }
-  },
-);
+router.post('/payments/confirm/:bookingId',paymentLimiter(),async(req,res):Promise<void>=>{
+ const bId=Number(req.params.bookingId),intentId=req.body?.paymentIntentId;
+ if(!Number.isInteger(bId)||bId<1||typeof intentId!=='string'){res.status(400).json({error:'Valid booking and payment required'});return;}
+ try{
+  const result=await withLock('payment:'+bId,async()=>{
+   const intent=await getStripe().paymentIntents.retrieve(intentId);
+   const [booking]=await db.select().from(bookings).where(eq(bookings.id,bId));
+   if(!booking)return {status:404,body:{error:'Booking not found'}};
+   if(booking.stripePaymentIntentId!==intent.id || intent.metadata.bookingId!==String(bId))return {status:403,body:{error:'Payment does not belong to this booking'}};
+   if(intent.currency!=='usd'||intent.amount<Math.round(Number(booking.priceQuoted)*100))return {status:402,body:{error:'Payment does not cover this booking'}};
+   if(intent.status==='succeeded'){await confirmBookingFromPaymentIntent(bId,intent.id);await enqueueBookingNotification(bId);}
+   else if(intent.status==='requires_capture')await authorizeBookingFromPaymentIntent(bId,intent.id);
+   else if(intent.status!=='processing')return {status:400,body:{error:'Payment not completed',status:intent.status}};
+   const [updated]=await db.select({status:bookings.status}).from(bookings).where(eq(bookings.id,bId));
+   return {status:200,body:{success:true,status:updated.status,paymentIntentId:intent.id,paymentStatus:intent.status}};
+  });res.status(result.status).json(result.body);
+ }catch(err){sendStripeError(req,res,err);}
+});
 
 // ─── Admin: manual payment confirmation for stuck awaiting_payment bookings ──
 
@@ -714,12 +419,13 @@ router.post(
     const [booking] = await db
       .select()
       .from(bookings)
-      .where(eq(bookings.id, bId));
+      .where(eq(bookings.id,bId));
     if (!booking) {
       res.status(404).json({ error: "Booking not found" });
       return;
     }
 
+    if(booking.status==="cancelled"){res.status(409).json({error:"Booking was cancelled"});return;}
     // If already paid/confirmed, return success immediately
     if (booking.status !== "awaiting_payment") {
       res.json({
@@ -740,7 +446,7 @@ router.post(
         limit: 5,
       });
       const succeededIntent = intents.data.find(
-        (pi) => pi.status === "succeeded",
+        (pi) => pi.status === "succeeded" && pi.currency === "usd" && pi.amount_received >= Math.round(Number(booking.priceQuoted)*100),
       );
       if (succeededIntent) {
         await db
@@ -750,8 +456,8 @@ router.post(
             stripePaymentIntentId: succeededIntent.id,
             updatedAt: new Date(),
           })
-          .where(eq(bookings.id, bId));
-        firePostPaymentEmails(bId).catch(() => {});
+          .where(and(eq(bookings.id, bId),eq(bookings.status,"awaiting_payment")));
+        await enqueueBookingNotification(bId);
         res.json({
           confirmed: true,
           source: "payment_intent",
@@ -767,14 +473,14 @@ router.post(
         limit: 5,
       });
       const paidInvoice = invoiceSearch.data.find(
-        (inv) => inv.status === "paid",
+        (inv) => inv.status === "paid" && inv.currency === "usd" && inv.amount_paid >= Math.round(Number(booking.priceQuoted)*100),
       );
       if (paidInvoice) {
         await db
           .update(bookings)
           .set({ status: "pending", updatedAt: new Date() })
-          .where(eq(bookings.id, bId));
-        firePostPaymentEmails(bId).catch(() => {});
+          .where(and(eq(bookings.id, bId),eq(bookings.status,"awaiting_payment")));
+        await enqueueBookingNotification(bId);
         res.json({
           confirmed: true,
           source: "invoice",
@@ -884,6 +590,7 @@ router.post(
           "charge.updated",
           "charge.refunded",
           "charge.dispute.created",
+          "charge.dispute.closed",
           "invoice.paid",
         ];
       const existing = await stripe.webhookEndpoints.list({ limit: 20 });
@@ -927,6 +634,7 @@ router.post(
           "charge.updated",
           "charge.refunded",
           "charge.dispute.created",
+          "charge.dispute.closed",
           "invoice.paid",
         ],
         description: "Royal Midnight payment confirmation webhook",
@@ -980,6 +688,7 @@ router.post(
       "charge.updated",
       "charge.refunded",
       "charge.dispute.created",
+          "charge.dispute.closed",
       "invoice.paid",
     ];
     try {
@@ -1028,330 +737,94 @@ router.post(
 
 // ─── Admin: cancel a Stripe authorization (manual-capture PI) and release the hold
 
-router.post(
-  "/admin/payments/cancel-auth/:bookingId",
-  requireAdmin,
-  async (req, res): Promise<void> => {
-    const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
-    if (!bId) {
-      res.status(400).json({ error: "Invalid booking id" });
-      return;
-    }
-
-    const [booking] = await db
-      .select()
-      .from(bookings)
-      .where(eq(bookings.id, bId));
-    if (!booking) {
-      res.status(404).json({ error: "Booking not found" });
-      return;
-    }
-
-    if (booking.status !== "authorized") {
-      res
-        .status(400)
-        .json({
-          error: `Booking is not in authorized status (current: ${booking.status})`,
-        });
-      return;
-    }
-
-    if (!booking.stripePaymentIntentId) {
-      res
-        .status(400)
-        .json({ error: "Booking has no associated payment intent to cancel" });
-      return;
-    }
-
-    try {
-      const stripe = getStripe();
-      await stripe.paymentIntents.cancel(booking.stripePaymentIntentId);
-      await db
-        .update(bookings)
-        .set({ status: "cancelled", updatedAt: new Date() })
-        .where(eq(bookings.id, bId));
-      if (booking.promoCode) {
-        releasePromoUsage(booking.promoCode, req.log);
-      }
-      req.log.info(
-        `[payments] Admin cancelled PI authorization for booking #${bId} (PI: ${booking.stripePaymentIntentId})`,
-      );
-      res.json({
-        success: true,
-        message: "Authorization cancelled and card hold released.",
-      });
-    } catch (err: any) {
-      sendStripeError(req, res, err);
-    }
-  },
-);
+router.post('/admin/payments/cancel-auth/:bookingId',requireAdmin,bookingAction(async(req,res):Promise<void>=>{
+ const id=Number(req.params.bookingId);
+ if(!Number.isInteger(id)||id<1){res.status(400).json({error:'Invalid booking id'});return;}
+ const result=await db.transaction(async tx=>{
+  await setActor(tx,req.currentUser!.userId);
+  const [booking]=await tx.select().from(bookings).where(eq(bookings.id,id));
+  if(!booking)return {status:404,body:{error:'Booking not found'}};
+  if(booking.status!=='authorized')return {status:409,body:{error:'Booking is not authorized'}};
+  await tx.update(bookings).set({status:'cancelled',cancelledAt:new Date(),cancelledBy:'admin',updatedAt:new Date()}).where(and(eq(bookings.id,id),eq(bookings.status,'authorized')));
+  if(booking.promoCode)await tx.execute(sql`UPDATE promo_codes SET used_count=GREATEST(0,used_count-1) WHERE lower(code)=lower(${booking.promoCode})`);
+  const payload={intentId:booking.stripePaymentIntentId,refundCents:Math.round(Number(booking.priceQuoted)*100),feeAmount:0};
+  await tx.execute(sql`INSERT INTO app_jobs(key,kind,booking_id,payload) VALUES(${'booking-cancellation:'+id},'booking-cancellation',${id},${JSON.stringify(payload)}::jsonb) ON CONFLICT DO NOTHING`);
+  return {status:200,body:{success:true,message:'Cancellation recorded; card settlement is queued.',settlementStatus:'queued'}};
+ });
+ res.status(result.status).json(result.body);
+}));
 
 // ─── Admin: send a Stripe Invoice to the passenger's email for manual bookings
 
-router.post(
-  "/payments/create-invoice/:bookingId",
-  requireAdmin,
-  async (req, res): Promise<void> => {
-    const bId = parseInt(String(req.params["bookingId"] ?? ""), 10);
-    if (!bId) {
-      res.status(400).json({ error: "Invalid booking id" });
-      return;
-    }
-
-    const [booking] = await db
-      .select()
-      .from(bookings)
-      .where(eq(bookings.id, bId));
-    if (!booking) {
-      res.status(404).json({ error: "Booking not found" });
-      return;
-    }
-    if (booking.status !== "awaiting_payment") {
-      res.status(400).json({ error: "Booking is not awaiting payment" });
-      return;
-    }
-
-    try {
-      const stripe = getStripe();
-      const amount = Math.round(parseFloat(String(booking.priceQuoted)) * 100);
-      if (!amount || amount <= 0) {
-        res
-          .status(400)
-          .json({ error: "Booking has no valid price to invoice." });
-        return;
-      }
-
-      const bookingRef = `RM-${String(bId).padStart(4, "0")}`;
-
-      // Find or create the Stripe customer
-      const existingCustomers = await stripe.customers.list({
-        email: booking.passengerEmail,
-        limit: 1,
-      });
-      const customer =
-        existingCustomers.data.length > 0
-          ? existingCustomers.data[0]
-          : await stripe.customers.create({
-              email: booking.passengerEmail,
-              name: booking.passengerName,
-              metadata: { bookingId: String(bId) },
-            });
-
-      // Void any pre-existing open invoices for this booking to avoid stale state
-      const openInvoices = await stripe.invoices.list({
-        customer: customer.id,
-        status: "open",
-        limit: 10,
-      });
-      for (const inv of openInvoices.data) {
-        if (inv.metadata?.bookingId === String(bId)) {
-          await stripe.invoices.voidInvoice(inv.id);
-        }
-      }
-
-      // Also remove any dangling pending invoice items for this customer so they
-      // don't contaminate the new invoice total
-      const pendingItems = await stripe.invoiceItems.list({
-        customer: customer.id,
-        pending: true,
-        limit: 100,
-      });
-      for (const item of pendingItems.data) {
-        await stripe.invoiceItems.del(item.id);
-      }
-
-      // Create the draft invoice FIRST so we can attach the line item directly to
-      // it — this bypasses Stripe's "pending items" pool entirely and guarantees
-      // the invoice total is exactly what we expect.
-      const invoice = await stripe.invoices.create({
-        customer: customer.id,
-        collection_method: "send_invoice",
-        days_until_due: 7,
-        metadata: { bookingId: String(bId) },
-        description: `Royal Midnight — Reservation ${bookingRef}`,
-      });
-
-      // Attach the line item directly to the draft invoice
-      await stripe.invoiceItems.create({
-        customer: customer.id,
-        invoice: invoice.id,
-        amount,
-        currency: "usd",
-        description: `Royal Midnight Chauffeur — Booking ${bookingRef} · ${booking.pickupAddress} → ${booking.dropoffAddress}`,
-      });
-
-      // Retrieve the draft to confirm the total before finalising
-      const draft = await stripe.invoices.retrieve(invoice.id);
-      if ((draft.amount_due ?? 0) !== amount) {
-        await stripe.invoices.del(invoice.id);
-        res
-          .status(500)
-          .json({
-            error: `Invoice total mismatch: expected $${(amount / 100).toFixed(2)}, got $${((draft.amount_due ?? 0) / 100).toFixed(2)}. Please try again.`,
-          });
-        return;
-      }
-
-      const finalised = await stripe.invoices.finalizeInvoice(invoice.id);
-
-      const invoiceUrl = finalised.hosted_invoice_url ?? "";
-      const invoicePdfUrl = finalised.invoice_pdf ?? null;
-
-      if (!invoiceUrl) {
-        res
-          .status(500)
-          .json({
-            error:
-              "Invoice finalised but no payment URL was generated. Please try again.",
-          });
-        return;
-      }
-
-      await sendInvoiceToPassenger(
-        {
-          id: bId,
-          passengerName: booking.passengerName,
-          passengerEmail: booking.passengerEmail,
-          pickupAddress: booking.pickupAddress,
-          dropoffAddress: booking.dropoffAddress,
-          pickupAt: String(booking.pickupAt),
-          vehicleClass: booking.vehicleClass,
-          passengers: booking.passengers,
-          priceQuoted: parseFloat(String(booking.priceQuoted)),
-        },
-        invoiceUrl,
-        invoicePdfUrl,
-      );
-
-      res.json({ success: true, invoiceId: finalised.id, invoiceUrl });
-    } catch (err: any) {
-      sendStripeError(req, res, err);
-    }
-  },
-);
+router.post('/payments/create-invoice/:bookingId',requireAdmin,async(req,res):Promise<void>=>{
+ const bId=Number(req.params.bookingId);
+ if(!Number.isInteger(bId)||bId<1){res.status(400).json({error:'Invalid booking id'});return;}
+ try{
+  const result=await withLock('payment:'+bId,async()=>{
+   const [booking]=await db.select().from(bookings).where(eq(bookings.id,bId));
+   if(!booking)return {status:404,body:{error:'Booking not found'}};
+   if(booking.status!=='awaiting_payment')return {status:409,body:{error:'Booking is not awaiting payment'}};
+   const stripe=getStripe(),amount=Math.round(Number(booking.priceQuoted)*100);
+   if(!Number.isSafeInteger(amount)||amount<50)return {status:400,body:{error:'Invalid invoice amount'}};
+   if(booking.stripePaymentIntentId){
+    const pi=await stripe.paymentIntents.retrieve(booking.stripePaymentIntentId);
+    if(['processing','succeeded','requires_capture'].includes(pi.status))return {status:409,body:{error:'Card payment is already received or processing'}};
+    if(pi.status!=='canceled')await stripe.paymentIntents.cancel(pi.id,{}, {idempotencyKey:'invoice-cancel-card-'+pi.id});
+   }
+   const [saved]=rows<{stripe_invoice_id:string|null}>(await db.execute(sql`SELECT stripe_invoice_id FROM bookings WHERE id=${bId}`));
+   let invoice:Stripe.Invoice|null=saved?.stripe_invoice_id?await stripe.invoices.retrieve(saved.stripe_invoice_id):null;
+   if(!invoice){
+    const found=await stripe.invoices.search({query:'metadata["bookingId"]:"'+bId+'"',limit:100});
+    const active=found.data.filter(i=>i.status==='open'||i.status==='draft'||i.status==='paid');
+    if(active.length>1)return {status:409,body:{error:'Multiple invoices exist for this booking. Reconcile them before issuing another.'}};
+    invoice=active[0]??null;
+   }
+   if(invoice?.status==='paid')return {status:409,body:{error:'This invoice is paid. Reconcile the payment before issuing another.'}};
+   if(invoice&&invoice.status==='open'&&invoice.amount_due!==amount)return {status:409,body:{error:'The existing invoice has a different total. Void it in Stripe before repricing.'}};
+   const predecessor=invoice?.id??'initial';
+   if(!invoice||invoice.status==='void'||invoice.status==='uncollectible'){
+    const customer=await stripe.customers.create({email:booking.passengerEmail,name:booking.passengerName,metadata:{bookingId:String(bId)}},{idempotencyKey:'invoice-customer-'+bId});
+    invoice=await stripe.invoices.create({customer:customer.id,collection_method:'send_invoice',days_until_due:7,
+      pending_invoice_items_behavior:'exclude',metadata:{bookingId:String(bId)},description:'Royal Midnight — Reservation '+bId},
+      {idempotencyKey:'invoice-'+bId+'-'+amount+'-'+predecessor});
+   }
+   await db.execute(sql`UPDATE bookings SET stripe_invoice_id=${invoice.id} WHERE id=${bId}`);
+   if(invoice.status==='draft'){
+    const customer=typeof invoice.customer==='string'?invoice.customer:invoice.customer!.id;
+    if(invoice.amount_due===0)await stripe.invoiceItems.create({customer,invoice:invoice.id,amount,currency:'usd',description:'Royal Midnight reservation '+bId},{idempotencyKey:'invoice-line-'+invoice.id});
+    const draft=await stripe.invoices.retrieve(invoice.id);
+    if(draft.amount_due!==amount)throw new Error('Invoice amount mismatch. Review the draft in Stripe.');
+    invoice=await stripe.invoices.finalizeInvoice(invoice.id,{}, {idempotencyKey:'invoice-finalize-'+invoice.id});
+   }
+   const url=invoice.hosted_invoice_url;
+   if(!url)throw new Error('Invoice payment URL is unavailable');
+   await withMailScope('invoice:'+invoice.id,()=>sendInvoiceToPassenger({id:bId,passengerName:booking.passengerName,passengerEmail:booking.passengerEmail,
+     pickupAddress:booking.pickupAddress,dropoffAddress:booking.dropoffAddress,pickupAt:booking.pickupAt.toISOString(),vehicleClass:booking.vehicleClass,passengers:booking.passengers,priceQuoted:Number(booking.priceQuoted)},url,invoice!.invoice_pdf??null));
+   return {status:200,body:{success:true,invoiceId:invoice.id,invoiceUrl:url}};
+  });res.status(result.status).json(result.body);
+ }catch(err){sendStripeError(req,res,err);}
+});
 
 // ─── Stripe webhook ──────────────────────────────────────────────────────────
 
-async function confirmBookingFromPaymentIntent(
-  bookingId: number,
-  intentId: string,
-  maxAttempts = 4,
-): Promise<void> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const [current] = await db
-      .select({
-        status: bookings.status,
-        stripePaymentIntentId: bookings.stripePaymentIntentId,
-      })
-      .from(bookings)
-      .where(eq(bookings.id, bookingId));
-    if (!current) {
-      if (attempt < maxAttempts) {
-        console.warn(
-          `[payments] webhook: booking #${bookingId} not found yet — retrying in ${2 * attempt}s (attempt ${attempt}/${maxAttempts})`,
-        );
-        await new Promise((r) => setTimeout(r, 2000 * attempt));
-        continue;
-      }
-      console.error(
-        `[payments] Booking #${bookingId} not found after ${maxAttempts} attempts`,
-      );
-      return;
-    }
-    // payment_intent.succeeded fires after capture — move authorized → confirmed
-    // (the driver accept flow already moves it, but webhook is a safety net)
-    if (current.status === "awaiting_payment") {
-      await db
-        .update(bookings)
-        .set({
-          status: "pending",
-          stripePaymentIntentId: intentId,
-          updatedAt: new Date(),
-        })
-        .where(eq(bookings.id, bookingId));
-      logger.info(
-        `[payments] PI succeeded → Booking #${bookingId} → pending (PI: ${intentId})`,
-      );
-      // Awaited: this runs from the Stripe webhook, and Vercel can freeze the
-      // function the moment the response is sent. Fire-and-forget meant the
-      // confirmation and driver-offer emails were simply lost.
-      await firePostPaymentEmails(bookingId).catch((err) =>
-        console.error("[payments] post-payment email error:", err),
-      );
-    } else if (current.status === "cancelled") {
-      // Booking was cancelled but payment went through anyway (race condition) — issue full refund
-      console.warn(
-        `[payments] PI succeeded for already-cancelled booking #${bookingId} — issuing full refund (PI: ${intentId})`,
-      );
-      try {
-        const stripe = getStripe();
-        await stripe.refunds.create({ payment_intent: intentId });
-        logger.info(
-          `[payments] Full refund issued for cancelled booking #${bookingId} (PI: ${intentId})`,
-        );
-      } catch (refundErr: any) {
-        console.error(
-          `[payments] Failed to refund cancelled booking #${bookingId}:`,
-          refundErr.message,
-        );
-      }
-    } else if (!current.stripePaymentIntentId) {
-      await db
-        .update(bookings)
-        .set({ stripePaymentIntentId: intentId, updatedAt: new Date() })
-        .where(eq(bookings.id, bookingId));
-    }
-    return;
-  }
+async function confirmBookingFromPaymentIntent(bookingId:number,intentId:string):Promise<void>{
+ const [booking]=await db.select().from(bookings).where(eq(bookings.id,bookingId));
+ if(!booking)throw new Error('Payment booking not found');
+ if(booking.status==='cancelled'){
+  await withMailScope('booking-cancellation:'+bookingId,()=>settleBookingCancellation(bookingId,intentId));return;
+ }
+ if(booking.stripePaymentIntentId!==intentId)throw new Error('Payment intent no longer matches this booking');
+ await db.update(bookings).set({status:booking.driverId?'confirmed':'pending',updatedAt:new Date()})
+  .where(and(eq(bookings.id,bookingId),sql`${bookings.status} IN ('awaiting_payment','authorized')`));
+ await enqueueBookingNotification(bookingId);
 }
-
-async function authorizeBookingFromPaymentIntent(
-  bookingId: number,
-  intentId: string,
-  maxAttempts = 4,
-): Promise<void> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const [current] = await db
-      .select({
-        status: bookings.status,
-        stripePaymentIntentId: bookings.stripePaymentIntentId,
-      })
-      .from(bookings)
-      .where(eq(bookings.id, bookingId));
-    if (!current) {
-      if (attempt < maxAttempts) {
-        console.warn(
-          `[payments] webhook: booking #${bookingId} not found yet — retrying in ${2 * attempt}s (attempt ${attempt}/${maxAttempts})`,
-        );
-        await new Promise((r) => setTimeout(r, 2000 * attempt));
-        continue;
-      }
-      console.error(
-        `[payments] Booking #${bookingId} not found after ${maxAttempts} attempts`,
-      );
-      return;
-    }
-    if (current.status === "awaiting_payment") {
-      await db
-        .update(bookings)
-        .set({
-          status: "authorized",
-          stripePaymentIntentId: intentId,
-          authorizedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(bookings.id, bookingId));
-      logger.info(
-        `[payments] PI requires_capture → Booking #${bookingId} → authorized (PI: ${intentId})`,
-      );
-    } else if (!current.stripePaymentIntentId) {
-      await db
-        .update(bookings)
-        .set({ stripePaymentIntentId: intentId, updatedAt: new Date() })
-        .where(eq(bookings.id, bookingId));
-    }
-    return;
-  }
+async function authorizeBookingFromPaymentIntent(bookingId:number,intentId:string):Promise<void>{
+ const [booking]=await db.select().from(bookings).where(eq(bookings.id,bookingId));
+ if(!booking)throw new Error('Payment booking not found');
+ if(booking.status==='cancelled'){await settleBookingCancellation(bookingId,intentId);return;}
+ if(booking.stripePaymentIntentId!==intentId)throw new Error('Payment intent no longer matches this booking');
+ await db.update(bookings).set({status:'authorized',authorizedAt:new Date(),updatedAt:new Date()})
+  .where(and(eq(bookings.id,bookingId),eq(bookings.status,'awaiting_payment')));
 }
 
 router.post("/webhook/stripe", async (req, res): Promise<void> => {
@@ -1387,6 +860,21 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
   // exact hazard and awaits its job before responding; the lesson had not been
   // carried across. Stripe allows 10 seconds, far more than these queries take.
   try {
+    const object=event.data.object as unknown as {metadata?:Record<string,string>};
+    const bookingId=Number(object.metadata?.bookingId)||0;
+    await withLock(bookingId?'payment:'+bookingId:'stripe-event:'+event.id,async()=>{
+    const [receipt]=rows<{status:string}>(await db.execute(sql`SELECT status FROM payment_events WHERE id=${event.id}`));
+    if(receipt?.status==='done')return;
+    await db.execute(sql`INSERT INTO payment_events(id,event_type,booking_id) VALUES(${event.id},${event.type},${bookingId||null})
+      ON CONFLICT(id) DO UPDATE SET status='processing',attempts=payment_events.attempts+1,last_error=NULL`);
+    if(event.type==='payment_intent.succeeded'||event.type==='payment_intent.amount_capturable_updated'){
+      const intent=event.data.object as Stripe.PaymentIntent;
+      if(bookingId){
+        const [booking]=await db.select().from(bookings).where(eq(bookings.id,bookingId));
+        if(!booking)throw new Error('Payment booking not found');
+        if(intent.currency!=='usd'||intent.amount<Math.round(Number(booking.priceQuoted)*100))throw new Error('Payment amount or currency mismatch');
+      }
+    }
     if (event.type === "payment_intent.created") {
       const intent = event.data.object as Stripe.PaymentIntent;
       const bookingId = parseInt(intent.metadata.bookingId || "0");
@@ -1407,42 +895,24 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       }
     }
 
-    if (event.type === "invoice.paid") {
-      const invoice = event.data.object as Stripe.Invoice;
-      const bookingId = parseInt(invoice.metadata?.bookingId || "0");
-      if (bookingId) {
-        // The SDK's types describe the API version we're pinned to
-        // ("2024-06-20" above), which still returns payment_intent directly on
-        // the invoice — the field was only dropped from the *types* because the
-        // npm package always types the latest API shape, not the pinned one.
-        const invoiceWithPI = invoice as Stripe.Invoice & {
-          payment_intent?: string | Stripe.PaymentIntent | null;
-        };
-        const piId =
-          typeof invoiceWithPI.payment_intent === "string"
-            ? invoiceWithPI.payment_intent
-            : (invoiceWithPI.payment_intent?.id ?? null);
-        const [current] = await db
-          .select({ status: bookings.status })
-          .from(bookings)
-          .where(eq(bookings.id, bookingId));
-        if (current && current.status === "awaiting_payment") {
-          await db
-            .update(bookings)
-            .set({
-              status: "pending",
-              stripePaymentIntentId: piId ?? undefined,
-              updatedAt: new Date(),
-            })
-            .where(eq(bookings.id, bookingId));
-          req.log.info(
-            `[payments] Invoice paid → Booking #${bookingId} → pending (PI: ${piId ?? "N/A"})`,
-          );
-          await firePostPaymentEmails(bookingId).catch((err) =>
-            console.error("[payments] invoice.paid email error:", err),
-          );
-        }
+    if(event.type==='invoice.paid'){
+     const invoice=event.data.object as Stripe.Invoice & {payment_intent?:string|Stripe.PaymentIntent|null};
+     const bId=Number(invoice.metadata?.bookingId);
+     if(bId){
+      const [booking]=await db.select().from(bookings).where(eq(bookings.id,bId));
+      if(!booking)throw new Error('Invoice booking not found');
+      const [saved]=rows<{stripe_invoice_id:string|null}>(await db.execute(sql`SELECT stripe_invoice_id FROM bookings WHERE id=${bId}`));
+      if(saved?.stripe_invoice_id&&saved.stripe_invoice_id!==invoice.id)throw new Error('Invoice no longer matches booking');
+      if(invoice.currency!=='usd'||invoice.amount_paid<Math.round(Number(booking.priceQuoted)*100))throw new Error('Invoice payment does not cover booking');
+      const pi=typeof invoice.payment_intent==='string'?invoice.payment_intent:invoice.payment_intent?.id;
+      if(booking.status==='cancelled'){
+       if(!pi)throw new Error('Cancelled paid invoice requires refund reconciliation');
+       await withMailScope('booking-cancellation:'+bId,()=>settleBookingCancellation(bId,pi));
+      }else{
+       await db.update(bookings).set({status:'pending',stripePaymentIntentId:pi??undefined,updatedAt:new Date()}).where(and(eq(bookings.id,bId),eq(bookings.status,'awaiting_payment')));
+       await enqueueBookingNotification(bId);
       }
+     }
     }
 
     if (event.type === "payment_intent.amount_capturable_updated") {
@@ -1459,6 +929,7 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       const bookingId = parseInt(intent.metadata.bookingId || "0");
       if (bookingId) {
         await confirmBookingFromPaymentIntent(bookingId, intent.id);
+        await enqueueBookingNotification(bookingId);
       }
       // Save the payment method to the customer's user record for future off-session charges
       if (intent.customer && intent.payment_method) {
@@ -1517,6 +988,13 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       );
     }
 
+    if (event.type === 'charge.refunded' || event.type === 'charge.dispute.created' || event.type === 'charge.dispute.closed') {
+      const fact=event.data.object as unknown as {id:string;payment_intent?:string;amount?:number;amount_refunded?:number;currency?:string;status?:string};
+      const [linked]=fact.payment_intent?await db.select({id:bookings.id}).from(bookings).where(eq(bookings.stripePaymentIntentId,fact.payment_intent)):[];
+      await db.execute(sql`INSERT INTO financial_events(id,booking_id,kind,amount_cents,currency,status,reference)
+       VALUES(${event.id},${linked?.id??null},${event.type},${fact.amount_refunded??fact.amount??0},${fact.currency??'usd'},${fact.status??'received'},${fact.id}) ON CONFLICT DO NOTHING`);
+      if(linked && event.type==='charge.refunded')await db.update(bookings).set({refundAmount:sql`GREATEST(COALESCE(${bookings.refundAmount},0),${(fact.amount_refunded??0)/100})`}).where(eq(bookings.id,linked.id));
+    }
     if (event.type === "charge.refunded") {
       const charge = event.data.object as Stripe.Charge;
       req.log.info(
@@ -1536,8 +1014,11 @@ router.post("/webhook/stripe", async (req, res): Promise<void> => {
       );
     }
 
+    await db.execute(sql`UPDATE payment_events SET status='done',processed_at=now(),last_error=NULL WHERE id=${event.id}`);
+    });
     res.json({ received: true });
   } catch (err: any) {
+    await db.execute(sql`UPDATE payment_events SET status='failed',last_error=${String(err.message).slice(0,500)} WHERE id=${event.id}`).catch(()=>{});
     req.log?.error({ err, eventType: event.type }, "webhook_processing_failed");
     // 500 makes Stripe retry with backoff, which is exactly what we want for a
     // transient database or mail failure. Swallowing it lost the event.

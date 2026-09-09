@@ -1,3 +1,4 @@
+import { BUSINESS_TIME_ZONE,businessDate,businessMidnight,addBusinessDays } from "./businessTime.js";
 /**
  * What each chauffeur is owed for a week.
  *
@@ -42,22 +43,11 @@ export function resolvePayoutWeek(weekStartStr?: string | null): PayoutWeek {
   const explicit = weekStartStr ? new Date(weekStartStr) : null;
   const hasExplicit = explicit != null && !Number.isNaN(explicit.getTime());
 
-  const weekStart = hasExplicit ? explicit : new Date();
-  if (!hasExplicit) {
-    const day = weekStart.getDay(); // 0 = Sunday
-    weekStart.setDate(weekStart.getDate() + (day === 0 ? -6 : 1 - day));
-  }
-  weekStart.setHours(0, 0, 0, 0);
-
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
-
-  const fmt = (d: Date, opts: Intl.DateTimeFormatOptions) => d.toLocaleDateString("en-US", opts);
-  const weekLabel =
-    fmt(weekStart, { month: "short", day: "numeric" }) +
-    " – " +
-    fmt(new Date(weekEnd.getTime() - 1), { month: "short", day: "numeric", year: "numeric" });
-
+  let start=hasExplicit?(weekStartStr!.length===10?weekStartStr!:businessDate(explicit!)):businessDate(new Date());
+  if(!hasExplicit){const day=new Date(start+'T12:00:00Z').getUTCDay();start=addBusinessDays(start,day===0?-6:1-day);}
+  const weekStart=businessMidnight(start),weekEnd=businessMidnight(addBusinessDays(start,7));
+  const fmt=(d:Date,opts:Intl.DateTimeFormatOptions)=>d.toLocaleDateString('en-US',{...opts,timeZone:BUSINESS_TIME_ZONE});
+  const weekLabel=fmt(weekStart,{month:'short',day:'numeric'})+' – '+fmt(new Date(+weekEnd-1),{month:'short',day:'numeric',year:'numeric'});
   return { weekStart, weekEnd, weekLabel };
 }
 
@@ -91,6 +81,8 @@ export async function computeWeeklyEarnings(
   const bookings = await db
     .select({
       driverId: bookingsTable.driverId,
+      rate: bookingsTable.commissionPct,
+      overtime: sql<string>`coalesce(overage_fare,0)`,
       priceQuoted: bookingsTable.priceQuoted,
       fareSubtotal: bookingsTable.fareSubtotal,
       tipAmount: bookingsTable.tipAmount,
@@ -106,14 +98,16 @@ export async function computeWeeklyEarnings(
         AND b.pickup_at <  ${week.weekEnd.toISOString()}`,
   );
 
-  const raw = new Map<number, { rides: number; fare: number; tips: number }>();
+  const raw = new Map<number, { rides: number; fare: number; tips: number; commission:number }>();
   for (const b of bookings) {
     if (!b.driverId) continue;
-    const cur = raw.get(b.driverId) ?? { rides: 0, fare: 0, tips: 0 };
+    const cur = raw.get(b.driverId) ?? { rides: 0, fare: 0, tips: 0, commission:0 };
     // fare_subtotal is the commission base; price_quoted only for legacy rows
     // that predate the column.
     cur.rides += 1;
     cur.fare += b.fareSubtotal != null ? parseFloat(b.fareSubtotal) : parseFloat(b.priceQuoted ?? "0");
+    const rate=b.rate!=null?Number(b.rate):commissionPct;
+    cur.commission+=round2(Number(b.fareSubtotal??b.priceQuoted)*rate)+round2(Number(b.overtime)*rate);
     cur.tips += parseFloat(b.tipAmount ?? "0");
     raw.set(b.driverId, cur);
   }
@@ -121,10 +115,10 @@ export async function computeWeeklyEarnings(
   const byDriver = new Map<number, DriverWeekEarnings>();
   const driverIds = new Set([...raw.keys(), ...extras.keys()]);
   for (const driverId of driverIds) {
-    const r = raw.get(driverId) ?? { rides: 0, fare: 0, tips: 0 };
+    const r = raw.get(driverId) ?? { rides: 0, fare: 0, tips: 0, commission:0 };
     const e = extras.get(driverId) ?? { overageFare: 0, driverExtras: 0 };
     const grossEarnings = round2(r.fare + e.overageFare);
-    const commission = round2(grossEarnings * commissionPct);
+    const commission = round2(r.commission);
     const extrasTotal = round2(e.driverExtras);
     const tipsTotal = round2(r.tips);
     byDriver.set(driverId, {

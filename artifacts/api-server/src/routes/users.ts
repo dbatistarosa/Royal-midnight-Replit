@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, ne, desc, or, and, isNull, isNotNull, inArray } from "drizzle-orm";
+import { eq, ne, desc, or, and, isNull, isNotNull, inArray, sql } from "drizzle-orm";
 import { db, usersTable, bookingsTable, userFavoriteDriversTable, driversTable, managedTravelersTable } from "@workspace/db";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { ensureUniqueReferralCode, fetchReferralCreditAmount } from "../lib/referrals.js";
@@ -123,6 +123,7 @@ router.patch("/users/:id", requireAuth, async (req, res): Promise<void> => {
       return;
     }
     updateData.email = nextEmail;
+    updateData.emailVerifiedAt = sql`CASE WHEN lower(trim(email)) = ${nextEmail} THEN email_verified_at ELSE NULL END`;
   }
 
   if ("cabinTempF" in body) updateData.cabinTempF = body["cabinTempF"] ?? null;
@@ -180,7 +181,7 @@ router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> =
     .where(
       or(
         eq(bookingsTable.userId, user.id),
-        and(eq(bookingsTable.passengerEmail, user.email), isNull(bookingsTable.userId))
+        and(eq(bookingsTable.passengerEmail, user.email), isNull(bookingsTable.userId), sql`EXISTS(SELECT 1 FROM users WHERE id=${user.id} AND email_verified_at IS NOT NULL)`)
       )
     )
     .orderBy(desc(bookingsTable.createdAt));
@@ -188,10 +189,10 @@ router.get("/users/:id/bookings", requireAuth, async (req, res): Promise<void> =
   // Retroactively link any email-matched bookings that have no userId yet
   const unlinked = bookings.filter(b => !b.userId);
   if (unlinked.length > 0) {
-    db.update(bookingsTable)
+    await db.update(bookingsTable)
       .set({ userId: user.id })
       .where(
-        and(eq(bookingsTable.passengerEmail, user.email), isNull(bookingsTable.userId))
+        and(eq(bookingsTable.passengerEmail, user.email), isNull(bookingsTable.userId), sql`EXISTS(SELECT 1 FROM users WHERE id=${user.id} AND email_verified_at IS NOT NULL)`)
       )
       .catch(err => console.error("[users] retroactive link error:", err));
   }

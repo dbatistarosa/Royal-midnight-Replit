@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import rateLimit from "express-rate-limit";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, usersTable, driversTable, passwordResetTokensTable, corporateAccountsTable, objectOwnersTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
@@ -81,14 +81,15 @@ router.post("/auth/register", credentialLimiter, async (req, res): Promise<void>
     return;
   }
 
-  const { name, email, password, phone, role } = parsed.data;
+  const { name, password, phone, role } = parsed.data;
+  const email = parsed.data.email.trim().toLowerCase();
   // referralCode isn't part of the generated RegisterBody contract — read it loosely so
   // older/other clients that don't send it keep working unchanged.
   const referralCodeUsed = typeof (req.body as Record<string, unknown> | undefined)?.["referralCode"] === "string"
     ? ((req.body as Record<string, string>)["referralCode"]).trim().toUpperCase()
     : undefined;
 
-  const [existingUser] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email));
+  const [existingUser] = await db.select({ id: usersTable.id }).from(usersTable).where(sql`lower(trim(${usersTable.email})) = ${email.trim().toLowerCase()}`);
   if (existingUser) {
     res.status(400).json({ error: "Email already registered" });
     return;
@@ -155,8 +156,9 @@ router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> =>
     return;
   }
 
-  const { email, password } = parsed.data;
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  const { password } = parsed.data;
+  const email = parsed.data.email.trim().toLowerCase();
+  const [user] = await db.select().from(usersTable).where(sql`lower(trim(${usersTable.email})) = ${email.trim().toLowerCase()}`);
 
   if (!user) {
     res.status(401).json({ error: "Invalid credentials" });
@@ -396,7 +398,7 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
 
   const { name, email, phone, password, agreementAccepted: _accepted, ...driverFields } = parsed.data;
 
-  const [existingUser] = await db.select({ id: usersTable.id, role: usersTable.role }).from(usersTable).where(eq(usersTable.email, email));
+  const [existingUser] = await db.select({ id: usersTable.id, role: usersTable.role }).from(usersTable).where(sql`lower(trim(${usersTable.email})) = ${email.trim().toLowerCase()}`);
   if (existingUser) {
     const msg = existingUser.role === "driver"
       ? "A driver account with this email already exists."
@@ -548,7 +550,7 @@ router.post("/auth/admin-register", requireAdmin, async (req, res): Promise<void
 
   const { name, email, password, phone } = parsed.data;
 
-  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  const [existing] = await db.select().from(usersTable).where(sql`lower(trim(${usersTable.email})) = ${email.trim().toLowerCase()}`);
   if (existing) {
     res.status(400).json({ error: "Email already registered" });
     return;
@@ -610,7 +612,7 @@ router.post("/auth/corporate-register", requireAdmin, async (req, res): Promise<
 
   const { companyName, contactName, email, password, phone, billingEmail, netTermsDays, volumeDiscountPct } = parsed.data;
 
-  const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  const [existing] = await db.select().from(usersTable).where(sql`lower(trim(${usersTable.email})) = ${email.trim().toLowerCase()}`);
   if (existing) {
     res.status(400).json({ error: "Email already registered" });
     return;
@@ -671,7 +673,7 @@ router.post("/auth/forgot-password", credentialLimiter, async (req, res): Promis
     return;
   }
 
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  const [user] = await db.select().from(usersTable).where(sql`lower(trim(${usersTable.email})) = ${email.trim().toLowerCase()}`);
   if (!user) {
     // Return 200 to avoid user enumeration
     res.json({ message: "If that email is registered, a reset link has been generated." });

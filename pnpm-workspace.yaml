@@ -62,6 +62,7 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  browserslist: ">=4.28.7 <5"
   # vitest pins its own vite, which kept 7.3.2 alive after the catalog moved to
   # 7.3.5. Both advisories (GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3) cover
   # <=7.3.4. A range, not an exact pin, so this does not block future patches

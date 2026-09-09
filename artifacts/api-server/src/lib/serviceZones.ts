@@ -1,5 +1,5 @@
 import { eq, and, sql } from "drizzle-orm";
-import { db, geoZonesTable, driverServiceZonesTable } from "@workspace/db";
+import { db, geoZonesTable, driverServiceZonesTable, driversTable } from "@workspace/db";
 import { pointInZone } from "./pricing.js";
 import { tableExists } from "./schemaGuards.js";
 
@@ -13,15 +13,8 @@ import { tableExists } from "./schemaGuards.js";
  * The rule, as chosen by the operator:
  *
  *   A trip is offered only to drivers whose assigned service zones contain its
- *   pickup point — EXCEPT when no driver covers that point at all, in which
- *   case it is offered to everyone rather than disappearing.
- *
- * That exception is the whole reason this is not a one-line SQL join. A hard
- * filter with no fallback loses bookings silently: a pickup just outside every
- * drawn zone, a brand-new metro nobody is assigned to yet, or an address Mapbox
- * could not geocode would each vanish from every driver's list while looking
- * perfectly healthy in the admin panel. Trips that nobody's zone covers stay
- * visible to all, and dispatch can assign them by hand.
+ *   pickup point. Missing coordinates, unstaffed markets and lookup failures
+ *   fail closed so trips are never leaked across regions.
  */
 
 export type ServiceZone = {
@@ -72,11 +65,12 @@ export async function loadZoneCoverage(driverId: number): Promise<ZoneCoverage> 
         .where(and(eq(geoZonesTable.isActive, true), eq(geoZonesTable.isServiceArea, true))),
       db
         .select({ driverId: driverServiceZonesTable.driverId, zoneId: driverServiceZonesTable.zoneId })
-        .from(driverServiceZonesTable),
+        .from(driverServiceZonesTable)
+        .innerJoin(driversTable, eq(driverServiceZonesTable.driverId, driversTable.id))
+        .where(and(eq(driversTable.approvalStatus, "approved"), eq(driversTable.complianceHold, false))),
     ]);
 
-    // No service areas defined, or none staffed — the feature is effectively
-    // off and every driver sees everything, exactly as before.
+    // No service areas defined means the market is not ready to accept rides.
     if (zones.length === 0) return empty;
 
     const staffedZoneIds = new Set(assignments.map(a => a.zoneId));
@@ -84,9 +78,20 @@ export async function loadZoneCoverage(driverId: number): Promise<ZoneCoverage> 
 
     return { zones, staffedZoneIds, driverZoneIds, enabled: true };
   } catch {
-    // A failure here must not empty the pool. Fail open.
+    // A failure here empties the pool rather than leaking rides across markets.
     return empty;
   }
+}
+
+/** A pickup is bookable only when it is inside an active service area that has
+ * at least one approved, compliant chauffeur assigned. Unknown locations fail
+ * closed: accepting a booking the fleet cannot serve is worse than asking the
+ * passenger to correct the address. */
+export function isPickupServiceable(pickup: PickupPoint, coverage: ZoneCoverage): boolean {
+  if (!coverage.enabled || !pickup) return false;
+  return coverage.zones.some(
+    zone => coverage.staffedZoneIds.has(zone.id) && pointInZone(pickup.lat, pickup.lng, zone),
+  );
 }
 
 /**
@@ -96,22 +101,17 @@ export async function loadZoneCoverage(driverId: number): Promise<ZoneCoverage> 
  * pure in-memory test per booking, with no further queries or geocoding.
  */
 export function isTripVisibleToDriver(pickup: PickupPoint, coverage: ZoneCoverage): boolean {
-  if (!coverage.enabled) return true;
+  if (!coverage.enabled) return false;
 
-  // No coordinates on the booking (created before migration 0009, or the
-  // address could not be geocoded). Unknown location is not the same as "out of
-  // area", so it goes to everyone.
-  if (!pickup) return true;
+  // Legacy or unverified coordinates cannot safely be assigned by market.
+  if (!pickup) return false;
 
   const containing = coverage.zones.filter(z => pointInZone(pickup.lat, pickup.lng, z));
-  if (containing.length === 0) return true; // outside every drawn zone
+  if (containing.length === 0) return false;
 
-  // Only zones that actually have drivers can claim a trip. If a pickup falls
-  // inside "Jacksonville" and nobody works Jacksonville, the trip is orphaned
-  // and must stay visible rather than being hidden from the drivers who could
-  // still take it.
+  // Only zones that actually have eligible drivers can claim a trip.
   const staffedContaining = containing.filter(z => coverage.staffedZoneIds.has(z.id));
-  if (staffedContaining.length === 0) return true;
+  if (staffedContaining.length === 0) return false;
 
   return staffedContaining.some(z => coverage.driverZoneIds.has(z.id));
 }

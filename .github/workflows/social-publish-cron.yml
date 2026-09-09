@@ -1,0 +1,55 @@
+name: Social Publish Cron
+
+# Vercel's Hobby plan only allows daily cron schedules (see trip-reminders-cron.yml
+# for the same constraint), so GitHub Actions pings /api/cron/social-publish instead.
+# `*/15` is best-effort and can drift — that's fine here: a post scheduled for
+# 11:30 AM going out at 11:45 AM is invisible to followers. The endpoint is
+# due-based ("is scheduled_at in the past and still status=scheduled?"), so it
+# catches up on its own however late this workflow runs.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+# Least privilege: this job only calls an external URL, it never touches the repo.
+permissions: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call social-publish endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error title=CRON_SECRET not configured::Skipping social publish."
+            exit 1
+          fi
+
+          http_status=$(curl -sS --fail-with-body \
+            -o /tmp/cron-response.txt -w '%{http_code}' \
+            -X POST "https://www.royalmidnight.com/api/cron/social-publish" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Length: 0") || true
+
+          echo "HTTP $http_status"
+          cat /tmp/cron-response.txt || true
+
+          case "$http_status" in
+            2*)
+              echo "Social publish dispatched."
+              ;;
+            401)
+              echo "::error title=Cron auth rejected::The API rejected this secret (401). The CRON_SECRET in GitHub does not match the one set in Vercel."
+              exit 1
+              ;;
+            503)
+              echo "::error title=Cron secret missing on the server::The API has no CRON_SECRET configured (503)."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Cron call failed::Unexpected HTTP $http_status."
+              exit 1
+              ;;
+          esac

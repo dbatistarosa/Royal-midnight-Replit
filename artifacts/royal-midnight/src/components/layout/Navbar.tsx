@@ -134,6 +134,7 @@ export function Navbar() {
                       My Rides
                     </Link>
                   )}
+                  <Link href="/auth/verify-email" onClick={() => setAccountMenuOpen(false)} className="block px-4 py-3 text-sm text-gray-300 hover:text-white">Verify email</Link>
                   <button
                     onClick={handleLogout}
                     className="flex items-center gap-3 w-full px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors border-t border-white/10"

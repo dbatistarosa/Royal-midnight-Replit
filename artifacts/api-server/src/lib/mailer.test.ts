@@ -4,13 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // network call — lets us assert on the actual HTML the recipient would see.
 const sendMock = vi.hoisted(() => vi.fn().mockResolvedValue({ data: { id: "test" } }));
 
-vi.mock("resend", () => ({
-  // `new Resend(...)` is called in mailer.ts — the mock must be a real
-  // function (not an arrow function) so it's valid as a constructor.
-  Resend: vi.fn().mockImplementation(function MockResend() {
-    return { emails: { send: sendMock } };
-  }),
-}));
+vi.mock("./mailOutbox.js", () => ({ enqueueMail: async (to: unknown, subject: string, html: string, kind: string) => { await sendMock({to,subject,html,kind}); } }));
 
 // mailer.ts also logs every send attempt to the DB; mock it out so this test
 // has zero real I/O instead of relying on the dummy DATABASE_URL in

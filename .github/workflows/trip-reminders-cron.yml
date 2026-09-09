@@ -29,7 +29,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
-            echo "::warning title=CRON_SECRET not configured::Skipping trip reminders."
+            echo "::error title=CRON_SECRET not configured::Skipping trip reminders."
             echo ""
             echo "The repository secret CRON_SECRET is empty or missing, so this job"
             echo "cannot authenticate against /api/cron/trip-reminders."
@@ -39,9 +39,7 @@ jobs:
             echo "into GitHub"
             echo "  (Repo -> Settings -> Secrets and variables -> Actions -> New repository secret)."
             echo ""
-            echo "Exiting 0 on purpose: a missing secret is a configuration task, not a"
-            echo "broken run, and failing every 10 minutes just buries real alerts."
-            exit 0
+            exit 1
           fi
 
           # --fail-with-body so a non-2xx still prints what the server said,

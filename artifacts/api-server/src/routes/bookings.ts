@@ -1,3 +1,7 @@
+import { enqueueBookingNotification } from "../lib/bookingJobs.js";
+import { ValidatedBookingBody } from "../lib/bookingInput.js";
+import { bookingAction, withLock, setActor, rows } from "../lib/durability.js";
+import { tripConflicts, tripDurationMinutes, vehicleFits, type TripWindowInput } from "../lib/scheduling.js";
 import { Router, type IRouter } from "express";
 import crypto from "node:crypto";
 import Stripe from "stripe";
@@ -14,8 +18,10 @@ import {
   extraServicesTable,
   bookingExtrasTable,
   driverVehiclesTable,
+  vehiclesTable,
   managedTravelersTable,
   bookingDriverBlocksTable,
+  bookingItineraryStopsTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { bookingLimiter } from "../lib/rateLimit.js";
@@ -130,47 +136,13 @@ const ACTIVE_TRIP_STATUSES = [
 /** 1-hour buffer on each side of an active trip (in milliseconds). */
 const BUFFER_MS = 60 * 60 * 1000;
 
-type BusyWindow = { start: Date; end: Date };
-
-/**
- * Returns an array of time windows during which a driver is unavailable.
- * Each window is:
- *   start = pickupAt − 1 hour
- *   end   = pickupAt + estimatedDurationMinutes + 1 hour
- * If estimatedDurationMinutes is missing we fall back to DEFAULT_DURATION_MINUTES
- * so the buffer is always conservative.
- */
-async function getDriverBusyWindows(driverId: number): Promise<BusyWindow[]> {
-  const activeTrips = await db
-    .select({
-      pickupAt: bookingsTable.pickupAt,
-      estimatedDurationMinutes: bookingsTable.estimatedDurationMinutes,
-    })
-    .from(bookingsTable)
-    .where(
-      and(
-        eq(bookingsTable.driverId, driverId),
-        or(...ACTIVE_TRIP_STATUSES.map((s) => eq(bookingsTable.status, s))),
-      ),
-    );
-
-  return activeTrips.map((trip) => {
-    const duration = trip.estimatedDurationMinutes ?? DEFAULT_DURATION_MINUTES;
-    const pickup = trip.pickupAt.getTime();
-    return {
-      start: new Date(pickup - BUFFER_MS),
-      end: new Date(pickup + duration * 60 * 1000 + BUFFER_MS),
-    };
-  });
+type BusyWindow = TripWindowInput;
+async function getDriverBusyWindows(driverId: number, executor: Pick<typeof db, 'select'> = db): Promise<BusyWindow[]> {
+ return executor.select({pickupAt:bookingsTable.pickupAt,estimatedDurationMinutes:bookingsTable.estimatedDurationMinutes,
+ charterMode:bookingsTable.charterMode,charterHours:bookingsTable.charterHours}).from(bookingsTable)
+ .where(and(eq(bookingsTable.driverId,driverId),inArray(bookingsTable.status,[...ACTIVE_TRIP_STATUSES])));
 }
-
-/**
- * Returns true if the given pickup time falls inside ANY of the busy windows.
- */
-function hasConflict(pickupAt: Date, windows: BusyWindow[]): boolean {
-  const t = pickupAt.getTime();
-  return windows.some((w) => t >= w.start.getTime() && t <= w.end.getTime());
-}
+function hasConflict(trip: TripWindowInput, windows: BusyWindow[]) { return tripConflicts(trip,windows); }
 
 /**
  * True when this error is Postgres 42703 (undefined_column).
@@ -184,6 +156,16 @@ function isUndefinedColumn(err: unknown): boolean {
 }
 
 const parseBooking = serializeBooking;
+
+async function loadItineraries(bookingIds: number[]) {
+  const grouped = new Map<number, Array<typeof bookingItineraryStopsTable.$inferSelect>>();
+  if (bookingIds.length === 0) return grouped;
+  const rows = await db.select().from(bookingItineraryStopsTable)
+    .where(inArray(bookingItineraryStopsTable.bookingId, bookingIds))
+    .orderBy(bookingItineraryStopsTable.bookingId, bookingItineraryStopsTable.sequence);
+  for (const row of rows) grouped.set(row.bookingId, [...(grouped.get(row.bookingId) ?? []), row]);
+  return grouped;
+}
 
 // ─── Cancellation policy ─────────────────────────────────────────────────────
 
@@ -299,7 +281,7 @@ const getCommissionPct = fetchCommissionPct;
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("STRIPE_SECRET_KEY is not configured");
-  return new Stripe(key, { apiVersion: "2024-06-20" as const });
+  return new Stripe(key, { apiVersion: "2024-06-20" as const, timeout:10000,maxNetworkRetries:0 });
 }
 
 /**
@@ -410,7 +392,7 @@ function maskPassengerName(raw: unknown): string {
  * Extras were previously absent from this entirely: they are not part of
  * fare_subtotal, so a chauffeur who fitted a car seat was paid nothing for it.
  */
-function toDriverView<T extends { priceQuoted: number; fareSubtotal: number }>(
+function toDriverView<T extends { priceQuoted: number; fareSubtotal: number; commissionPct?:string|null }>(
   booking: T,
   commissionPct: number,
   opts: { driverExtras?: number; overtimeFare?: number } = {},
@@ -421,6 +403,7 @@ function toDriverView<T extends { priceQuoted: number; fareSubtotal: number }>(
   driverOvertimeEarnings: number;
 } {
   const { priceQuoted, fareSubtotal, ...rest } = booking;
+  commissionPct=booking.commissionPct!=null?Number(booking.commissionPct):commissionPct;
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
   const driverFareEarnings = round2(fareSubtotal * commissionPct);
@@ -540,7 +523,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       let authorized = targetDriver.userId === caller.userId;
       if (!authorized && targetDriver.email) {
         const [callerUser] = await db
-          .select({ email: usersTable.email })
+          .select({ email: sql<string | null>`CASE WHEN email_verified_at IS NOT NULL THEN ${usersTable.email} ELSE NULL END` })
           .from(usersTable)
           .where(eq(usersTable.id, caller.userId));
         authorized =
@@ -604,7 +587,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       // Fallback: match by email if userId link was never set
       if (!driverRow) {
         const [callerUser] = await db
-          .select({ email: usersTable.email })
+          .select({ email: sql<string | null>`CASE WHEN email_verified_at IS NOT NULL THEN ${usersTable.email} ELSE NULL END` })
           .from(usersTable)
           .where(eq(usersTable.id, caller.userId));
         if (callerUser?.email) {
@@ -706,7 +689,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       return;
     }
     const [callerUser] = await db
-      .select({ email: usersTable.email })
+      .select({ email: sql<string | null>`CASE WHEN email_verified_at IS NOT NULL THEN ${usersTable.email} ELSE NULL END` })
       .from(usersTable)
       .where(eq(usersTable.id, caller.userId));
     const userEmail = callerUser?.email ?? "";
@@ -765,22 +748,19 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     // For the open pool, hide trips that conflict with the driver's existing schedule.
     if (isDriverOpenPoolQuery && driverBusyWindows.length > 0) {
       driverBookings = parsed2.filter(
-        (b) => !hasConflict(new Date(b.pickupAt), driverBusyWindows),
+        (b) => !hasConflict(b, driverBusyWindows),
       );
     }
 
-    // ...and trips outside the driver's service areas. Coverage is read once
-    // per request; the per-booking test is then pure geometry with no further
-    // queries. A trip whose pickup no staffed zone covers stays visible to
-    // everyone rather than vanishing — see lib/serviceZones.ts.
+    // ...and trips outside the driver's service areas. This intentionally fails
+    // closed: unknown coordinates or missing coverage must never expose a ride
+    // from another market.
     if (isDriverOpenPoolQuery && poolDriverId != null) {
       const coverage = await loadZoneCoverage(poolDriverId);
-      if (coverage.enabled) {
-        const points = await loadPickupPoints(driverBookings.map((b) => b.id));
-        driverBookings = driverBookings.filter((b) =>
-          isTripVisibleToDriver(points.get(b.id) ?? null, coverage),
-        );
-      }
+      const points = await loadPickupPoints(driverBookings.map((b) => b.id));
+      driverBookings = driverBookings.filter((b) =>
+        isTripVisibleToDriver(points.get(b.id) ?? null, coverage),
+      );
     }
 
     // The open pool is a broadcast: every approved driver in the fleet sees it,
@@ -798,6 +778,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       const poolExtras = await loadBookingExtras(
         driverBookings.map((b) => b.id),
       );
+      const poolItineraries = await loadItineraries(driverBookings.map((b) => b.id));
       res.json(
         driverBookings.map((b) => {
           const extras = poolExtras.get(b.id) ?? [];
@@ -806,6 +787,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
               driverExtras: driverExtrasTotal(extras),
             }),
             extras,
+            itinerary: poolItineraries.get(b.id) ?? [],
             passengerName: maskPassengerName(
               (b as { passengerName?: unknown }).passengerName,
             ),
@@ -859,6 +841,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     const assignedExtras = await loadBookingExtras(
       driverBookings.map((b) => b.id),
     );
+    const itineraries = await loadItineraries(driverBookings.map((b) => b.id));
     const overtimeFares = await loadOverageFares(
       driverBookings.map((b) => b.id),
     );
@@ -879,7 +862,7 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
         const passengerPreferences = uid
           ? (prefsByUserId.get(uid) ?? null)
           : null;
-        return { ...view, extras, passengerPreferences };
+        return { ...view, extras, passengerPreferences, itinerary: itineraries.get(b.id) ?? [] };
       }),
     );
     return;
@@ -896,13 +879,23 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
 router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promise<void> => {
   // Public endpoint — allows anonymous booking creation from the booking form.
   // Corporate account paymentType is restricted: caller must be authenticated as role=corporate (or admin).
-  const parsed = CreateBookingBody.safeParse(req.body);
+  const parsed = ValidatedBookingBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
   const caller = req.currentUser;
+  const checkoutKey=typeof req.body?.checkoutKey==='string' && /^[a-zA-Z0-9-]{20,100}$/.test(req.body.checkoutKey)?req.body.checkoutKey:null;
+  const fingerprint=crypto.createHash('sha256').update(JSON.stringify([caller?.userId??null,req.body])).digest('hex');
+  if(checkoutKey){
+    const [previous]=rows<{id:number;checkout_fingerprint:string}>(await db.execute(sql`SELECT id,checkout_fingerprint FROM bookings WHERE checkout_key=${checkoutKey}`));
+    if(previous){
+      if(previous.checkout_fingerprint!==fingerprint){res.status(409).json({error:'Checkout details changed. Start a new reservation.'});return;}
+      const [existing]=await db.select().from(bookingsTable).where(eq(bookingsTable.id,previous.id));
+      res.status(201).json({...GetBookingResponse.parse(parseBooking(existing)),trackingToken:existing.trackingToken});return;
+    }
+  }
   const isCorporate = parsed.data.paymentType === "corporate_account";
 
   if (isCorporate) {
@@ -931,7 +924,7 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
   // otherwise attribute bookings to any account. Admins may book on anyone's
   // behalf, and an executive assistant may book for a traveler they manage;
   // everyone else is pinned to their own id.
-  let bookingUserId: number | null = caller?.userId ?? null;
+  let bookingUserId: number | null = caller?.role === "admin" ? (parsed.data.userId ?? null) : caller?.userId ?? null;
   const requestedUserId = parsed.data.userId ?? null;
   if (requestedUserId != null && requestedUserId !== caller?.userId) {
     if (caller?.role === "admin") {
@@ -985,6 +978,7 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
         price: parseFloat(String(s.price)) || 0,
       });
     }
+    if(services.length!==requestedExtras.length){res.status(400).json({error:'An extra service is unavailable. Refresh your selection.'});return;}
   }
   const extrasTotal =
     Math.round(
@@ -1128,233 +1122,46 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
     trackingToken: crypto.randomBytes(16).toString("hex"),
   };
 
-  // The tracking_token column arrives via migration 0004. Deploys and migrations
-  // are applied separately here, so tolerate the window where the code is ahead
-  // of the schema: a booking that cannot be created is a far worse outcome than
-  // one without a token. Postgres 42703 is undefined_column. Once the migration
-  // lands this branch simply stops being taken.
-  let booking: typeof bookingsTable.$inferSelect;
-  try {
-    [booking] = (await db
-      .insert(bookingsTable)
-      .values(bookingValues)
-      .returning()) as [typeof bookingsTable.$inferSelect];
-  } catch (err: unknown) {
-    if (!isUndefinedColumn(err)) throw err;
-    console.error(
-      "[bookings] tracking_token column is missing — run migration 0004_booking_tracking_token.sql. " +
-        "Falling back to creating this booking without a tracking token.",
-    );
-    const { trackingToken: _omitted, ...withoutToken } = bookingValues;
-    [booking] = (await db
-      .insert(bookingsTable)
-      .values(withoutToken)
-      .returning()) as [typeof bookingsTable.$inferSelect];
-  }
-
-  // The passenger ticked the terms box on the final booking step. Recorded
-  // against this specific reservation, because that is the act being agreed to
-  // — the cancellation policy in particular is per-booking. Non-blocking: the
-  // booking exists and was paid for, and losing the audit row must not undo it.
-  void recordAcceptances(req, ["terms", "privacy"], {
-    bookingId: booking.id,
-    userId: bookingUserId ?? null,
-    email: parsed.data.passengerEmail,
+  const booking=await withLock('checkout:'+(checkoutKey??crypto.randomUUID()),async tx=>{
+    await setActor(tx,caller?.userId);
+    if(checkoutKey){
+      const [previous]=rows<{id:number;checkout_fingerprint:string}>(await tx.execute(sql`SELECT id,checkout_fingerprint FROM bookings WHERE checkout_key=${checkoutKey}`));
+      if(previous){
+        if(previous.checkout_fingerprint!==fingerprint)throw Object.assign(new Error('Checkout details changed. Start a new reservation.'),{status:409});
+        const [existing]=await tx.select().from(bookingsTable).where(eq(bookingsTable.id,previous.id));return existing;
+      }
+    }
+    if(appliedPromoCode){
+      await tx.execute(sql`SELECT id FROM promo_codes WHERE code=${appliedPromoCode} FOR UPDATE`);
+      const current=await evaluatePromoCode(appliedPromoCode,grossTotal,bookingUserId,tx);
+      if(!current.valid || current.discountAmount!==discountAmount)throw Object.assign(new Error('This promotion is no longer available. Refresh your quote.'),{status:409});
+      await tx.update(promoCodesTable).set({usedCount:sql`${promoCodesTable.usedCount}+1`}).where(eq(promoCodesTable.code,appliedPromoCode));
+    }
+    const [created]=await tx.insert(bookingsTable).values({...bookingValues,
+      estimatedDurationMinutes:ext.charterMode==='hourly'?Math.max(quote.estimatedDuration??60,(ext.charterHours??0)*60):quote.estimatedDuration??60,
+      estimatedDistanceMiles:String(quote.estimatedDistance)}).returning();
+    const commission=await getCommissionPct();
+    await tx.execute(sql`UPDATE bookings SET checkout_key=${checkoutKey},checkout_fingerprint=${fingerprint},commission_pct=${commission},
+      tax_amount=${quote.taxAmount},card_fee=${quote.cardProcessingFee},airport_fee=${quote.airportFee},extras_total=${quote.extrasTotal},
+      pickup_lat=${quote.pickupPoint?.lat??null},pickup_lng=${quote.pickupPoint?.lng??null} WHERE id=${created.id}`);
+    if(pricedExtras.length)await tx.insert(bookingExtrasTable).values(pricedExtras.map(e=>({bookingId:created.id,extraServiceId:e.id,quantity:e.quantity,priceAtBooking:String(e.price)})));
+    if(created.charterMode==='hourly')await tx.insert(bookingItineraryStopsTable).values([
+      ...ext.waypoints.map((address,sequence)=>({bookingId:created.id,sequence,kind:'stop',address:address.trim()})),
+      {bookingId:created.id,sequence:ext.waypoints.length,kind:'final',address:created.dropoffAddress}]);
+    if(isCorporate||isFreeBooking)await enqueueBookingNotification(created.id,tx);
+    return created;
   });
-
-  // Cache the geocoded pickup so the driver service-area filter never has to
-  // geocode a pending booking on a pool refresh. Fire-and-forget, and written
-  // through a guarded raw statement rather than the drizzle schema — see the
-  // note in lib/db/src/schema/bookings.ts. A booking that cannot be created is
-  // a far worse outcome than one without coordinates, which the filter treats
-  // as "location unknown" and shows to every driver.
-  if (quote.pickupPoint) {
-    void savePickupPoint(booking.id, quote.pickupPoint, req.log);
-  }
-
-  // What this booking was actually charged, line by line, frozen at today's
-  // rates. Without it the revenue report can only guess, and it guessed badly:
-  // everything that was not the commission base got counted as Florida tax.
-  void saveFareBreakdown(
-    booking.id,
-    {
-      taxAmount: quote.taxAmount,
-      cardFee: quote.cardProcessingFee,
-      airportFee: quote.airportFee,
-      extrasTotal: quote.extrasTotal,
-    },
-    req.log,
-  ).catch((err) =>
-    console.error("[bookings] fare breakdown save failed:", err),
-  );
+  await recordAcceptances(req,['terms','privacy'],{bookingId:booking.id,userId:bookingUserId,email:parsed.data.passengerEmail});
 
   // trackingToken rides alongside the contract response rather than inside it:
   // it is the one field the creator must receive and nobody else ever should,
   // so it stays out of the shared booking shape that other endpoints return.
+
+
   res.status(201).json({
     ...GetBookingResponse.parse(parseBooking(booking)),
     trackingToken: booking.trackingToken,
   });
-
-  // ── Route estimate (non-blocking) ────────────────────────────────────────────
-  // Fetch driving time and distance from Google Maps so the driver scheduling
-  // conflict detector can prevent impossible back-to-back trip assignments.
-  (async () => {
-    try {
-      const estimate = await getRouteEstimate(
-        booking.pickupAddress,
-        booking.dropoffAddress,
-      );
-      const durationMinutes =
-        estimate?.durationMinutes ?? DEFAULT_DURATION_MINUTES;
-      const distanceMiles = estimate?.distanceMiles ?? null;
-      await db
-        .update(bookingsTable)
-        .set({
-          estimatedDurationMinutes: durationMinutes,
-          estimatedDistanceMiles:
-            distanceMiles != null ? String(distanceMiles) : null,
-        })
-        .where(eq(bookingsTable.id, booking.id));
-    } catch (err) {
-      console.error("[bookings] route estimate error:", err);
-    }
-  })();
-
-  // ── Account linking (non-blocking, admin-created bookings) ───────────────────
-  // When an admin creates a booking manually, link it to an existing user account
-  // (by email) or send the passenger an invitation to create one.
-  if (caller?.role === "admin" && !parsed.data.userId) {
-    (async () => {
-      try {
-        const [existingUser] = await db
-          .select({ id: usersTable.id })
-          .from(usersTable)
-          .where(eq(usersTable.email, booking.passengerEmail));
-
-        if (existingUser) {
-          // Attach booking to their existing account
-          await db
-            .update(bookingsTable)
-            .set({ userId: existingUser.id })
-            .where(eq(bookingsTable.id, booking.id));
-          req.log.info(
-            `[bookings] Linked booking #${booking.id} to existing user #${existingUser.id} (${booking.passengerEmail})`,
-          );
-        } else {
-          // New passenger — send invitation to create an account
-          await sendAccountInvitation({
-            passengerName: booking.passengerName,
-            passengerEmail: booking.passengerEmail,
-            bookingId: booking.id,
-          });
-          req.log.info(
-            `[bookings] Sent account invitation to new passenger: ${booking.passengerEmail}`,
-          );
-        }
-      } catch (err) {
-        console.error("[bookings] account-linking error:", err);
-      }
-    })();
-  }
-
-  // Persist selected extras (non-blocking). The ids were already validated as
-  // existing and active above, and priced from the extra_services table, so the
-  // stored priceAtBooking matches what the fare was actually computed from.
-  if (pricedExtras.length) {
-    (async () => {
-      try {
-        await db
-          .insert(bookingExtrasTable)
-          .values(
-            pricedExtras.map((e) => ({
-              bookingId: booking.id,
-              extraServiceId: e.id,
-              quantity: e.quantity,
-              priceAtBooking: String(e.price),
-            })),
-          )
-          .onConflictDoNothing();
-      } catch (err) {
-        console.error("[bookings] extras insert failed:", err);
-      }
-    })();
-  }
-
-  // If a promo code was used, increment its usedCount (non-blocking)
-  if (booking.promoCode) {
-    db.update(promoCodesTable)
-      .set({ usedCount: sql`${promoCodesTable.usedCount} + 1` })
-      .where(eq(promoCodesTable.code, booking.promoCode))
-      .catch((err) =>
-        console.error("[bookings] promoCode usedCount increment failed:", err),
-      );
-  }
-
-  // Corporate and fully-discounted bookings: fire emails immediately since there's no payment step
-  if (isCorporate || isFreeBooking) {
-    (async () => {
-      try {
-        const parsed2 = parseBooking(booking);
-        const commissionPct = await getCommissionPct();
-        const driverEarnings = await driverEarningsForBooking(
-          booking.id,
-          parsed2.fareSubtotal,
-          commissionPct,
-        );
-        const emailData = {
-          ...parsed2,
-          vehicleClass: parsed2.vehicleClass ?? "business",
-          passengers: parsed2.passengers ?? 1,
-          driverEarnings,
-        };
-        const approvedDrivers = await db
-          .select({ email: usersTable.email })
-          .from(driversTable)
-          .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
-          .where(eq(driversTable.approvalStatus, "approved"));
-        const driverEmails = approvedDrivers
-          .map((d) => d.email)
-          .filter(Boolean) as string[];
-
-        const pushableDrivers = await db
-          .select({
-            pushToken: driversTable.pushToken,
-            pushPlatform: driversTable.pushPlatform,
-          })
-          .from(driversTable)
-          .where(
-            and(
-              eq(driversTable.status, "available"),
-              eq(driversTable.complianceHold, false),
-            ),
-          );
-
-        // Each notification is independent — one failing (e.g. a bad template field)
-        // must never silently prevent the others from firing, especially the driver
-        // fan-out, which is how drivers learn a ride is available to claim.
-        const results = await Promise.allSettled([
-          sendBookingConfirmationPassenger(emailData),
-          sendNewBookingAdmin(emailData),
-          sendNewBookingAvailableToDrivers(emailData, driverEmails),
-          sendNewRideOfferPush(pushableDrivers, {
-            id: booking.id,
-            pickupAddress: booking.pickupAddress,
-            driverEarnings,
-          }),
-        ]);
-        for (const r of results) {
-          if (r.status === "rejected")
-            console.error(
-              "[bookings] post-create notification failed:",
-              r.reason,
-            );
-        }
-      } catch (err) {
-        console.error("[bookings] post-create email error:", err);
-      }
-    })();
-  }
 });
 
 // Public receipt/tracking endpoint, addressed by an unguessable token (CN-005).
@@ -1479,7 +1286,7 @@ router.get(
       }
     } else if (caller.role !== "admin" && booking.userId !== caller.userId) {
       const [callerUser] = await db
-        .select({ email: usersTable.email })
+        .select({ email: sql<string | null>`CASE WHEN email_verified_at IS NOT NULL THEN ${usersTable.email} ELSE NULL END` })
         .from(usersTable)
         .where(eq(usersTable.id, caller.userId));
       if (!callerUser?.email || booking.passengerEmail !== callerUser.email) {
@@ -1654,7 +1461,7 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     if (booking.userId !== caller.userId) {
       // Check if email matches (covers admin-created bookings not yet linked by userId)
       const [callerUser] = await db
-        .select({ email: usersTable.email })
+        .select({ email: sql<string | null>`CASE WHEN email_verified_at IS NOT NULL THEN ${usersTable.email} ELSE NULL END` })
         .from(usersTable)
         .where(eq(usersTable.id, caller.userId));
       if (!callerUser || booking.passengerEmail !== callerUser.email) {
@@ -1730,7 +1537,7 @@ router.get(
     if (caller.role === "passenger" || caller.role === "corporate") {
       if (booking.userId !== caller.userId) {
         const [callerUser] = await db
-          .select({ email: usersTable.email })
+          .select({ email: sql<string | null>`CASE WHEN email_verified_at IS NOT NULL THEN ${usersTable.email} ELSE NULL END` })
           .from(usersTable)
           .where(eq(usersTable.id, caller.userId));
         if (!callerUser || booking.passengerEmail !== callerUser.email) {
@@ -1827,7 +1634,7 @@ router.get(
     if (caller.role === "passenger" || caller.role === "corporate") {
       if (booking.userId !== caller.userId) {
         const [callerUser] = await db
-          .select({ email: usersTable.email })
+          .select({ email: sql<string | null>`CASE WHEN email_verified_at IS NOT NULL THEN ${usersTable.email} ELSE NULL END` })
           .from(usersTable)
           .where(eq(usersTable.id, caller.userId));
         if (!callerUser || booking.passengerEmail !== callerUser.email) {
@@ -1897,7 +1704,7 @@ router.get(
   },
 );
 
-router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
+router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Promise<void> => {
   const params = UpdateBookingParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -1924,22 +1731,45 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
   if (parsed.data.specialRequests !== undefined)
     updateData.specialRequests = parsed.data.specialRequests;
 
-  const [booking] = await db
-    .update(bookingsTable)
-    .set(updateData)
-    .where(eq(bookingsTable.id, params.data.id))
-    .returning();
+  if(!before){res.status(404).json({error:'Booking not found'});return;}
+  if(parsed.data.status==='cancelled'){res.status(409).json({error:'Use the cancellation action so refunds are recorded.'});return;}
+  const booking=await withLock('driver-schedule:'+(updateData.driverId??before.driverId??'unassigned'),async tx=>{
+    await setActor(tx,req.currentUser!.userId);
+    const assigning=parsed.data.driverId!==undefined||parsed.data.vehicleId!==undefined;
+    const nextDriverId=parsed.data.driverId!==undefined?parsed.data.driverId:before.driverId;
+    if(assigning&&['cancelled','completed','in_progress'].includes(before.status))throw Object.assign(new Error('This trip cannot be reassigned'),{status:409});
+    if(assigning&&nextDriverId!=null){
+      const [driver]=await tx.select().from(driversTable).where(eq(driversTable.id,nextDriverId));
+      if(!driver||driver.approvalStatus!=='approved'||driver.complianceHold)throw Object.assign(new Error('Select an approved, compliant driver'),{status:409});
+      const windows=await tx.select().from(bookingsTable).where(and(eq(bookingsTable.driverId,nextDriverId),ne(bookingsTable.id,before.id),inArray(bookingsTable.status,[...ACTIVE_TRIP_STATUSES])));
+      if(hasConflict(before,windows))throw Object.assign(new Error('Driver schedule conflict'),{status:409});
+      if(parsed.data.vehicleId!=null){
+        const [vehicle]=await tx.select().from(vehiclesTable).where(eq(vehiclesTable.id,parsed.data.vehicleId));
+        if(!vehicle||vehicle.driverId!==nextDriverId||!vehicle.isAvailable||vehicle.vehicleClass!==before.vehicleClass||vehicle.capacity<before.passengers)throw Object.assign(new Error('The vehicle does not belong to this driver or cannot serve this trip'),{status:409});
+        updateData.selectedVehicleId=null;
+      }else if(nextDriverId!==before.driverId){
+        const candidates=await tx.select().from(driverVehiclesTable).where(eq(driverVehiclesTable.driverId,nextDriverId));
+        const vehicle=candidates.find(candidate=>vehicleFits(candidate,before));
+        if(!vehicle)throw Object.assign(new Error('Driver has no vehicle with the required class and capacity'),{status:409});
+        updateData.selectedVehicleId=vehicle.id;updateData.vehicleId=null;
+      }
+    }else if(assigning){
+      if(parsed.data.vehicleId!=null)throw Object.assign(new Error('Assign a driver before selecting a vehicle'),{status:409});
+      updateData.selectedVehicleId=null;updateData.vehicleId=null;
+    }
+    const [updated]=await tx.update(bookingsTable).set(updateData).where(and(eq(bookingsTable.id,params.data.id),eq(bookingsTable.status,before.status))).returning();return updated;
+  });
 
   if (!booking) {
     res.status(404).json({ error: "Booking not found" });
     return;
   }
 
-  res.json(UpdateBookingResponse.parse(parseBooking(booking)));
+
 
   // Fire-and-forget: notify admin on status change
   if (before && parsed.data.status && before.status !== parsed.data.status) {
-    (async () => {
+    await (async () => {
       try {
         await sendStatusChangedAdmin(
           booking.id,
@@ -1955,14 +1785,14 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
     if (parsed.data.status === "completed") {
       // Increment driver's totalRides counter
       if (booking.driverId) {
-        db.update(driversTable)
+        await db.update(driversTable)
           .set({ totalRides: sql`${driversTable.totalRides} + 1` })
           .where(eq(driversTable.id, booking.driverId))
           .catch((err) =>
             console.error("[bookings] totalRides increment error:", err),
           );
       }
-      (async () => {
+      await (async () => {
         try {
           await sendTripCompletionEmail(
             {
@@ -1985,7 +1815,7 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
         }
       })();
       if (booking.userId) {
-        maybeRewardReferrerForCompletedRide(booking.userId).catch((err) =>
+        await maybeRewardReferrerForCompletedRide(booking.userId).catch((err) =>
           console.error("[bookings] referral reward error:", err),
         );
       }
@@ -1997,7 +1827,7 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
   // that tells the driver a trip now exists for them.
   if (booking.driverId != null && before?.driverId !== booking.driverId) {
     const assignedDriverId = booking.driverId;
-    (async () => {
+    await (async () => {
       try {
         const [driverUser] = await db
           .select({
@@ -2050,13 +1880,14 @@ router.patch("/bookings/:id", requireAdmin, async (req, res): Promise<void> => {
       }
     })();
   }
-});
+  res.json(UpdateBookingResponse.parse(parseBooking(booking)));
+}));
 
 // Driver self-assigns a pending booking
 router.post(
   "/bookings/:id/accept",
   requireAuth,
-  async (req, res): Promise<void> => {
+  bookingAction(async (req, res): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) {
       res.status(400).json({ error: "Invalid booking id" });
@@ -2182,10 +2013,7 @@ router.post(
     // the pool is presentation, and booking ids are sequential. Without this a
     // driver could take a trip three metros away simply by POSTing its id.
     const coverage = await loadZoneCoverage(driverRow.id);
-    if (
-      coverage.enabled &&
-      !isTripVisibleToDriver(await loadPickupPoint(booking.id), coverage)
-    ) {
+    if (!isTripVisibleToDriver(await loadPickupPoint(booking.id), coverage)) {
       req.log.warn(
         {
           ip: req.ip,
@@ -2216,7 +2044,7 @@ router.post(
     // This guards against race conditions where a driver accepts another trip between
     // loading the list and tapping Accept.
     const busyWindows = await getDriverBusyWindows(driverRow.id);
-    if (hasConflict(booking.pickupAt, busyWindows)) {
+    if (hasConflict(booking, busyWindows)) {
       res.status(409).json({
         error:
           "This trip conflicts with your existing schedule. You have another booking within 1 hour of this pickup time.",
@@ -2225,40 +2053,30 @@ router.post(
       return;
     }
 
-    // Step 1: Atomically assign the driver (optimistic locking via isNull check).
-    // We do this BEFORE Stripe capture so that if capture succeeds we have a
-    // consistent DB record. If capture then fails we explicitly revert.
-    // Optional: driver may specify which of their vehicles they're using for this trip
-    const selectedVehicleId =
-      typeof req.body?.vehicleId === "number"
-        ? (req.body.vehicleId as number)
-        : null;
-
-    const acceptSet: Record<string, unknown> = {
-      driverId: driverRow.id,
-      status: "confirmed",
-    };
-    if (selectedVehicleId != null)
-      acceptSet.selectedVehicleId = selectedVehicleId;
-
-    const [updated] = await db
-      .update(bookingsTable)
-      .set(acceptSet)
-      .where(and(eq(bookingsTable.id, id), isNull(bookingsTable.driverId)))
-      .returning();
-
-    if (!updated) {
-      res
-        .status(409)
-        .json({ error: "Booking was just taken by another driver" });
-      return;
-    }
+    // Serialize by driver: a row-level CAS alone protects the booking, not the agenda.
+    const result = await withLock('driver-schedule:'+driverRow.id, async tx => {
+      await setActor(tx, caller.userId);
+      const windows = await getDriverBusyWindows(driverRow.id,tx);
+      if (hasConflict(booking,windows)) return {error:'This trip conflicts with your schedule',booking:null};
+      const requestedVehicle=req.body?.vehicleId;
+      if(requestedVehicle!=null && (!Number.isInteger(requestedVehicle)||requestedVehicle<=0))
+        return {error:'Invalid vehicle',booking:null};
+      const candidates=await tx.select().from(driverVehiclesTable).where(eq(driverVehiclesTable.driverId,driverRow.id));
+      const vehicle=requestedVehicle!=null?candidates.find(v=>v.id===requestedVehicle):candidates.find(v=>vehicleFits(v,booking));
+      if(!vehicle || !vehicleFits(vehicle,booking)) return {error:'Select one of your vehicles with the required class and capacity',booking:null};
+      const [updated]=await tx.update(bookingsTable).set({driverId:driverRow.id,selectedVehicleId:vehicle.id,status:'confirmed'})
+        .where(and(eq(bookingsTable.id,id),isNull(bookingsTable.driverId),inArray(bookingsTable.status,['pending','authorized','confirmed'])))
+        .returning();
+      return {error:updated?null:'Booking was taken or cancelled. Refresh your trips.',booking:updated??null};
+    });
+    if(!result.booking){res.status(409).json({error:result.error});return;}
+    const updated=result.booking;
 
     // Accepting a trip is the act the per-trip terms attach to: the confirmation
     // deadline, the arrival obligation and the late-cancellation rule all become
     // binding at this moment, which is why it is recorded per booking rather than
     // once at onboarding.
-    void recordAcceptance(req, {
+    await recordAcceptance(req, {
       documentType: "trip_terms",
       bookingId: id,
       driverId: driverRow.id,
@@ -2270,39 +2088,31 @@ router.post(
     if (isAuthorized) {
       try {
         const stripe = getStripe();
-        await stripe.paymentIntents.capture(booking.stripePaymentIntentId!);
+        await stripe.paymentIntents.capture(booking.stripePaymentIntentId!,{}, {idempotencyKey:'accept-capture-'+booking.stripePaymentIntentId});
         // Capture succeeded — booking stays confirmed, continue to send emails below.
       } catch (stripeErr: any) {
         console.error(
           `[bookings] Stripe capture failed for booking #${id}:`,
           stripeErr.message,
         );
-        // Revert: unassign driver and move booking back to awaiting_payment so admin is alerted.
-        await db
-          .update(bookingsTable)
-          .set({
-            driverId: null,
-            status: "awaiting_payment",
-            updatedAt: new Date(),
-          })
-          .where(eq(bookingsTable.id, id));
-        console.warn(
-          `[bookings] Booking #${id} reverted to awaiting_payment after capture failure`,
-        );
-        res.status(402).json({
-          error: `Payment capture failed: ${stripeErr.message}. The booking is now back in awaiting payment — please contact the admin.`,
-          captureError: true,
-        });
-        return;
+        // A timeout can occur after Stripe captured the funds. Reconcile before changing state.
+        const actual=await getStripe().paymentIntents.retrieve(booking.stripePaymentIntentId!).catch(()=>null);
+        if(actual?.status!=='succeeded'){
+          const retryable=!actual||['requires_capture','processing'].includes(actual.status);
+          await db.update(bookingsTable).set({driverId:null,vehicleId:null,status:retryable?'authorized':'awaiting_payment',
+            authorizedAt:retryable?booking.authorizedAt:null,updatedAt:new Date()}).where(and(eq(bookingsTable.id,id),eq(bookingsTable.status,'confirmed')));
+          res.status(retryable?503:402).json({error:retryable?'Payment confirmation is pending. Please retry acceptance shortly.':'Payment could not be captured. Please contact the admin.',captureError:true});
+          return;
+        }
       }
     }
 
     const commissionPct2 = await getCommissionPct();
     const parsedUpdated = parseBooking(updated);
-    res.json(parsedUpdated);
+
 
     // Fire-and-forget emails
-    (async () => {
+    await (async () => {
       try {
         const [driverUser] = await db
           .select({
@@ -2354,26 +2164,20 @@ router.post(
         // For authorized (captured) bookings, also fire the post-payment confirmation emails
         // since they were deferred at authorization time
         if (isAuthorized) {
-          const approvedDrivers = await db
-            .select({ email: usersTable.email })
+          const pickupPoint = await loadPickupPoint(bookingEmailData.id);
+          const notificationCandidates = await db
+            .select({ id: driversTable.id, email: usersTable.email, pushToken: driversTable.pushToken, pushPlatform: driversTable.pushPlatform })
             .from(driversTable)
             .innerJoin(usersTable, eq(driversTable.userId, usersTable.id))
-            .where(eq(driversTable.approvalStatus, "approved"));
-          const driverEmails = approvedDrivers
+            .where(and(eq(driversTable.approvalStatus, "approved"), eq(driversTable.complianceHold, false)));
+          const eligibleCandidates = (await Promise.all(notificationCandidates.map(async candidate => ({
+            candidate,
+            visible: isTripVisibleToDriver(pickupPoint, await loadZoneCoverage(candidate.id)),
+          })))).filter(result => result.visible).map(result => result.candidate);
+          const driverEmails = eligibleCandidates
             .map((d) => d.email)
             .filter(Boolean) as string[];
-          const pushableDrivers = await db
-            .select({
-              pushToken: driversTable.pushToken,
-              pushPlatform: driversTable.pushPlatform,
-            })
-            .from(driversTable)
-            .where(
-              and(
-                eq(driversTable.status, "available"),
-                eq(driversTable.complianceHold, false),
-              ),
-            );
+          const pushableDrivers = eligibleCandidates.filter(driver => driver.pushToken);
           emailPromises.push(
             sendBookingConfirmationPassenger(bookingEmailData),
             sendNewBookingAdmin(bookingEmailData),
@@ -2395,7 +2199,8 @@ router.post(
         console.error("[bookings] accept email error:", err);
       }
     })();
-  },
+    res.json(parsedUpdated);
+  }),
 );
 
 // ─── Trip lifecycle endpoints (driver-only) ───────────────────────────────────
@@ -2709,6 +2514,65 @@ router.post(
   },
 );
 
+// Hourly-charter progress is deliberately separate from booking.status so the
+// existing in_progress timer keeps running while passengers are at a stop.
+router.post(
+  "/bookings/:id/trip/itinerary/:sequence/:action",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const id = Number(req.params["id"]);
+    const sequence = Number(req.params["sequence"]);
+    const action = String(req.params["action"] ?? "");
+    if (!Number.isInteger(id) || !Number.isInteger(sequence) || sequence < 0 || !["arrive", "depart"].includes(action)) {
+      res.status(400).json({ error: "Invalid itinerary action" });
+      return;
+    }
+
+    const resolved = await resolveAssignedDriver(req, res, id);
+    if (!resolved) return;
+    const { booking, driverRow } = resolved;
+    if (booking.charterMode !== "hourly" || booking.status !== "in_progress") {
+      res.status(400).json({ error: "Itinerary actions require an hourly trip in progress" });
+      return;
+    }
+
+    const itinerary = (await loadItineraries([id])).get(id) ?? [];
+    const current = itinerary.find(stop => stop.sequence === sequence);
+    if (!current) {
+      res.status(404).json({ error: "Itinerary stop not found" });
+      return;
+    }
+    const previous = itinerary.find(stop => stop.sequence === sequence - 1);
+    if (previous && !previous.departedAt) {
+      res.status(409).json({ error: "Complete the previous stop before continuing" });
+      return;
+    }
+
+    const now = new Date();
+    if (action === "arrive") {
+      if (current.arrivedAt) {
+        res.status(409).json({ error: "Arrival has already been recorded" });
+        return;
+      }
+      await db.update(bookingItineraryStopsTable).set({ arrivedAt: now, arrivedByDriverId: driverRow.id, updatedAt: now })
+        .where(and(eq(bookingItineraryStopsTable.id, current.id), isNull(bookingItineraryStopsTable.arrivedAt)));
+    } else {
+      if (current.kind === "final") {
+        res.status(400).json({ error: "The final destination is completed with the Complete Trip action" });
+        return;
+      }
+      if (!current.arrivedAt || current.departedAt) {
+        res.status(409).json({ error: current.departedAt ? "Departure has already been recorded" : "Record arrival first" });
+        return;
+      }
+      await db.update(bookingItineraryStopsTable).set({ departedAt: now, departedByDriverId: driverRow.id, updatedAt: now })
+        .where(and(eq(bookingItineraryStopsTable.id, current.id), isNull(bookingItineraryStopsTable.departedAt)));
+    }
+
+    res.json({ ok: true, itinerary: (await loadItineraries([id])).get(id) ?? [] });
+  },
+);
+
 // POST /bookings/:id/trip/complete
 // Requires: caller = assigned driver, booking status = in_progress
 router.post(
@@ -2730,6 +2594,15 @@ router.post(
         .status(400)
         .json({ error: `Cannot complete trip from status: ${booking.status}` });
       return;
+    }
+
+    if (booking.charterMode === "hourly") {
+      const itinerary = (await loadItineraries([id])).get(id) ?? [];
+      const finalDestination = itinerary.find(stop => stop.kind === "final");
+      if (!finalDestination?.arrivedAt) {
+        res.status(409).json({ error: "Arrive at the final destination before completing this hourly trip" });
+        return;
+      }
     }
 
     // Hourly overage, computed here rather than by the cron that was planned and
@@ -3412,159 +3285,27 @@ router.get(
 
 // ─── Cancel booking ───────────────────────────────────────────────────────────
 
-router.delete("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
-  const params = CancelBookingParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-
-  const [existing] = await db
-    .select()
-    .from(bookingsTable)
-    .where(eq(bookingsTable.id, params.data.id));
-  if (!existing) {
-    res.status(404).json({ error: "Booking not found" });
-    return;
-  }
-
-  const caller = req.currentUser!;
-
-  // Passengers/corporate can only cancel their own bookings in cancellable statuses
-  if (caller.role !== "admin") {
-    if (existing.userId !== caller.userId) {
-      req.log.warn(
-        {
-          ip: req.ip,
-          path: req.path,
-          userId: req.currentUser?.userId,
-          role: req.currentUser?.role,
-        },
-        "authorization_failed",
-      );
-      res.status(403).json({ error: "Access denied" });
-      return;
-    }
-    if (["completed", "cancelled", "in_progress"].includes(existing.status)) {
-      res.status(400).json({ error: "This booking cannot be cancelled." });
-      return;
-    }
-  }
-
-  const priceQuoted = parseFloat(String(existing.priceQuoted));
-  const policy = getCancellationPolicy(
-    existing.pickupAt,
-    priceQuoted,
-    existing.status,
-  );
-
-  // Conditioned on status != cancelled so two overlapping cancel requests (a
-  // double-click, a retried request) can't both see a row to act on — only
-  // the one that actually flips the status fires the Stripe side effect
-  // below. Without this, the second request would re-derive the same policy
-  // against an "already cancelled" row (netRefund 0, harmless), but a
-  // narrower race where both reads land before either write completes could
-  // otherwise trigger two refunds for one cancellation.
-  const [cancelled] = await db
-    .update(bookingsTable)
-    .set({ status: "cancelled", updatedAt: new Date() })
-    .where(and(eq(bookingsTable.id, params.data.id), ne(bookingsTable.status, "cancelled")))
-    .returning({ id: bookingsTable.id });
-
-  res.json({
-    success: true,
-    feePercent: policy.feePercent,
-    feeAmount: policy.feeAmount,
-    netRefund: policy.netRefund,
-  });
-
-  // Release this booking's promo redemption, if any, now that it never
-  // actually completed — see releasePromoUsage's own doc comment.
-  if (cancelled && existing.promoCode) {
-    releasePromoUsage(existing.promoCode, req.log);
-  }
-
-  // Fire-and-forget: settle the Stripe side of the cancellation.
-  //
-  // This used to only run for awaiting_payment/authorized — i.e. before the
-  // card was actually charged. But the payment intent is created with
-  // capture_method: "automatic" (payments.ts), so a booking is captured and
-  // moved out of those two statuses within moments of payment succeeding.
-  // Every cancellation after that point — which in practice is nearly all of
-  // them — updated the booking, emailed the passenger a promise of a refund
-  // per the 12h/2h policy, and never actually called Stripe. The refund the
-  // email promised never happened unless an admin noticed and did it by hand
-  // in the Stripe dashboard.
-  if (cancelled && existing.stripePaymentIntentId) {
-    (async () => {
-      try {
-        const stripe = getStripe();
-        const pi = await stripe.paymentIntents.retrieve(
-          existing.stripePaymentIntentId!,
-        );
-        if (
-          [
-            "requires_payment_method",
-            "requires_confirmation",
-            "requires_action",
-            "requires_capture",
-          ].includes(pi.status)
-        ) {
-          // Never charged (or only a hold placed) — cancelling the PI is the
-          // whole story, there is nothing to refund.
-          await stripe.paymentIntents.cancel(existing.stripePaymentIntentId!);
-          req.log.info(
-            `[bookings] PI cancelled on booking cancel for booking #${existing.id} (PI status was: ${pi.status})`,
-          );
-        } else if (pi.status === "succeeded") {
-          // Charged. Refund exactly what the cancellation policy says is
-          // owed — full refund at 12h+, 75% at 2-12h (25% fee retained),
-          // nothing under 2h/no-show. Not a flat full refund: that would
-          // hand back the cancellation fee the passenger was told about.
-          const refundCents = Math.round(policy.netRefund * 100);
-          if (refundCents > 0) {
-            await stripe.refunds.create({
-              payment_intent: existing.stripePaymentIntentId!,
-              amount: refundCents,
-            });
-            req.log.info(
-              `[bookings] Refunded $${policy.netRefund.toFixed(2)} (tier: ${policy.tier}) for booking #${existing.id}`,
-            );
-          } else {
-            req.log.info(
-              `[bookings] No refund owed (tier: ${policy.tier}) for booking #${existing.id} — cancellation fee covers the full charge`,
-            );
-          }
-        } else {
-          req.log.info(
-            `[bookings] PI in unvoidable status '${pi.status}' for booking #${existing.id} — no action taken`,
-          );
-        }
-      } catch (err) {
-        console.error(
-          "[bookings] Stripe PI cancel/refund failed on booking cancel:",
-          err,
-        );
-      }
-    })();
-  }
-
-  // Fire-and-forget: email admin + passenger
-  (async () => {
-    try {
-      const emailData = {
-        ...parseBooking(existing),
-        vehicleClass: existing.vehicleClass ?? "business",
-        passengers: existing.passengers ?? 1,
-      };
-      await sendBookingCancelledAdmin(emailData);
-      if (existing.passengerEmail) {
-        await sendBookingCancelledPassenger(emailData, policy.feeAmount);
-      }
-    } catch (err) {
-      console.error("[bookings] cancel email error:", err);
-    }
-  })();
+router.delete("/bookings/:id",requireAuth,async(req,res):Promise<void>=>{
+ const params=CancelBookingParams.safeParse(req.params);
+ if(!params.success){res.status(400).json({error:'Invalid booking id'});return;}
+ const caller=req.currentUser!;
+ const result=await withLock('payment:'+params.data.id,async tx=>{
+  await setActor(tx,caller.userId);
+  const [booking]=await tx.select().from(bookingsTable).where(eq(bookingsTable.id,params.data.id));
+  if(!booking)return {status:404,body:{error:'Booking not found'}};
+  if(caller.role!=='admin'&&booking.userId!==caller.userId)return {status:403,body:{error:'Access denied'}};
+  if(booking.status==='cancelled')return {status:200,body:{success:true}};
+  if(['completed','in_progress'].includes(booking.status))return {status:409,body:{error:'This booking cannot be cancelled.'}};
+  const policy=getCancellationPolicy(booking.pickupAt,Number(booking.priceQuoted),booking.status);
+  const [cancelled]=await tx.update(bookingsTable).set({status:'cancelled',cancelledAt:new Date(),cancelledBy:caller.role,updatedAt:new Date()})
+   .where(and(eq(bookingsTable.id,booking.id),eq(bookingsTable.status,booking.status))).returning();
+  if(!cancelled)return {status:409,body:{error:'The trip changed. Refresh before cancelling.'}};
+  if(booking.promoCode)await tx.update(promoCodesTable).set({usedCount:sql`greatest(0,${promoCodesTable.usedCount}-1)`}).where(eq(promoCodesTable.code,booking.promoCode));
+  const payload={intentId:booking.stripePaymentIntentId,refundCents:Math.round(policy.netRefund*100),feeAmount:policy.feeAmount};
+  await tx.execute(sql`INSERT INTO app_jobs(key,kind,booking_id,payload) VALUES(${'booking-cancellation:'+booking.id},'booking-cancellation',${booking.id},${JSON.stringify(payload)}::jsonb) ON CONFLICT DO NOTHING`);
+  return {status:200,body:{success:true,feePercent:policy.feePercent,feeAmount:policy.feeAmount,netRefund:policy.netRefund,settlementStatus:'queued'}};
+ });
+ res.status(result.status).json(result.body);
 });
 
 // ─── Passenger: rate a driver after trip completion ──────────────────────────

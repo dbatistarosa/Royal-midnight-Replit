@@ -233,7 +233,8 @@ app.use(
       { err: { message, causeMsg, stack } },
       "Unhandled route error",
     );
-    res.status(500).json({ error: "Internal server error" });
+    const status = (err as {status?: number})?.status;
+    res.status(status === 409 ? 409 : 500).json({ error: status === 409 ? message : "Internal server error" });
   },
 );
 

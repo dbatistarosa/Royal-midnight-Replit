@@ -1,3 +1,5 @@
+import systemHealthRouter from "./systemHealth.js";
+import emailVerificationRouter from "./emailVerification.js";
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import authRouter from "./auth";
@@ -27,7 +29,9 @@ import extrasRouter from "./extras";
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(systemHealthRouter);
 router.use(authRouter);
+router.use(emailVerificationRouter);
 router.use(bookingsRouter);
 router.use(vehiclesRouter);
 router.use(driversRouter);

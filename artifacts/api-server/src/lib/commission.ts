@@ -1,4 +1,4 @@
-import { db, settingsTable } from "@workspace/db";
+import { db, settingsTable, bookingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { loadExtrasFor, driverExtrasTotal } from "./bookingExtras.js";
 
@@ -63,5 +63,6 @@ export async function driverEarningsForBooking(
   } catch {
     // fall through with 0
   }
-  return computeDriverEarnings({ fareSubtotal, commissionPct, driverExtras });
+  const [booking]=await db.select({rate:bookingsTable.commissionPct}).from(bookingsTable).where(eq(bookingsTable.id,bookingId));
+  return computeDriverEarnings({ fareSubtotal, commissionPct: booking?.rate!=null?Number(booking.rate):commissionPct, driverExtras });
 }

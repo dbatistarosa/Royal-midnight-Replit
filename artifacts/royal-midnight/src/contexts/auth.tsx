@@ -1,7 +1,18 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
-import { setAuthTokenGetter } from "@workspace/api-client-react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  type ReactNode,
+} from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  setAuthTokenGetter,
+  setUnauthorizedHandler,
+} from "@workspace/api-client-react";
 import { API_BASE } from "@/lib/constants";
-
 export interface AuthUser {
   id: number;
   name: string;
@@ -10,7 +21,6 @@ export interface AuthUser {
   role: "passenger" | "driver" | "admin" | "corporate";
   driverId?: number | null;
 }
-
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
@@ -20,120 +30,127 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
 }
-
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-const STORAGE_KEY = "rm_auth";
-
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [driverId, setDriverId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-
-  // The session token is NOT persisted. It lives in an HttpOnly cookie that
-  // page JavaScript cannot read, so an XSS can no longer steal a 30-day admin
-  // session (CN-014). Only non-sensitive display fields are cached here so the
-  // UI can render immediately on reload; the cookie is what actually
-  // authenticates, and it is sent automatically because the API is same-origin.
-  useEffect(() => {
-    let cancelled = false;
-
-    // Restore immediately so the shell can paint, then confirm with the server.
-    let restored: AuthUser | null = null;
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as { user: AuthUser; driverId?: number | null };
-        restored = parsed.user;
-        setUser(parsed.user);
-        setDriverId(parsed.driverId ?? null);
-      }
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-
-    if (!restored) {
-      setIsLoading(false);
-      return;
-    }
-
-    // The cached user says nothing about whether the session behind it is still
-    // alive. Without this check an expired or revoked session rendered a normal
-    // dashboard that simply stayed empty — AuthGuard saw a user and let the page
-    // through, then every data call came back 401 with nothing listening. The
-    // server's answer is also authoritative for `role`, so a localStorage blob
-    // edited in DevTools self-corrects instead of unlocking the admin shell.
-    fetch(`${API_BASE}/auth/me`, { credentials: "include" })
-      .then(async res => {
-        if (cancelled) return;
-        if (res.status === 401) {
-          clearSession();
-          return;
-        }
-        if (!res.ok) return; // network/server hiccup: keep the cached user
-        const data = await res.json() as { user: AuthUser; driverId?: number | null };
-        setUser(data.user);
-        setDriverId(data.driverId ?? null);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ user: data.user, driverId: data.driverId ?? null }));
-      })
-      .catch(() => undefined)
-      .finally(() => { if (!cancelled) setIsLoading(false); });
-
-    return () => { cancelled = true; };
-  }, []);
-
-  /** Drop everything we know about the session. Used both by logout and when the
-   *  server tells us the session is gone. */
-  function clearSession() {
+  const revision = useRef(0);
+  const loggedOut = useRef(false);
+  const clearSession = useCallback(() => {
+    revision.current++;
     setUser(null);
     setToken(null);
     setDriverId(null);
-    localStorage.removeItem(STORAGE_KEY);
-  }
-
+    setAuthTokenGetter(null);
+    void queryClient.cancelQueries();
+    queryClient.clear();
+    try {
+      localStorage.removeItem("rm_auth");
+    } catch {
+      /* Storage may be disabled. */
+    }
+  }, [queryClient]);
   useEffect(() => {
-    setAuthTokenGetter(token ? () => token : null);
-  }, [token]);
-
-  function login(user: AuthUser, token: string, driverIdArg?: number | null) {
-    const did = driverIdArg ?? null;
-    setUser(user);
-    // Kept in memory only, for the current tab. After a reload it is gone and
-    // requests authenticate with the cookie instead.
-    setToken(token);
-    setDriverId(did);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ user, driverId: did }));
-  }
-
-  function logout() {
+    let active = true;
+    const controller = new AbortController();
+    async function checkSession() {
+      if (loggedOut.current) {
+        setIsLoading(false);
+        return;
+      }
+      const started = revision.current;
+      try {
+        const response = await fetch(API_BASE + "/auth/me", {
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!active || started !== revision.current) return;
+        if (response.status === 401) {
+          clearSession();
+          return;
+        }
+        if (!response.ok) return;
+        const data = (await response.json()) as {
+          user: AuthUser;
+          driverId?: number | null;
+        };
+        if (!active || started !== revision.current) return;
+        setUser(data.user);
+        setDriverId(data.driverId ?? null);
+      } catch {
+        /* A temporary outage does not revoke an established session. */
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    }
+    void checkSession();
+    const focus = () => {
+      void checkSession();
+    };
+    window.addEventListener("focus", focus);
+    const timer = window.setInterval(focus, 60000);
+    setUnauthorizedHandler(clearSession);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(timer);
+      window.removeEventListener("focus", focus);
+      setUnauthorizedHandler(null);
+    };
+  }, [clearSession]);
+  function login(
+    nextUser: AuthUser,
+    nextToken: string,
+    nextDriverId?: number | null,
+  ) {
+    loggedOut.current = false;
     clearSession();
-    // The cookie is HttpOnly, so only the server can clear it.
-    void fetch(`${API_BASE}/auth/logout`, { method: "POST" }).catch(() => undefined);
+    setUser(nextUser);
+    setToken(nextToken);
+    setDriverId(nextDriverId ?? null);
+    setIsLoading(false);
+    setAuthTokenGetter(nextToken ? () => nextToken : null);
   }
-
-  // A session dying mid-visit is handled by reloading, not by intercepting.
-  //
-  // There was a global fetch wrapper here that watched for 401s. It took every
-  // admin screen down: `const original = window.fetch` and then calling
-  // `original(...)` loses the `window` receiver, and Chrome rejects that with
-  // "Illegal invocation". Pages that .catch() without clearing their loading
-  // flag then span forever on "Loading...".
-  //
-  // It is not worth a second attempt. The reported problem — a dead session
-  // showing empty dashboards — is already solved by the /auth/me check above,
-  // which runs on every page load. Patching a global to also catch an expiry
-  // that happens between two loads buys very little and risks all of it.
-
+  async function logout() {
+    loggedOut.current = true;
+    const currentToken = token;
+    clearSession();
+    try {
+      for (const key of [
+        "rm_checkout_request",
+        "rm_pending_booking_id",
+        "rm_pending_booking_token",
+        "rm_booking_draft",
+      ])
+        sessionStorage.removeItem(key);
+    } catch {}
+    await fetch(API_BASE + "/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      headers: currentToken ? { Authorization: "Bearer " + currentToken } : {},
+    }).catch(() => undefined);
+  }
   return (
-    <AuthContext.Provider value={{ user, token, driverId, login, logout, isAuthenticated: !!user, isLoading }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        driverId,
+        login,
+        logout,
+        isAuthenticated: !!user,
+        isLoading,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
-
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
-  return ctx;
+  const context = useContext(AuthContext);
+  if (!context) throw new Error("useAuth must be used inside AuthProvider");
+  return context;
 }

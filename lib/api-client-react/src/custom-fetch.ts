@@ -15,6 +15,9 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 // Module-level configuration
 // ---------------------------------------------------------------------------
 
+let _unauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: (() => void) | null) { _unauthorized = handler; }
+
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
 
@@ -361,6 +364,7 @@ export async function customFetch<T = unknown>(
   const requestInfo = { method, url: resolveUrl(input) };
 
   const response = await fetch(input, { ...init, method, headers });
+  if (response.status === 401) _unauthorized?.();
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);

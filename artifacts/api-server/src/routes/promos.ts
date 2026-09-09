@@ -78,6 +78,7 @@ export async function evaluatePromoCode(
   rawCode: string,
   bookingAmount: number,
   userId?: number | null,
+  executor: Pick<typeof db, "select"> = db,
 ): Promise<PromoEvaluation> {
   const invalid = (message: string): PromoEvaluation => ({
     valid: false, code: null, discountAmount: null, finalAmount: null, message,
@@ -86,7 +87,7 @@ export async function evaluatePromoCode(
   const code = rawCode.trim().toUpperCase();
   if (!code) return invalid("Invalid or expired promo code");
 
-  const [promo] = await db.select().from(promoCodesTable).where(eq(promoCodesTable.code, code));
+  const [promo] = await executor.select().from(promoCodesTable).where(eq(promoCodesTable.code, code));
 
   if (!promo || !promo.isActive) return invalid("Invalid or expired promo code");
   if (promo.expiresAt && new Date(promo.expiresAt) < new Date()) return invalid("Promo code has expired");
@@ -108,7 +109,7 @@ export async function evaluatePromoCode(
     // this code N times," not "you've ever typed this code into a booking
     // that didn't go through" — without the status filter, a cancelled trip
     // permanently burned one of a customer's uses with nothing to show for it.
-    const [row] = await db
+    const [row] = await executor
       .select({ used: sql<number>`count(*)::int` })
       .from(bookingsTable)
       .where(

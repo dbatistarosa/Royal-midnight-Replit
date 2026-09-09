@@ -1113,19 +1113,19 @@ router.get(
     // falling back to price_quoted only for legacy rows that predate the fare_subtotal column.
     const [stats] = await db
       .select({
-        fareTotal: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed'), 0)::float`,
-        fareThisMonth: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed' and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
-        fareThisWeek: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed' and created_at >= date_trunc('week', now())), 0)::float`,
-        fareToday: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed' and created_at::date = current_date), 0)::float`,
+        fareTotal: sql<number>`coalesce(sum((coalesce(fare_subtotal, price_quoted)::numeric * coalesce(commission_pct, ${commissionPct}))) filter (where status = 'completed'), 0)::float`,
+        fareThisMonth: sql<number>`coalesce(sum((coalesce(fare_subtotal, price_quoted)::numeric * coalesce(commission_pct, ${commissionPct}))) filter (where status = 'completed' and date_trunc('month', pickup_at) = date_trunc('month', now())), 0)::float`,
+        fareThisWeek: sql<number>`coalesce(sum((coalesce(fare_subtotal, price_quoted)::numeric * coalesce(commission_pct, ${commissionPct}))) filter (where status = 'completed' and pickup_at >= date_trunc('week', now())), 0)::float`,
+        fareToday: sql<number>`coalesce(sum((coalesce(fare_subtotal, price_quoted)::numeric * coalesce(commission_pct, ${commissionPct}))) filter (where status = 'completed' and pickup_at::date = current_date), 0)::float`,
         totalRides: sql<number>`count(*) filter (where status = 'completed')::int`,
         tipsTotal: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null), 0)::float`,
-        tipsThisMonth: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and date_trunc('month', created_at) = date_trunc('month', now())), 0)::float`,
-        tipsThisWeek: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and created_at >= date_trunc('week', now())), 0)::float`,
-        tipsToday: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and created_at::date = current_date), 0)::float`,
+        tipsThisMonth: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and date_trunc('month', pickup_at) = date_trunc('month', now())), 0)::float`,
+        tipsThisWeek: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and pickup_at >= date_trunc('week', now())), 0)::float`,
+        tipsToday: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and pickup_at::date = current_date), 0)::float`,
         // Period-scoped aggregates (only populated when date range is provided)
-        farePeriod: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric) filter (where status = 'completed' and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`})), 0)::float`,
-        tipsPeriod: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`})), 0)::float`,
-        ridesPeriod: sql<number>`count(*) filter (where status = 'completed' and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`}))::int`,
+        farePeriod: sql<number>`coalesce(sum((coalesce(fare_subtotal, price_quoted)::numeric * coalesce(commission_pct, ${commissionPct}))) filter (where status = 'completed' and (${filterStart ? sql`pickup_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`pickup_at <= ${filterEnd}` : sql`true`})), 0)::float`,
+        tipsPeriod: sql<number>`coalesce(sum(tip_amount::numeric) filter (where status = 'completed' and tip_amount is not null and (${filterStart ? sql`pickup_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`pickup_at <= ${filterEnd}` : sql`true`})), 0)::float`,
+        ridesPeriod: sql<number>`count(*) filter (where status = 'completed' and (${filterStart ? sql`pickup_at >= ${filterStart}` : sql`true`}) and (${filterEnd ? sql`pickup_at <= ${filterEnd}` : sql`true`}))::int`,
       })
       .from(bookingsTable)
       .where(eq(bookingsTable.driverId, driverId));
@@ -1135,34 +1135,34 @@ router.get(
     const hasAnyBound = filterStart !== null || filterEnd !== null;
     const dailyWhere = hasAnyBound
       ? sql`driver_id = ${driverId} and status = 'completed'
-          and (${filterStart ? sql`created_at >= ${filterStart}` : sql`true`})
-          and (${filterEnd ? sql`created_at <= ${filterEnd}` : sql`true`})`
-      : sql`driver_id = ${driverId} and status = 'completed' and created_at >= now() - interval '30 days'`;
+          and (${filterStart ? sql`pickup_at >= ${filterStart}` : sql`true`})
+          and (${filterEnd ? sql`pickup_at <= ${filterEnd}` : sql`true`})`
+      : sql`driver_id = ${driverId} and status = 'completed' and pickup_at >= now() - interval '30 days'`;
 
     const dailyRaw = await db
       .select({
-        date: sql<string>`date(created_at)::text`,
-        fare: sql<number>`coalesce(sum(coalesce(fare_subtotal, price_quoted)::numeric), 0)::float`,
+        date: sql<string>`date(pickup_at)::text`,
+        fare: sql<number>`coalesce(sum((coalesce(fare_subtotal, price_quoted)::numeric * coalesce(commission_pct, ${commissionPct}))), 0)::float`,
         tip: sql<number>`coalesce(sum(coalesce(tip_amount, 0)::numeric), 0)::float`,
         rides: sql<number>`count(*)::int`,
       })
       .from(bookingsTable)
       .where(dailyWhere)
-      .groupBy(sql`date(created_at)`)
-      .orderBy(sql`date(created_at)`);
+      .groupBy(sql`date(pickup_at)`)
+      .orderBy(sql`date(pickup_at)`);
 
     const totalRides = stats?.totalRides ?? 0;
     const commissionAllTime =
-      Math.round((stats?.fareTotal ?? 0) * commissionPct * 100) / 100;
+      Math.round((stats?.fareTotal ?? 0) * 100) / 100;
     const commissionThisWeek =
-      Math.round((stats?.fareThisWeek ?? 0) * commissionPct * 100) / 100;
+      Math.round((stats?.fareThisWeek ?? 0) * 100) / 100;
     const tipsTotal = Math.round((stats?.tipsTotal ?? 0) * 100) / 100;
     const tipsThisWeek = Math.round((stats?.tipsThisWeek ?? 0) * 100) / 100;
     const tipsToday = Math.round((stats?.tipsToday ?? 0) * 100) / 100;
 
     // Period-scoped totals
     const periodCommission =
-      Math.round((stats?.farePeriod ?? 0) * commissionPct * 100) / 100;
+      Math.round((stats?.farePeriod ?? 0) * 100) / 100;
     const periodTips = Math.round((stats?.tipsPeriod ?? 0) * 100) / 100;
     const periodEarnings =
       Math.round((periodCommission + periodTips) * 100) / 100;
@@ -1203,10 +1203,10 @@ router.get(
       let addons = 0;
       for (const r of extraRows) {
         if (!inWindow(r.createdAt, from, to)) continue;
-        overtime += r.overageFare;
+        overtime += r.overageFare * (r.commissionPct??commissionPct);
         addons += r.driverExtras;
       }
-      return Math.round((overtime * commissionPct + addons) * 100) / 100;
+      return Math.round((overtime + addons) * 100) / 100;
     };
 
     const extrasAllTime = sumExtras(null, null);
@@ -1224,14 +1224,14 @@ router.get(
       100;
     const thisMonth =
       Math.round(
-        ((stats?.fareThisMonth ?? 0) * commissionPct +
+        ((stats?.fareThisMonth ?? 0) +
           (stats?.tipsThisMonth ?? 0) +
           extrasThisMonth) *
           100,
       ) / 100;
     const today =
       Math.round(
-        ((stats?.fareToday ?? 0) * commissionPct + tipsToday + extrasToday) *
+        ((stats?.fareToday ?? 0) + tipsToday + extrasToday) *
           100,
       ) / 100;
 
@@ -1243,7 +1243,7 @@ router.get(
       extrasByDay.set(
         key,
         (extrasByDay.get(key) ?? 0) +
-          r.overageFare * commissionPct +
+          r.overageFare * (r.commissionPct??commissionPct) +
           r.driverExtras,
       );
     }
@@ -1253,7 +1253,7 @@ router.get(
       rides: d.rides,
       amount:
         Math.round(
-          (d.fare * commissionPct + d.tip + (extrasByDay.get(d.date) ?? 0)) *
+          (d.fare + d.tip + (extrasByDay.get(d.date) ?? 0)) *
             100,
         ) / 100,
     }));

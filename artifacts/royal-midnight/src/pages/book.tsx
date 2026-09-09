@@ -1,3 +1,4 @@
+import { checkoutRequest } from "@/lib/checkoutRequest";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -264,7 +265,10 @@ export default function Book() {
   // "airport" and "event" describe the trip, not a distinct booking mode, so
   // there is no equivalent field to pre-set for them without inventing one.
   useEffect(() => {
-    if (searchParams.get("service") === "hourly") setCharterMode("hourly");
+    if (searchParams.get("service") === "hourly") {
+      setCharterMode("hourly");
+      setWaypoints(current => current.length > 0 ? current : [""]);
+    }
   }, []);
 
   // On mount: handle 3DS redirect return (payment_intent + redirect_status in URL)
@@ -331,6 +335,7 @@ export default function Book() {
         console.warn("[book] 3DS confirm network error — webhook will finalise booking");
       }
       sessionStorage.removeItem(DRAFT_KEY);
+    sessionStorage.removeItem("rm_checkout_request");
       // Without the token there is no receipt URL to send them to; the ride is
       // still booked and paid, so fall back to their trip list.
       setLocation(bookingToken ? `/booking-confirmation/${bookingToken}` : "/passenger/rides");
@@ -415,7 +420,8 @@ export default function Book() {
     if (!raw) return;
     try {
       const d = JSON.parse(raw) as Record<string, unknown>;
-      if (d.ver !== 1) { sessionStorage.removeItem(DRAFT_KEY); return; }
+      if (d.ver !== 1) { sessionStorage.removeItem(DRAFT_KEY);
+    sessionStorage.removeItem("rm_checkout_request"); return; }
 
       const f = (d.form as Record<string, unknown>) ?? {};
       form.reset({
@@ -449,6 +455,7 @@ export default function Book() {
       if (typeof d.step === "number" && d.step > 1) setStep(d.step as StepKey);
     } catch {
       sessionStorage.removeItem(DRAFT_KEY);
+    sessionStorage.removeItem("rm_checkout_request");
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -554,6 +561,15 @@ export default function Book() {
       "passengers", "luggage", "passengerName", "passengerEmail", "passengerPhone",
     ]);
     if (!valid) return;
+
+    if (charterMode === "hourly" && !waypoints.some(w => w.trim().length >= 3)) {
+      toast({
+        title: "Add an intermediate stop",
+        description: "Hourly chauffeur service requires at least one stop before the final destination.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const { pickupAddress, dropoffAddress, pickupDate, pickupTime, passengers } = form.getValues();
     const isoDate = new Date(`${format(pickupDate, "yyyy-MM-dd")}T${pickupTime}:00`).toISOString();
@@ -766,7 +782,7 @@ export default function Book() {
             "Content-Type": "application/json",
             ...(token ? { "Authorization": `Bearer ${token}` } : {}),
           },
-          body: JSON.stringify({
+          body: checkoutRequest({
             passengerName: values.passengerName,
             passengerEmail: values.passengerEmail,
             passengerPhone: values.passengerPhone,
@@ -821,6 +837,7 @@ export default function Book() {
         sessionStorage.removeItem("rm_pending_booking_id");
         sessionStorage.removeItem("rm_pending_booking_token");
         sessionStorage.removeItem(DRAFT_KEY);
+    sessionStorage.removeItem("rm_checkout_request");
         setLocation(bookingToken ? `/booking-confirmation/${bookingToken}` : "/passenger/rides");
         setIsConfirming(false);
         return;
@@ -953,6 +970,7 @@ export default function Book() {
     }
 
     sessionStorage.removeItem(DRAFT_KEY);
+    sessionStorage.removeItem("rm_checkout_request");
     setLocation(bookingToken ? `/booking-confirmation/${bookingToken}` : "/passenger/rides");
   };
 
@@ -1078,7 +1096,13 @@ export default function Book() {
                             className={`flex-1 ${inputClass}`}
                             mode="dropoff"
                           />
-                          <button type="button" onClick={() => setWaypoints(prev => prev.filter((_, i) => i !== idx))} className="text-gray-600 hover:text-white p-1">
+                          <button
+                            type="button"
+                            onClick={() => setWaypoints(prev => prev.filter((_, i) => i !== idx))}
+                            disabled={charterMode === "hourly" && waypoints.length === 1}
+                            aria-label={`Remove stop ${idx + 1}`}
+                            className="text-gray-600 hover:text-white p-1 disabled:opacity-25 disabled:cursor-not-allowed"
+                          >
                             <X className="w-4 h-4" />
                           </button>
                         </div>
@@ -1107,7 +1131,10 @@ export default function Book() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setCharterMode("hourly")}
+                        onClick={() => {
+                          setCharterMode("hourly");
+                          setWaypoints(prev => prev.length > 0 ? prev : [""]);
+                        }}
                         className={`px-3 py-1.5 text-xs transition-colors ${charterMode === "hourly" ? "bg-primary text-black font-semibold" : "text-gray-400 hover:text-white"}`}
                       >
                         Hourly Charter
@@ -1136,6 +1163,11 @@ export default function Book() {
                       </div>
                     )}
                   </div>
+                  {charterMode === "hourly" && (
+                    <p className="text-xs text-gray-500">
+                      At least one stop is required. The final destination may be the same as the pickup. Your route is checked against the mileage included with the booked hours.
+                    </p>
+                  )}
 
                   {/* Airline selectors — shown when airport detected */}
                   {(pickupAirportCode || dropoffAirportCode) && (

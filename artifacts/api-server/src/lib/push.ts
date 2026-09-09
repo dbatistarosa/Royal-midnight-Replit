@@ -18,6 +18,7 @@ async function sendExpoPush(messages: ExpoPushMessage[]): Promise<void> {
   try {
     const res = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
+      signal: AbortSignal.timeout(5000),
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(valid),
     });
