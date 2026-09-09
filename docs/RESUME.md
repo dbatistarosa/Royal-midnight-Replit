@@ -1,6 +1,39 @@
 # Royal Midnight — punto de recuperación, 2026-09-09
 
-## Estado más reciente: PR #5 publicado; separación de pagos adicionales en curso
+## Estado vigente al cerrar este bloque: PR #5 y #6 publicados
+
+Producción final **2e62471bd55e296579aa9fc6f57157da57aed1e0**, deployment
+**dpl_7dXheWC2fG2ZoFjtYjjD9BPf7ieK** Ready con www.royalmidnight.com.
+PR #6 https://github.com/dbatistarosa/Royal-midnight-Replit/pull/6 MERGED.
+CI main **34370765641 PASS** y Post-Deploy Smoke Test **34370941486 PASS**;
+CI del PR **34370522156 PASS**. Suite acumulada: 184 API + 3 web.
+healthz 200 con SHA exacto; admin/system-health sin sesión 401; payments/config
+200 TEST; webhook sin Stripe-Signature 400. No se cambiaron claves ni se hicieron
+cobros. El cambio de webhooks se verificó con pruebas automatizadas y rechazo de
+petición sin firma; NO se afirma un E2E completo con tarjeta/3DS/Stripe real.
+Los cuatro esquemas/migraciones existentes siguen vigentes: este bloque no
+añadió DDL. Checkpoint documental posterior guardado en la rama de reparación.
+
+### Próximo bloque (pendiente, no implementado)
+
+1. Llevar el cierre manual admin de PATCH /bookings/:id a la misma garantía de
+   contador + job en la transacción; hoy conserva efectos separados tras el commit.
+2. /admin/bookings/:id/extras necesita identificador de operación persistido y
+   reintentos idempotentes: hoy crea cargos/facturas sin clave estable, inserta
+   extras y precio por separado y aún usa void para desglose/recibos. Congelar
+   cantidades/precio/impuestos por operación, serializar por reserva y guardar
+   referencia Stripe antes de confirmar un cargo; confirmar extras y outbox juntos.
+3. collect-extra-time y chargeExtraTime conservan ventana entre el éxito Stripe
+   y la escritura de la referencia. La clave Stripe por reserva no sustituye un
+   registro persistente fuera de la retención de idempotencia del proveedor.
+   No reutilizar extra_charge_payment_intent_id para un intento sin cobrar: la UI
+   interpreta su presencia como COBRADO; añadir estado/referencia de operación aparte.
+4. Tip/checkout también permite crear varios intents; completar idempotencia,
+   reconciliación de cargos/facturas, E2E TEST, push móvil, MFA y restauración.
+No afirmar que todo el informe RM-01–20 está completado. Mantener pausa al 3 % y
+no consumir créditos de reinicio sin petición explícita.
+
+### Evidencia del PR #5
 
 PR #5 MERGED y producción verificada en f0164dd3f5f0c396dcb4ef50093ca469b4f38122.
 CI main 34370136413 y Post-Deploy Smoke Test 34370315788 PASS. CI del PR 34369647853
@@ -11,10 +44,10 @@ referido y un código premio. Se eliminaron los usuarios QA 4/5, conductor 1,
 reservas 3/4, sesión, job, auditorías, premio y dos correos pendientes de staging.
 No se enviaron correos ni se hicieron cobros. Las credenciales QA ya no son válidas.
 
-Siguiente parche preparado: webhooks con metadata.type tip/extra_time/addon_extras
+PR #6 publicado: webhooks con metadata.type tip/extra_time/addon_extras
 se registran en financial_events y no se comparan con el precio principal ni
 modifican su intent/factura/estado o reenvían confirmaciones. 11 pruebas nuevas
-PASS y tipos API PASS. Falta CI y publicación de este segundo bloque.
+PASS y tipos API PASS. CI y publicación completados según la evidencia superior.
 No requiere DDL. Quedan pendientes cargos adicionales idempotentes, facturas,
 respuesta Stripe perdida y completar también la ruta de cierre manual admin.
 
