@@ -1,4 +1,38 @@
-# Royal Midnight — punto de recuperación, 2026-09-08
+# Royal Midnight — punto de recuperación, 2026-09-09
+
+## REANUDACIÓN 2026-09-09 — prevalece sobre las pausas históricas
+
+Las CUATRO migraciones ya se aplicaron correctamente en PRODUCCIÓN con la
+autorización específica recibida. Versiones remotas: schema_baseline 20260909061016,
+reliability_foundation 20260909061032, reliability_settlement 20260909061038 y
+reliability_indexes 20260909061044. Checksums verificados; se mantienen 7 usuarios
+y 15 reservas. Cero tablas públicas sin RLS y cero grants anon/authenticated.
+Columnas de verificación y factura presentes. No hubo borrado de datos.
+
+PR #3 MERGED; main ccd5d96c4420566a3806bccceba49d5a4b895f8d ya desplegado en
+producción, deployment dpl_BiB545zDpXzxQCM7nyDaccDptDV8 Ready. Dominio canónico
+https://www.royalmidnight.com/api/healthz devuelve ese SHA. Smoke test automático
+34318250352 PASS. Workers booking-jobs/mail-outbox HTTP 200 con colas vacías.
+Cotización MIA → Fontainebleau business HTTP 200, total 40.62 USD (sin reserva).
+Inicio y formulario /book cargan sin errores de consola. Stripe config HTTP 200
+en TEST: el propietario confirmó expresamente MANTENER PRUEBAS POR AHORA.
+No habilitar cobros reales ni cambiar claves por iniciativa propia.
+
+CI del head previo 0a8c93a PASS, pero CI de main 34318130454 detectó nuevas
+alertas en dependencias. Corrección preparada: Nodemailer 9.1.1, qs 6.16.0,
+js-yaml 4.3.2, xmldom 0.8.15/0.9.12 manteniendo sus ramas y fflate 0.8.3.
+Auditoría local ahora exit 0: 1 moderate (decode-uri-component bajo Expo) y
+2 high previamente exceptuadas (image-size/Metro). No se añadieron excepciones.
+El parche sugerido decode-uri-component 0.4.3 no existe en npm; 0.5 implica
+revisión de compatibilidad aparte. Tipos PASS; API 166/18 y web 3/1 PASS.
+Pendiente al escribir: terminar build web, subir parche y verificar CI/deploy.
+
+Supabase security advisor: 42 INFO RLS sin policies (tablas privadas de API;
+sin acceso anon/authenticated) y 1 WARN extensión en public, sin errores.
+Referencia: https://supabase.com/docs/guides/database/database-linter?lint=0014_extension_in_public
+Conservar los pendientes funcionales históricos: checkout completo/3DS en entorno
+de pruebas, notificaciones móviles reales, conciliación/payouts y restauración.
+Mantener regla de pausa al 3 %; no usar créditos de reinicio sin autorización.
 
 ## PAUSA POR LÍMITE — ESTADO DEFINITIVO AL CERRAR
 
