@@ -6,6 +6,11 @@ import nodemailer from "nodemailer";
 import { rows } from "./durability.js";
 
 const scope = new AsyncLocalStorage<string>();
+const mailExecutor = new AsyncLocalStorage<Pick<typeof db, "execute">>();
+/** Enqueue templates in the same transaction as the business record. */
+export function withMailTransaction<T>(executor: Pick<typeof db, "execute">, work: () => Promise<T>) {
+  return mailExecutor.run(executor, work);
+}
 export function withMailScope<T>(key: string, work: () => Promise<T>) {
   return scope.run(key, work);
 }
@@ -24,7 +29,7 @@ export async function enqueueMail(
         .update(JSON.stringify([parent, recipient, subject, kind]))
         .digest("hex")
     : null;
-  await db.execute(sql`INSERT INTO mail_outbox(dedupe_key,recipient,subject,html,kind)
+  await (mailExecutor.getStore() ?? db).execute(sql`INSERT INTO mail_outbox(dedupe_key,recipient,subject,html,kind)
     VALUES(${key},${JSON.stringify(recipient)}::jsonb,${subject},${html},${kind})
     ON CONFLICT(dedupe_key) DO NOTHING`);
 }

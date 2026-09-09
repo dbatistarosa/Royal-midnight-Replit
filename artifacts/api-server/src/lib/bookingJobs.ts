@@ -37,7 +37,12 @@ export async function drainBookingJobs() {
             const { settleBookingCancellation } =
               await import("./cancellationSettlement.js");
             await settleBookingCancellation(job.booking_id);
-          } else await firePostPaymentEmails(job.booking_id);
+          } else if (job.kind === "trip-completion") {
+            const { notifyTripCompletion } = await import("./tripCompletion.js");
+            await notifyTripCompletion(job.booking_id);
+          } else if (job.kind === "booking-confirmation") {
+            await firePostPaymentEmails(job.booking_id);
+          } else throw new Error("Unsupported booking job kind: " + job.kind);
         }),
       );
       await db.execute(

@@ -1,5 +1,18 @@
 # Royal Midnight — punto de recuperación, 2026-09-09
 
+## Bloque en curso: cierre de viajes y premios por referido
+
+Cambios locales preparados: transición completed, contador y desglose en una
+transacción con job trip-completion; worker encola recibo con deduplicación.
+Reintento de complete devuelve el viaje existente. Premio por referido usa lock
+por usuario y transacción común para promo, marca de recompensa y mail_outbox;
+tolera ejecución tardía después de una segunda reserva. 7 pruebas nuevas PASS
+de rollback/reintento, tipos API PASS. Pendiente CI/preview, prueba real de staging,
+limpieza QA y publicación. No requiere migración: usa las tablas ya aplicadas.
+La referencia de cobro extra se espera antes de responder, pero aún quedan por
+resolver la reconciliación de respuesta Stripe perdida y extras/facturas.
+La información de producción anterior sigue vigente hasta completar el deploy.
+
 ## REANUDACIÓN 2026-09-09 — prevalece sobre las pausas históricas
 
 ### Cierre verificado del despliegue

@@ -1,3 +1,4 @@
+import { commitTripCompletion } from "../lib/tripCompletion.js";
 import { enqueueBookingNotification } from "../lib/bookingJobs.js";
 import { ValidatedBookingBody } from "../lib/bookingInput.js";
 import { bookingAction, withLock, setActor, rows } from "../lib/durability.js";
@@ -2578,7 +2579,7 @@ router.post(
 router.post(
   "/bookings/:id/trip/complete",
   requireAuth,
-  async (req, res): Promise<void> => {
+  bookingAction(async (req, res): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) {
       res.status(400).json({ error: "Invalid booking id" });
@@ -2587,8 +2588,12 @@ router.post(
 
     const resolved = await resolveAssignedDriver(req, res, id);
     if (!resolved) return;
-    const { booking } = resolved;
+    const { booking, driverRow } = resolved;
 
+    if (booking.status === "completed") {
+      res.json(parseBooking(booking));
+      return;
+    }
     if (booking.status !== "in_progress") {
       res
         .status(400)
@@ -2649,19 +2654,11 @@ router.post(
         (parseFloat(String(booking.priceQuoted)) + extraCharge) * 100,
       ) / 100;
 
-    const [updated] = await db
-      .update(bookingsTable)
-      .set({
-        status: "completed",
-        tripEndedAt: endedAt,
-        extraCharge: String(extraCharge),
-        totalPrice: String(totalPrice),
-        updatedAt: endedAt,
-      })
-      .where(
-        and(eq(bookingsTable.id, id), eq(bookingsTable.status, "in_progress")),
-      )
-      .returning();
+    const updated = await commitTripCompletion({
+      bookingId: id, driverId: driverRow.id, endedAt, extraCharge, totalPrice,
+      breakdown: !useManual && (overage.reason === "overage" || overage.overtimeMinutes > 0)
+        ? { ...charge, minutes: overage.overtimeMinutes } : undefined,
+    });
 
     if (!updated) {
       res
@@ -2688,77 +2685,13 @@ router.post(
       );
     }
 
-    res.json({
-      ...parseBooking(updated),
-      overage,
-      overageCharge: charge,
-      overagePaymentIntentId,
-    });
-
-    // overage_* and the breakdown columns are not on the drizzle schema, so they
-    // are written separately and best-effort — see the note in
-    // lib/db/src/schema/bookings.ts about why a new column must never be able to
-    // break the table's other queries.
-    if (
-      !useManual &&
-      (overage.reason === "overage" || overage.overtimeMinutes > 0)
-    ) {
-      void saveOverageBreakdown(
-        id,
-        {
-          overageFare: charge.fare,
-          overageTax: charge.taxAmount,
-          overageCardFee: charge.cardProcessingFee,
-          overageMinutes: overage.overtimeMinutes,
-          paymentIntentId: overagePaymentIntentId,
-        },
-        req.log,
-      ).catch((err) =>
-        console.error("[bookings] overage breakdown save failed:", err),
-      );
+    // Persist the provider reference before responding. The fare breakdown,
+    // ride counter and notification job already committed with completion.
+    if (overagePaymentIntentId) {
+      await db.execute(sql`UPDATE bookings SET extra_charge_payment_intent_id=${overagePaymentIntentId} WHERE id=${id}`);
     }
-
-    // Increment driver's completed ride count (fire-and-forget)
-    if (updated.driverId) {
-      db.update(driversTable)
-        .set({ totalRides: sql`${driversTable.totalRides} + 1` })
-        .where(eq(driversTable.id, updated.driverId))
-        .catch((err) =>
-          console.error("[bookings] failed to increment totalRides:", err),
-        );
-    }
-
-    // Fire-and-forget: send trip completion email to passenger
-    (async () => {
-      try {
-        await sendTripCompletionEmail(
-          {
-            id: updated.id,
-            passengerName: updated.passengerName,
-            passengerEmail: updated.passengerEmail,
-            pickupAddress: updated.pickupAddress,
-            dropoffAddress: updated.dropoffAddress,
-            pickupAt: updated.pickupAt.toISOString(),
-            vehicleClass: updated.vehicleClass ?? "standard",
-            passengers: updated.passengers ?? 1,
-            priceQuoted: parseFloat(String(updated.priceQuoted)),
-          },
-          updated.tipAmount != null
-            ? parseFloat(String(updated.tipAmount))
-            : null,
-          extraCharge > 0 ? extraCharge : null,
-        );
-      } catch (err) {
-        console.error("[bookings] trip completion email error:", err);
-      }
-    })();
-
-    if (updated.userId) {
-      maybeRewardReferrerForCompletedRide(updated.userId).catch((err) =>
-        console.error("[bookings] referral reward error:", err),
-      );
-    }
-  },
+    res.json({ ...parseBooking(updated), overage, overageCharge: charge, overagePaymentIntentId });
+  }),
 );
 
 /**
