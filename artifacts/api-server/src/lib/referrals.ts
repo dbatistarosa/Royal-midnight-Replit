@@ -1,7 +1,8 @@
+import { withLock } from "./durability.js";
+import { withMailScope, withMailTransaction } from "./mailOutbox.js";
 import crypto from "crypto";
 import { eq, and } from "drizzle-orm";
 import { db, usersTable, bookingsTable, promoCodesTable, settingsTable } from "@workspace/db";
-import { logger } from "./logger.js";
 
 export async function fetchReferralCreditAmount(): Promise<number> {
   const [row] = await db
@@ -50,33 +51,27 @@ export async function issueRefereeWelcomePromo(refereeName: string): Promise<{ c
 // Call after a booking transitions to "completed". Rewards the referrer the
 // first (and only the first) time their referee finishes a ride.
 export async function maybeRewardReferrerForCompletedRide(userId: number): Promise<void> {
-  try {
-    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
-    if (!user || !user.referredByUserId || user.referralRewardedAt) return;
-
-    const completedRides = await db
-      .select({ id: bookingsTable.id })
-      .from(bookingsTable)
-      .where(and(eq(bookingsTable.userId, userId), eq(bookingsTable.status, "completed")));
-    if (completedRides.length !== 1) return; // only reward on the rider's first-ever completed ride
-
-    const [referrer] = await db.select().from(usersTable).where(eq(usersTable.id, user.referredByUserId));
+  await withLock('referral:' + userId, async tx => {
+    const [user] = await tx.select().from(usersTable).where(eq(usersTable.id, userId));
+    if (!user?.referredByUserId || user.referralRewardedAt) return;
+    const [completed] = await tx.select({ id: bookingsTable.id }).from(bookingsTable)
+      .where(and(eq(bookingsTable.userId, userId), eq(bookingsTable.status, "completed"))).limit(1);
+    // A delayed worker may run after a second ride; the reward marker, not the
+    // current ride count, determines whether the one-time award is still owed.
+    if (!completed) return;
+    const [referrer] = await tx.select().from(usersTable).where(eq(usersTable.id, user.referredByUserId));
     if (!referrer) return;
-
-    const amount = await fetchReferralCreditAmount();
-    const code = await createOneTimePromoCode("REF", amount, `Referral reward for inviting ${user.name.split(" ")[0]}`);
-    await db.update(usersTable).set({ referralRewardedAt: new Date() }).where(eq(usersTable.id, userId));
-
+    const [setting] = await tx.select({ value: settingsTable.value }).from(settingsTable)
+      .where(eq(settingsTable.key, "referral_credit_amount"));
+    const value = Number(setting?.value ?? 20);
+    const amount = Number.isFinite(value) && value >= 0 ? value : 20;
+    const code = 'REF-' + randomSuffix(3);
+    await tx.insert(promoCodesTable).values({ code, description: 'Referral reward for inviting ' + user.name.split(' ')[0],
+      discountType: 'fixed', discountValue: String(amount), maxUses: 1, isActive: true });
+    await tx.update(usersTable).set({ referralRewardedAt: new Date() }).where(eq(usersTable.id, userId));
     const { sendReferralRewardEmail } = await import("./mailer.js");
-    await sendReferralRewardEmail({
-      referrerName: referrer.name,
-      referrerEmail: referrer.email,
-      refereeName: user.name,
-      promoCode: code,
-      amount,
-    });
-    logger.info({ referrerId: referrer.id, refereeId: user.id, code }, "Referral reward issued");
-  } catch (err) {
-    logger.error({ err, userId }, "Referral reward error (non-fatal)");
-  }
+    await withMailScope('referral:' + userId, () => withMailTransaction(tx, () => sendReferralRewardEmail({
+      referrerName: referrer.name, referrerEmail: referrer.email, refereeName: user.name, promoCode: code, amount,
+    })));
+  });
 }
