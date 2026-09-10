@@ -1,4 +1,4 @@
-import { commitTripCompletion } from "../lib/tripCompletion.js";
+import { commitTripCompletion, recordTripCompletion } from "../lib/tripCompletion.js";
 import { enqueueBookingNotification } from "../lib/bookingJobs.js";
 import { ValidatedBookingBody } from "../lib/bookingInput.js";
 import { bookingAction, withLock, setActor, rows } from "../lib/durability.js";
@@ -94,7 +94,6 @@ import {
   sendDriverOnWay,
   sendDriverArrived,
   sendAccountInvitation,
-  sendTripCompletionEmail,
   sendBookingAssignedDriver,
   sendExtraTimeChargedEmail,
   sendAddonExtrasChargedEmail,
@@ -106,7 +105,6 @@ import {
   sendCancellationSms,
 } from "../lib/sms.js";
 import { sendNewRideOfferPush, sendDriverAssignedPush } from "../lib/push.js";
-import { maybeRewardReferrerForCompletedRide } from "../lib/referrals.js";
 import {
   ListBookingsQueryParams,
   ListBookingsResponse,
@@ -1758,7 +1756,10 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
       if(parsed.data.vehicleId!=null)throw Object.assign(new Error('Assign a driver before selecting a vehicle'),{status:409});
       updateData.selectedVehicleId=null;updateData.vehicleId=null;
     }
-    const [updated]=await tx.update(bookingsTable).set(updateData).where(and(eq(bookingsTable.id,params.data.id),eq(bookingsTable.status,before.status))).returning();return updated;
+    const [updated]=await tx.update(bookingsTable).set(updateData).where(and(eq(bookingsTable.id,params.data.id),eq(bookingsTable.status,before.status))).returning();if (updated && before.status !== "completed" && updated.status === "completed") {
+      await recordTripCompletion(tx, updated);
+    }
+    return updated;
   });
 
   if (!booking) {
@@ -1782,45 +1783,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
         console.error("[bookings] status change email error:", err);
       }
     })();
-    // Send trip completion email when admin manually marks a booking completed
-    if (parsed.data.status === "completed") {
-      // Increment driver's totalRides counter
-      if (booking.driverId) {
-        await db.update(driversTable)
-          .set({ totalRides: sql`${driversTable.totalRides} + 1` })
-          .where(eq(driversTable.id, booking.driverId))
-          .catch((err) =>
-            console.error("[bookings] totalRides increment error:", err),
-          );
-      }
-      await (async () => {
-        try {
-          await sendTripCompletionEmail(
-            {
-              id: booking.id,
-              passengerName: booking.passengerName,
-              passengerEmail: booking.passengerEmail,
-              pickupAddress: booking.pickupAddress,
-              dropoffAddress: booking.dropoffAddress,
-              pickupAt: booking.pickupAt.toISOString(),
-              vehicleClass: booking.vehicleClass ?? "standard",
-              passengers: booking.passengers ?? 1,
-              priceQuoted: parseFloat(String(booking.priceQuoted)),
-            },
-            booking.tipAmount != null
-              ? parseFloat(String(booking.tipAmount))
-              : null,
-          );
-        } catch (err) {
-          console.error("[bookings] trip completion email error:", err);
-        }
-      })();
-      if (booking.userId) {
-        await maybeRewardReferrerForCompletedRide(booking.userId).catch((err) =>
-          console.error("[bookings] referral reward error:", err),
-        );
-      }
-    }
+
   }
 
   // Fire-and-forget: notify the driver when an admin directly assigns/reassigns them —

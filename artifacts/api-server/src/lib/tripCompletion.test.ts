@@ -14,12 +14,14 @@ vi.mock("@workspace/db", () => {
           ? { returning: async () => {
             if (pending.status !== "in_progress") return [];
             pending.status = "completed";
-            return [{ id: 1, status: "completed" }];
+            return [{ id: 1, driverId: 3, status: "completed" }];
           } }
           : Promise.resolve().then(() => { pending.rides++; }) }) }),
         execute: async () => {
           if (state.failQueue) throw new Error("queue unavailable");
+          if (pending.jobs) return { rows: [] };
           pending.jobs++;
+          return { rows: [{ key: 'trip-completion:1' }] };
         },
       };
       const result = await work(tx);
@@ -54,6 +56,12 @@ describe("trip completion durability", () => {
     await commitTripCompletion(input);
     await expect(commitTripCompletion(input)).resolves.toBeUndefined();
     expect([state.rides, state.jobs]).toEqual([1, 1]);
+  });
+  it("does not count a reopened trip a second time", async () => {
+    await commitTripCompletion(input);
+    state.status = "in_progress";
+    await commitTripCompletion(input);
+    expect([state.status, state.rides, state.jobs]).toEqual(["completed", 1, 1]);
   });
   it("leaves email failures retryable without issuing the referral early", async () => {
     state.status = "completed";
