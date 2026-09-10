@@ -1,3 +1,16 @@
+## ESTADO VERIFICADO 2026-09-10 — producción PR #8; siguiente bloque local
+
+Producción 4476e242151f494aa437a00fb3725a546d31e850 confirmada por healthz 200.
+Vercel dpl_48GzEPRkMKZ2YjUQQuBjFGZnAqE1 Ready. CI main 34437462700 PASS y
+Post-Deploy Smoke Test 34437564336 PASS. payments/config 200 TEST; admin sin sesión 401.
+Siguiente bloque: chargeExtraTime reutiliza booking_adjustments + payAddonCard
+con metadata extra_time; collect-extra-time usa el lock payment de la reserva.
+Tipo API PASS; suite completa 196 API + 3 web PASS. No nueva migración.
+AÚN NO PUBLICAR ESTE SIGUIENTE BLOQUE: revisar transición de cargos antiguos sin
+referencia local, pues la clave Stripe anterior extra-time-ID cambia a addon-intent-
+extra-time:ID. También quedan escrituras del cobro/recibo separadas y void email;
+completar aplicación transaccional y QA remoto antes de fusionar.
+No cobrar reservas históricas para probar. Usar datos QA y mantener Stripe TEST.
 ## CHECKPOINT 2026-09-10 — PR #8 fusionado; verificar deploy
 
 PR #8 https://github.com/dbatistarosa/Royal-midnight-Replit/pull/8 MERGED.
@@ -379,4 +392,5 @@ No declarar el proyecto totalmente terminado. Push móvil necesita Firebase/APNs
 dispositivo real; falta E2E con tarjeta/3DS/webhook, registro completo de liquidaciones
 y facturas corporativas, MFA, panel de excepciones y ensayo de restauración. Las
 mejoras comerciales opcionales del informe no están implementadas.
+
 

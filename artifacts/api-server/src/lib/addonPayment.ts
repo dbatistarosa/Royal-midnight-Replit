@@ -5,14 +5,14 @@ import type { AddonOperation } from "./addonOperation.js";
 
 const fail = (message: string) => Object.assign(new Error(message), {status:409});
 /** Save an unconfirmed intent before it can take money. Retry the same Stripe object. */
-export async function payAddonCard(stripe: Stripe, op: AddonOperation, card: {stripeCustomerId:string;defaultPaymentMethodId:string} | null) {
+export async function payAddonCard(stripe: Stripe, op: AddonOperation, card: {stripeCustomerId:string;defaultPaymentMethodId:string} | null, paymentType: "addon_extras" | "extra_time" = "addon_extras") {
   const amount = Math.round(op.snapshot.charge.total * 100);
   if(!op.payment_intent_id&&!card)throw fail('No saved card; this operation has not charged anything');
   let intent = op.payment_intent_id
     ? await stripe.paymentIntents.retrieve(op.payment_intent_id)
     : await stripe.paymentIntents.create({ amount, currency:"usd", customer:card!.stripeCustomerId,
       payment_method:card!.defaultPaymentMethodId, confirm:false,
-      metadata:{bookingId:String(op.booking_id),type:"addon_extras",adjustmentId:op.id},
+      metadata:{bookingId:String(op.booking_id),type:paymentType,adjustmentId:op.id},
     }, {idempotencyKey:"addon-intent-"+op.id});
   if (intent.amount !== amount || intent.currency !== "usd" || intent.metadata.adjustmentId !== op.id) throw fail("Stored add-on payment does not match the operation");
   if (!op.payment_intent_id) {

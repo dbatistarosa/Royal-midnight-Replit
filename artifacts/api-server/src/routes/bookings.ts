@@ -301,9 +301,10 @@ function getStripe(): Stripe {
  */
 async function chargeExtraTime(
   booking: { id: number; userId: number | null; passengerEmail: string },
-  amount: number,
+  charge: { fare: number; taxAmount: number; cardProcessingFee: number; total: number },
   log?: { warn: (obj: object, msg: string) => void },
 ): Promise<string | null> {
+  const amount = charge.total;
   if (amount <= 0) return null;
 
   if (booking.userId == null) {
@@ -323,37 +324,15 @@ async function chargeExtraTime(
       .from(usersTable)
       .where(eq(usersTable.id, booking.userId));
 
-    if (!user?.stripeCustomerId || !user.defaultPaymentMethodId) {
-      log?.warn(
-        { bookingId: booking.id, amount },
-        "extra_time_uncollected_no_saved_card",
-      );
-      return null;
-    }
-
-    const stripe = getStripe();
-    const intent = await stripe.paymentIntents.create(
-      {
-        amount: Math.round(amount * 100),
-        currency: "usd",
-        customer: user.stripeCustomerId,
-        payment_method: user.defaultPaymentMethodId,
-        confirm: true,
-        off_session: true,
-        description: `Royal Midnight — Extra time for Booking #RM-${String(booking.id).padStart(4, "0")}`,
-        metadata: { bookingId: String(booking.id), type: "extra_time" },
-      },
-      { idempotencyKey: `extra-time-${booking.id}` },
-    );
-
-    if (intent.status !== "succeeded") {
-      log?.warn(
-        { bookingId: booking.id, amount, status: intent.status },
-        "extra_time_charge_not_succeeded",
-      );
-      return null;
-    }
-    return intent.id;
+    // The operation survives Stripe's idempotency retention window. Persist the
+    // unconfirmed intent before charging; a lost success response retrieves it.
+    const operationId = 'extra-time:' + booking.id;
+    const requestHash = crypto.createHash('sha256').update(JSON.stringify(charge)).digest('hex');
+    const operation = await loadAddonOperation(operationId, booking.id, requestHash)
+      ?? await createAddonOperation(operationId, booking.id, requestHash, {priced: [], charge});
+    const card = user?.stripeCustomerId && user.defaultPaymentMethodId
+      ? {stripeCustomerId:user.stripeCustomerId, defaultPaymentMethodId:user.defaultPaymentMethodId} : null;
+    return await payAddonCard(getStripe(), operation, card, 'extra_time');
   } catch (err) {
     if (isMissingCustomerError(err) && booking.userId != null) {
       await forgetStaleStripeCustomer(booking.userId, log);
@@ -2646,7 +2625,7 @@ router.post(
     if (!useManual && charge.total > 0) {
       overagePaymentIntentId = await chargeExtraTime(
         updated,
-        charge.total,
+        charge,
         req.log,
       );
     }
@@ -2685,7 +2664,7 @@ router.post(
 router.post(
   "/bookings/:id/collect-extra-time",
   requireAdmin,
-  async (req, res): Promise<void> => {
+  bookingAction(async (req, res): Promise<void> => {
     // String(...) because Express 5 types params as string | string[]. Most of
     // this file predates that and carries the resulting type error; no reason to
     // add another.
@@ -2753,7 +2732,7 @@ router.post(
 
     const paymentIntentId = await chargeExtraTime(
       booking,
-      charge.total,
+      charge,
       req.log,
     );
     if (!paymentIntentId) {
@@ -2815,7 +2794,7 @@ router.post(
     }).catch((err) =>
       console.error("[bookings] extra-time receipt email failed:", err),
     );
-  },
+  }),
 );
 
 // ── Admin: add extras to an already-paid booking ────────────────────────────
@@ -3215,3 +3194,4 @@ router.post(
 );
 
 export default router;
+
