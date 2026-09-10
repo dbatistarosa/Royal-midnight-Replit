@@ -1,5 +1,20 @@
 # Royal Midnight — punto de recuperación, 2026-09-09
 
+## REANUDACIÓN 2026-09-10 — estado que prevalece
+
+PR #7 MERGED y publicado: producción 674851849930c5565eefe1f345e7ce7204fef4de.
+CI main 34436490267 y Post-Deploy Smoke Test 34436591569 PASS. Cierre manual admin
+usa contador/job transaccionales compartidos; reabrir/cerrar no duplica contador.
+
+Bloque de extras en curso: booking_adjustments guarda solicitud y precios congelados,
+referencias Stripe antes de confirmar/finalizar y respuesta aplicada. Misma clave
+reutiliza intento/factura; extras, importes, recibo outbox y respuesta se confirman
+en transacción. UI conserva Idempotency-Key en sessionStorage durante reintentos.
+Migración 20260910043000_booking_adjustments.sql aplicada SOLO en staging;
+PRODUCCIÓN AÚN NO TIENE ESA TABLA. Tipos workspace PASS y 7 pruebas de proveedor
+simulado PASS; pendientes CI, prueba de factura TEST en staging, limpieza QA,
+migración producción y deploy. No publicar este código antes de la migración.
+
 ## Estado vigente al cerrar este bloque: PR #5 y #6 publicados
 
 Producción final **2e62471bd55e296579aa9fc6f57157da57aed1e0**, deployment
