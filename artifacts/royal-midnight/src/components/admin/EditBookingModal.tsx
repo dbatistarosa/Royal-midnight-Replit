@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, Save, Loader2, Lock, Mail, AlertTriangle, CreditCard, Send, PackagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -126,20 +126,30 @@ export function EditBookingModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(selectedAddon), paid, booking.id, token]);
 
+  const addonBusy = useRef(false);
   const submitAddon = async (method: "card" | "invoice") => {
-    if (selectedAddonList.length === 0) return;
+    if (selectedAddonList.length === 0 || addonBusy.current) return;
+    addonBusy.current = true;
     setAddonSubmitting(method);
     try {
+      const extras = selectedAddonList.map(([id, quantity]) => ({ id: Number(id), quantity })).sort((a,b)=>a.id-b.id);
+      const storageKey = `royal-addon:${booking.id}:${method}:${JSON.stringify(extras)}`;
+      let requestKey = sessionStorage.getItem(storageKey);
+      if (!requestKey) {
+        requestKey = crypto.randomUUID();
+        sessionStorage.setItem(storageKey, requestKey);
+      }
       const res = await fetch(`${API_BASE}/admin/bookings/${booking.id}/extras`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "Idempotency-Key": requestKey },
         body: JSON.stringify({
           method,
-          extras: selectedAddonList.map(([id, quantity]) => ({ id: Number(id), quantity })),
+          extras,
         }),
       });
       const data = await res.json().catch(() => null) as { error?: string; extras?: TripExtra[]; charge?: { total: number } } | null;
       if (!res.ok) throw new Error(data?.error || `Could not add the extras (HTTP ${res.status}).`);
+      sessionStorage.removeItem(storageKey);
 
       setCurrentExtras(data?.extras ?? currentExtras);
       setSelectedAddon({});
@@ -158,6 +168,7 @@ export function EditBookingModal({
         variant: "destructive",
       });
     } finally {
+      addonBusy.current = false;
       setAddonSubmitting(null);
     }
   };

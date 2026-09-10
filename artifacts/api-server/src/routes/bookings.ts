@@ -1,3 +1,6 @@
+import { addonRequestHash, loadAddonOperation, createAddonOperation } from "../lib/addonOperation.js";
+import { payAddonCard, invoiceAddon } from "../lib/addonPayment.js";
+import { withMailScope, withMailTransaction } from "../lib/mailOutbox.js";
 import { commitTripCompletion, recordTripCompletion } from "../lib/tripCompletion.js";
 import { enqueueBookingNotification } from "../lib/bookingJobs.js";
 import { ValidatedBookingBody } from "../lib/bookingInput.js";
@@ -2833,7 +2836,7 @@ const AddExtrasBody = z.object({
     .array(
       z.object({ id: z.number().int().positive(), quantity: z.number().int().positive().max(20).optional() }),
     )
-    .min(1),
+    .min(1).max(20).refine(items=>new Set(items.map(e=>e.id)).size===items.length,"Duplicate extras are not allowed"),
 });
 
 /** Server-priced total for a proposed set of extras — never trust a client
@@ -2850,6 +2853,7 @@ async function priceAddonExtras(requested: Array<{ id: number; quantity?: number
       ),
     );
 
+  if(services.length!==requested.length)throw Object.assign(new Error('An extra is unavailable; refresh the selection'),{status:400});
   const priced = services.map((s) => ({
     id: s.id,
     name: s.name,
@@ -2906,7 +2910,7 @@ router.post(
 router.post(
   "/admin/bookings/:id/extras",
   requireAdmin,
-  async (req, res): Promise<void> => {
+  bookingAction(async (req, res): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
@@ -2915,6 +2919,12 @@ router.post(
     }).safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: z.prettifyError(parsed.error) }); return; }
 
+    const key=req.get('Idempotency-Key');
+    if(!key || !/^[a-zA-Z0-9_-]{16,100}$/.test(key)){res.status(400).json({error:'A stable Idempotency-Key is required. Refresh the form and retry.'});return;}
+    const operationId='addon:'+req.currentUser!.userId+':'+key;
+    const hash=addonRequestHash(parsed.data.method,parsed.data.extras);
+    let operation=await loadAddonOperation(operationId,id,hash);
+    if(operation?.response){res.json({...operation.response,extras:await loadExtrasFor(id)});return;}
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
     if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
     if (booking.status === "cancelled") {
@@ -2928,11 +2938,13 @@ router.post(
       return;
     }
 
-    const { priced, charge } = await priceAddonExtras(parsed.data.extras);
+    const snapshot=operation?.snapshot ?? await priceAddonExtras(parsed.data.extras);
+    const {priced,charge}=snapshot;
     if (!priced.length || charge.total <= 0) {
       res.status(400).json({ error: "Nothing billable was selected." });
       return;
     }
+    if(!operation)operation=await createAddonOperation(operationId,id,hash,snapshot);
     const extraNames = priced.map((e) => (e.quantity > 1 ? `${e.name} ×${e.quantity}` : e.name));
     const bookingRef = `RM-${String(id).padStart(4, "0")}`;
 
@@ -2940,142 +2952,32 @@ router.post(
     let invoiceUrl: string | null = null;
     let invoicePdfUrl: string | null = null;
 
-    if (parsed.data.method === "card") {
-      const card = await findCardOnFile(booking.userId);
-      if (!card) {
-        res.status(400).json({ error: "No saved card on file for this passenger — send an invoice instead." });
-        return;
-      }
-      try {
-        const stripe = getStripe();
-        const intent = await stripe.paymentIntents.create({
-          amount: Math.round(charge.total * 100),
-          currency: "usd",
-          customer: card.stripeCustomerId,
-          payment_method: card.defaultPaymentMethodId,
-          confirm: true,
-          off_session: true,
-          description: `Royal Midnight — Add-ons for Booking #${bookingRef}: ${extraNames.join(", ")}`,
-          metadata: { bookingId: String(id), type: "addon_extras" },
-        });
-        if (intent.status !== "succeeded") {
-          res.status(402).json({ error: `Card was not charged (status: ${intent.status}). Try again or send an invoice instead.` });
-          return;
-        }
-        paymentIntentId = intent.id;
-      } catch (err) {
-        if (isMissingCustomerError(err) && booking.userId != null) {
-          await forgetStaleStripeCustomer(booking.userId, req.log);
-        }
-        sendStripeError(req, res, err, "The card on file could not be charged. Send an invoice instead.");
-        return;
-      }
-    } else {
-      try {
-        const stripe = getStripe();
-        const existingCustomers = await stripe.customers.list({ email: booking.passengerEmail, limit: 1 });
-        const customer = existingCustomers.data.length > 0
-          ? existingCustomers.data[0]!
-          : await stripe.customers.create({ email: booking.passengerEmail, name: booking.passengerName, metadata: { bookingId: String(id) } });
+    const stripe=getStripe();
+    if(parsed.data.method==='card')paymentIntentId=await payAddonCard(stripe,operation,await findCardOnFile(booking.userId));
+    else ({invoiceUrl,invoicePdfUrl}=await invoiceAddon(stripe,operation,{email:booking.passengerEmail,name:booking.passengerName}));
 
-        const invoice = await stripe.invoices.create({
-          customer: customer.id,
-          collection_method: "send_invoice",
-          days_until_due: 7,
-          metadata: { bookingId: String(id), type: "addon_extras" },
-          description: `Royal Midnight — Add-ons for Booking #${bookingRef}`,
-        });
-        await stripe.invoiceItems.create({
-          customer: customer.id,
-          invoice: invoice.id,
-          amount: Math.round(charge.total * 100),
-          currency: "usd",
-          description: `${extraNames.join(", ")} — Booking ${bookingRef}`,
-        });
-        const finalised = await stripe.invoices.finalizeInvoice(invoice.id);
-        invoiceUrl = finalised.hosted_invoice_url ?? null;
-        invoicePdfUrl = finalised.invoice_pdf ?? null;
-        if (!invoiceUrl) {
-          res.status(500).json({ error: "Invoice finalised but no payment link was generated. Please try again." });
-          return;
-        }
-      } catch (err) {
-        sendStripeError(req, res, err, "Could not create the invoice. Please try again.");
-        return;
-      }
-    }
-
-    // Only now is anything written — a failed charge or invoice attempt above
-    // must not add extras nobody has agreed to pay for.
-    //
-    // Always a new row, even if this extra is already on the booking, rather
-    // than merging into the existing one: merging would overwrite the earlier
-    // row's priceAtBooking (frozen at the price it was actually paid at) with
-    // today's catalogue price, so a receipt could show 2x at a price only one
-    // of them was ever charged at.
-    await db.insert(bookingExtrasTable).values(
-      priced.map((e) => ({
-        bookingId: id,
-        extraServiceId: e.id,
-        quantity: e.quantity,
-        priceAtBooking: String(e.price),
-      })),
-    );
-
-    const newPriceQuoted = Math.round((parseFloat(String(booking.priceQuoted)) + charge.total) * 100) / 100;
-    const [updated] = await db
-      .update(bookingsTable)
-      .set({ priceQuoted: String(newPriceQuoted), updatedAt: new Date() })
-      .where(eq(bookingsTable.id, id))
-      .returning();
-    if (!updated) {
-      // The charge/invoice above already succeeded and must not be reported as
-      // failed — the extras and price bump are logged for manual reconciliation.
-      req.log?.error({ bookingId: id, method: parsed.data.method, amount: charge.total }, "addon_extras_booking_vanished_after_charge");
-      res.status(500).json({ error: "Payment succeeded but the booking could not be updated — contact support to reconcile." });
-      return;
-    }
-
-    void incrementFareBreakdown(id, { extrasTotal: charge.fare, taxAmount: charge.taxAmount, cardFee: charge.cardProcessingFee }, req.log);
-
-    req.log?.info(
-      { bookingId: id, method: parsed.data.method, amount: charge.total, extraIds: priced.map((e) => e.id) },
-      "addon_extras_added",
-    );
-
-    res.json({
-      ok: true,
-      booking: parseBooking(updated),
-      extras: await loadExtrasFor(id),
-      method: parsed.data.method,
-      paymentIntentId,
-      invoiceUrl,
-      charge,
+    const result=await db.transaction(async tx=>{
+      await tx.insert(bookingExtrasTable).values(priced.map(e=>({bookingId:id,extraServiceId:e.id,quantity:e.quantity,priceAtBooking:String(e.price)})));
+      const [updated]=await tx.update(bookingsTable).set({
+        priceQuoted:sql`${bookingsTable.priceQuoted} + ${charge.total}`,
+        totalPrice:sql`CASE WHEN ${bookingsTable.totalPrice} IS NULL THEN NULL ELSE ${bookingsTable.totalPrice} + ${charge.total} END`,
+        updatedAt:new Date(),
+      }).where(eq(bookingsTable.id,id)).returning();
+      if(!updated)throw new Error('Booking vanished after payment; operation remains recoverable');
+      await tx.execute(sql`UPDATE bookings SET extras_total=coalesce(extras_total,0)+${charge.fare},
+        tax_amount=coalesce(tax_amount,0)+${charge.taxAmount},card_fee=coalesce(card_fee,0)+${charge.cardProcessingFee} WHERE id=${id}`);
+      await withMailScope(operationId,()=>withMailTransaction(tx,async()=>{
+        if(parsed.data.method==='card')await sendAddonExtrasChargedEmail({bookingId:id,passengerName:booking.passengerName,
+          passengerEmail:booking.passengerEmail,extraNames,fare:charge.fare,taxAmount:charge.taxAmount,cardProcessingFee:charge.cardProcessingFee,total:charge.total});
+        else if(invoiceUrl)await sendAddonInvoiceToPassenger({bookingId:id,passengerName:booking.passengerName,
+          passengerEmail:booking.passengerEmail,extraNames,total:charge.total,invoiceUrl,invoicePdfUrl});
+      }));
+      const response={ok:true,booking:parseBooking(updated),method:parsed.data.method,paymentIntentId,invoiceUrl,charge};
+      await tx.execute(sql`UPDATE booking_adjustments SET response=${JSON.stringify(response)}::jsonb,applied_at=now() WHERE id=${operationId}`);
+      return response;
     });
-
-    if (parsed.data.method === "card") {
-      void sendAddonExtrasChargedEmail({
-        bookingId: id,
-        passengerName: booking.passengerName,
-        passengerEmail: booking.passengerEmail,
-        extraNames,
-        fare: charge.fare,
-        taxAmount: charge.taxAmount,
-        cardProcessingFee: charge.cardProcessingFee,
-        total: charge.total,
-      }).catch((err) => console.error("[bookings] addon-extras charged email failed:", err));
-    } else if (invoiceUrl) {
-      void sendAddonInvoiceToPassenger({
-        bookingId: id,
-        passengerName: booking.passengerName,
-        passengerEmail: booking.passengerEmail,
-        extraNames,
-        total: charge.total,
-        invoiceUrl,
-        invoicePdfUrl,
-      }).catch((err) => console.error("[bookings] addon-extras invoice email failed:", err));
-    }
-  },
+    res.json({...result,extras:await loadExtrasFor(id)});
+  }),
 );
 
 // Admin: unassign driver from a booking (puts it back in the open pool)
