@@ -1,3 +1,31 @@
+## PAUSA POR CUOTA — 2026-09-10, PR #9 borrador
+
+Último código guardado f2160a9 en fix/royal-midnight-reliability.
+PR #9 https://github.com/dbatistarosa/Royal-midnight-Replit/pull/9 DRAFT; no fusionado.
+CI 34437836411 todavía in_progress al guardar; Preview Comments success.
+Producción sigue 4476e242151f494aa437a00fb3725a546d31e850, PR #8 verificado.
+Pruebas locales actuales: 196 API + 3 web PASS; tipos API PASS.
+
+Para retomar, en este orden:
+1. Revisar cuota y CI de f2160a9. No consumir resets sin instrucción.
+2. Revisar transición de Stripe: producción solo muestra reserva 13 con extra_charge
+   32.16, completada 2026-08-17 y extra_charge_payment_intent_id NULL. Eso NO prueba
+   ausencia de un cargo externo. No cobrarla para verificar. La cuenta TEST disponible
+   en conector es acct_1Svjs2G4saqVjBnZ; GetPaymentIntentsSearch ya descubierto (requiere
+   query, limit opcional). NO se ejecutó aún búsqueda Stripe. No usar búsqueda eventual
+   como garantía de consistencia para cargos nuevos; solo revisión histórica.
+3. Completar collect-extra-time: update importes + desglose + referencia + outbox en una
+   transacción. Actualmente saveOverageBreakdown usa db global y el correo sigue void;
+   no publicar ese bloque parcial sin revisión y QA. Si cambian tarifas entre reintentos,
+   el request hash actual bloquea la operación: conservar/reutilizar precio congelado
+   explícitamente en el flujo final en vez de crear otro intento.
+4. Validar reintentos/error DB/recuperación sin tarjeta y concurrencia admin-driver en
+   staging; solo entonces merge/deploy del PR #9 y smoke posterior.
+
+La factura TEST QA del PR #8 sigue retenida en la otra cuenta documentada más abajo;
+DB staging limpia, ningún correo QA enviado. Preview sigue pk LIVE/sk TEST; producción
+TEST. Mapbox preview sigue sin configurar (rechazo automático previo documentado).
+No considerar completados tips, E2E tarjeta/3DS, push móvil, MFA ni restauración.
 ## ESTADO VERIFICADO 2026-09-10 — producción PR #8; siguiente bloque local
 
 Producción 4476e242151f494aa437a00fb3725a546d31e850 confirmada por healthz 200.
@@ -392,5 +420,6 @@ No declarar el proyecto totalmente terminado. Push móvil necesita Firebase/APNs
 dispositivo real; falta E2E con tarjeta/3DS/webhook, registro completo de liquidaciones
 y facturas corporativas, MFA, panel de excepciones y ensayo de restauración. Las
 mejoras comerciales opcionales del informe no están implementadas.
+
 
 
