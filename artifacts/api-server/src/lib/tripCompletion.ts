@@ -2,6 +2,19 @@ import { db, bookingsTable, driversTable } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { sendTripCompletionEmail } from "./mailer.js";
 import { maybeRewardReferrerForCompletedRide } from "./referrals.js";
+import { rows, type Transaction } from "./durability.js";
+
+/** Called inside the status transaction by both driver and administrative completion. */
+export async function recordTripCompletion(tx: Transaction, booking: { id: number; driverId: number | null }) {
+  const inserted = rows(await tx.execute(sql`INSERT INTO app_jobs(key,kind,booking_id)
+    VALUES(${'trip-completion:' + booking.id},'trip-completion',${booking.id})
+    ON CONFLICT DO NOTHING RETURNING key`));
+  // A previously completed/reopened trip still represents one performed ride.
+  if (inserted.length && booking.driverId != null) {
+    await tx.update(driversTable).set({ totalRides: sql`${driversTable.totalRides} + 1` })
+      .where(eq(driversTable.id, booking.driverId));
+  }
+}
 
 type Completion = {
   bookingId: number;
@@ -22,15 +35,12 @@ export async function commitTripCompletion(input: Completion) {
     }).where(and(eq(bookingsTable.id, input.bookingId),
       eq(bookingsTable.driverId, input.driverId), eq(bookingsTable.status, "in_progress"))).returning();
     if (!updated) return undefined;
-    await tx.update(driversTable).set({ totalRides: sql`${driversTable.totalRides} + 1` })
-      .where(eq(driversTable.id, input.driverId));
     if (input.breakdown) {
       const b = input.breakdown;
       await tx.execute(sql`UPDATE bookings SET overage_fare=${b.fare}, overage_tax=${b.taxAmount},
         overage_card_fee=${b.cardProcessingFee}, overage_minutes=${b.minutes} WHERE id=${input.bookingId}`);
     }
-    await tx.execute(sql`INSERT INTO app_jobs(key,kind,booking_id)
-      VALUES(${'trip-completion:' + input.bookingId},'trip-completion',${input.bookingId}) ON CONFLICT DO NOTHING`);
+    await recordTripCompletion(tx, updated);
     return updated;
   });
 }
