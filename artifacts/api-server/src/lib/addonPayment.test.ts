@@ -56,3 +56,10 @@ describe('recoverable add-on payments',()=>{
     expect(s.invoiceItems.create).not.toHaveBeenCalled();expect(s.invoices.finalizeInvoice).toHaveBeenCalledOnce();
   });
 });
+
+it('preserves supplemental overtime metadata while saving before confirmation', async () => {
+  const s = provider();
+  await payAddonCard(s as unknown as Stripe, op(), card, 'extra_time');
+  expect(s.paymentIntents.create.mock.calls[0][0]).toMatchObject({confirm:false,metadata:{type:'extra_time'}});
+  expect(state.save.mock.invocationCallOrder[0]).toBeLessThan(s.paymentIntents.confirm.mock.invocationCallOrder[0]!);
+});
