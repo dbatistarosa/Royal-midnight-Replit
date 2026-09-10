@@ -1,3 +1,23 @@
+## CHECKPOINT 2026-09-10 — PR #8 fusionado; verificar deploy
+
+PR #8 https://github.com/dbatistarosa/Royal-midnight-Replit/pull/8 MERGED.
+Main 4476e242151f494aa437a00fb3725a546d31e850. CI PR 34436956325 PASS;
+CI main 34437462700 en curso al guardar. Preview dpl_6Znhi8QVeasTaS6zzxy1CkzwzjUw Ready.
+Migración booking_adjustments aplicada en producción versión 20260910042959:
+RLS true, sin permisos anon/authenticated. Archivo 20260910043000_booking_adjustments.sql.
+QA remoto staging PASS: POST extras invoice 200, repetición 200 misma factura,
+cantidad distinta/misma clave 409. Una operación, un extra, importe 100→110.70
+una sola vez y un correo pending/0 intentos. Limpieza DB QA completada (usuario 6,
+reserva 5, extra 1, sesión, ledger, extras, auditoría y correo); conteos verificados 0.
+No se enviaron correos ni se cobraron tarjetas. Queda factura TEST
+in_1UDzb9DItXPfYt5g9QjKUF5C, cuenta acct_1SvNVjDItXPfYt5g, auto_advance=false,
+cliente QA addon-qa-20260910@example.invalid; no anulada porque el conector solo
+expone otra cuenta TEST (acct_1Svjs2G4saqVjBnZ). No afirmar limpieza Stripe completa.
+Preview /payments/config sigue 503 por pk LIVE/sk TEST. Producción debe seguir TEST.
+Siguiente: comprobar CI main/smoke y healthz SHA 4476e24; guardar confirmación.
+Luego chargeExtraTime/collect-extra-time: referencia durable antes de confirmación,
+serialización, importe congelado y aplicación transaccional. Hoy create(confirm:true)
+con clave extra-time-ID y escrituras separadas sigue siendo una ventana de duplicación.
 # Royal Midnight — punto de recuperación, 2026-09-09
 
 ## REANUDACIÓN 2026-09-10 — estado que prevalece
@@ -359,3 +379,4 @@ No declarar el proyecto totalmente terminado. Push móvil necesita Firebase/APNs
 dispositivo real; falta E2E con tarjeta/3DS/webhook, registro completo de liquidaciones
 y facturas corporativas, MFA, panel de excepciones y ensayo de restauración. Las
 mejoras comerciales opcionales del informe no están implementadas.
+
