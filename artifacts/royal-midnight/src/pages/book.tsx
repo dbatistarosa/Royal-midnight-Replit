@@ -487,6 +487,7 @@ export default function Book() {
   }, []);
 
   const passengers = form.watch("passengers");
+  const luggage = form.watch("luggage");
   const pickupDate = form.watch("pickupDate");
   const pickupTime = form.watch("pickupTime");
   const pickupAddress = form.watch("pickupAddress");
@@ -545,8 +546,11 @@ export default function Book() {
 
   const selectedQuote = selectedVehicle ? quotes[selectedVehicle] : null;
   const selectedVehicleName = vehicleClasses.find(v => v.id === selectedVehicle)?.name ?? "";
-  // Classes that fit this many passengers, in admin-configured display order.
-  const eligibleVehicleClasses = vehicleClasses.filter(v => Number(passengers) <= v.passengers);
+  // A class must fit both constraints at once. Passenger capacity alone allowed
+  // combinations such as three people plus six bags into a three-bag sedan.
+  const eligibleVehicleClasses = vehicleClasses.filter(
+    v => Number(passengers) <= v.passengers && Number(luggage) <= v.bags,
+  );
 
   const formattedDateTime = pickupDate && pickupTime
     ? `${format(pickupDate, "EEEE, MMMM d, yyyy")} at ${pickupTime} EST`
@@ -571,13 +575,16 @@ export default function Book() {
       return;
     }
 
-    const { pickupAddress, dropoffAddress, pickupDate, pickupTime, passengers } = form.getValues();
+    const { pickupAddress, dropoffAddress, pickupDate, pickupTime, passengers, luggage } = form.getValues();
     const isoDate = new Date(`${format(pickupDate, "yyyy-MM-dd")}T${pickupTime}:00`).toISOString();
     const numPax = Number(passengers) || 1;
+    const numBags = Number(luggage) || 0;
 
-    const candidateClasses = vehicleClasses.filter(v => numPax <= v.passengers);
+    const candidateClasses = vehicleClasses.filter(
+      v => numPax <= v.passengers && numBags <= v.bags,
+    );
     if (candidateClasses.length === 0) {
-      toast({ title: "No vehicle available", description: "No vehicle in our fleet currently fits this many passengers.", variant: "destructive" });
+      toast({ title: "No vehicle available", description: "No vehicle category fits both this passenger and luggage count.", variant: "destructive" });
       return;
     }
 
@@ -590,7 +597,7 @@ export default function Book() {
       };
       const results = await Promise.allSettled(
         candidateClasses.map(vc =>
-          getQuote.mutateAsync({ data: { pickupAddress, dropoffAddress, vehicleClass: vc.id as QuoteRequestVehicleClass, passengers: numPax, pickupAt: isoDate, ...quoteExtras } as any })
+          getQuote.mutateAsync({ data: { pickupAddress, dropoffAddress, vehicleClass: vc.id as QuoteRequestVehicleClass, passengers: numPax, luggage: numBags, pickupAt: isoDate, ...quoteExtras } as any })
         )
       );
 
@@ -1437,10 +1444,10 @@ export default function Book() {
                 {vehicleClasses.map((info) => {
                   const vc = info.id;
                   const quote = quotes[vc];
-                  const isDisabled = Number(passengers) > info.passengers;
+                  const isDisabled = Number(passengers) > info.passengers || Number(luggage) > info.bags;
                   const isSelected = selectedVehicle === vc;
 
-                  if (isDisabled || !(vc in quotes)) return null;
+                  if (isDisabled || !quote) return null;
 
                   return (
                     <div

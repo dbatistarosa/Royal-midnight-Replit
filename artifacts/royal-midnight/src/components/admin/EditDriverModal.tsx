@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { API_BASE } from "@/lib/constants";
+import { useVehicleClasses } from "@/hooks/useVehicleClasses";
 
 /**
  * Full driver editing.
@@ -86,6 +87,7 @@ export function EditDriverModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { vehicleClasses } = useVehicleClasses();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
 
@@ -244,7 +246,14 @@ export function EditDriverModal({
               <Field label="Make"><Input className={INPUT} placeholder="Cadillac" value={f.vehicleMake} onChange={e => set("vehicleMake", e.target.value)} /></Field>
               <Field label="Model"><Input className={INPUT} placeholder="Escalade" value={f.vehicleModel} onChange={e => set("vehicleModel", e.target.value)} /></Field>
               <Field label="Color"><Input className={INPUT} placeholder="Black" value={f.vehicleColor} onChange={e => set("vehicleColor", e.target.value)} /></Field>
-              <Field label="Class" hint="business, suv…"><Input className={INPUT} value={f.vehicleClass} onChange={e => set("vehicleClass", e.target.value)} /></Field>
+              <Field label="Class" hint="Choose the exact category offered to passengers">
+                <select className={SELECT} value={f.vehicleClass} onChange={e => set("vehicleClass", e.target.value)}>
+                  <option value="">Select category</option>
+                  {vehicleClasses.map(vehicle => (
+                    <option key={vehicle.id} value={vehicle.id}>{vehicle.name}</option>
+                  ))}
+                </select>
+              </Field>
               <Field label="Passengers"><Input className={INPUT} inputMode="numeric" value={f.passengerCapacity} onChange={e => set("passengerCapacity", e.target.value.replace(/\D/g, "").slice(0, 2))} /></Field>
               <Field label="Luggage"><Input className={INPUT} inputMode="numeric" value={f.luggageCapacity} onChange={e => set("luggageCapacity", e.target.value.replace(/\D/g, "").slice(0, 2))} /></Field>
               <div className="flex items-end pb-2">

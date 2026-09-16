@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, ne, inArray } from "drizzle-orm";
 import { z } from "zod/v4";
-import { db, driversTable, usersTable, geoZonesTable, driverServiceZonesTable } from "@workspace/db";
+import { db, driversTable, usersTable, geoZonesTable, driverServiceZonesTable, pricingRulesTable } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 import { tableExists } from "../lib/schemaGuards.js";
 import { syncDriverVehicleFromLegacy } from "../lib/driverVehicles.js";
@@ -80,6 +80,20 @@ router.patch("/admin/drivers/:id/details", requireAdmin, async (req, res): Promi
     return;
   }
   const body = parsed.data;
+
+  if (body.vehicleClass) {
+    const [activeClass] = await db
+      .select({ id: pricingRulesTable.id })
+      .from(pricingRulesTable)
+      .where(and(
+        eq(pricingRulesTable.vehicleClass, body.vehicleClass),
+        eq(pricingRulesTable.isActive, true),
+      ));
+    if (!activeClass) {
+      res.status(400).json({ error: "Choose an active vehicle category from the list." });
+      return;
+    }
+  }
 
   const [before] = await db.select().from(driversTable).where(eq(driversTable.id, id));
   if (!before) {

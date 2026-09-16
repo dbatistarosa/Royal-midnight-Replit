@@ -75,6 +75,7 @@ import {
 } from "../lib/driverEligibility.js";
 import { getDriverWindows } from "../lib/driverWindows.js";
 import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
+import { fleetAvailability } from "../lib/fleetAvailability.js";
 import {
   HOURLY_RATES,
   DEFAULT_RATE_PER_MILE,
@@ -82,6 +83,7 @@ import {
   computeQuote,
   readQuoteExtensions,
   resolveHourlyRate,
+  vehicleClassFits,
 } from "./quote.js";
 import { evaluatePromoCode, releasePromoUsage } from "./promos.js";
 import {
@@ -930,6 +932,17 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
   // disagrees is logged and ignored, so a tampered request cannot produce a
   // free ride and an honest one is never rejected over rounding.
   const ext = readQuoteExtensions(req.body);
+  if (!(await vehicleClassFits(
+    parsed.data.vehicleClass as string,
+    parsed.data.passengers,
+    parsed.data.luggageCount,
+  ))) {
+    res.status(409).json({
+      error: "This vehicle category cannot carry both the selected passengers and luggage.",
+      code: "VEHICLE_CAPACITY_EXCEEDED",
+    });
+    return;
+  }
 
   // Extras are priced from extra_services, never from the body — and priced
   // BEFORE the quote, because they are part of the taxable base. They used to
@@ -1102,13 +1115,36 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
     trackingToken: crypto.randomBytes(16).toString("hex"),
   };
 
-  const booking=await withLock('checkout:'+(checkoutKey??crypto.randomUUID()),async tx=>{
+  // All categories draw from the same chauffeur pool. Serialize the short
+  // capacity decision globally so simultaneous checkouts in different classes
+  // cannot both reserve the final available chauffeur.
+  const booking=await withLock('fleet-booking',async tx=>{
     await setActor(tx,caller?.userId);
     if(checkoutKey){
       const [previous]=rows<{id:number;checkout_fingerprint:string}>(await tx.execute(sql`SELECT id,checkout_fingerprint FROM bookings WHERE checkout_key=${checkoutKey}`));
       if(previous){
         if(previous.checkout_fingerprint!==fingerprint)throw Object.assign(new Error('Checkout details changed. Start a new reservation.'),{status:409});
         const [existing]=await tx.select().from(bookingsTable).where(eq(bookingsTable.id,previous.id));return existing;
+      }
+    }
+    if (caller?.role !== "admin") {
+      const fleet = await fleetAvailability({
+        pickupPoint: quote.pickupPoint ?? null,
+        pickupAt: parsed.data.pickupAt,
+        estimatedDurationMinutes: ext.charterMode === "hourly"
+          ? Math.max(quote.estimatedDuration ?? 60, (ext.charterHours ?? 0) * 60)
+          : quote.estimatedDuration ?? 60,
+        charterMode: ext.charterMode,
+        charterHours: ext.charterHours,
+        vehicleClass: parsed.data.vehicleClass as string,
+        passengers: parsed.data.passengers,
+        luggageCount: parsed.data.luggageCount,
+      }, tx);
+      if (!fleet.available) {
+        throw Object.assign(
+          new Error("No chauffeur and vehicle in this category are available for that time and area."),
+          { status: 409, code: "FLEET_CAPACITY_UNAVAILABLE" },
+        );
       }
     }
     if(appliedPromoCode){

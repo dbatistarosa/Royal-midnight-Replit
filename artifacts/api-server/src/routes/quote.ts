@@ -13,6 +13,7 @@ import {
   computeFareBreakdown,
 } from "../lib/pricing";
 import { isPickupServiceable, loadZoneCoverage } from "../lib/serviceZones.js";
+import { fleetAvailability } from "../lib/fleetAvailability.js";
 
 const router: IRouter = Router();
 
@@ -208,6 +209,25 @@ async function getPricingForClass(vc: string): Promise<{ baseFare: number; rateP
     airportFee: 0,
     hourlyRate: null,
   };
+}
+
+/** The public catalog is also the capacity contract enforced by the server. */
+export async function vehicleClassFits(
+  vehicleClass: string,
+  passengers: number,
+  luggage: number,
+): Promise<boolean> {
+  const [rule] = await db
+    .select({ passengers: pricingRulesTable.passengers, bags: pricingRulesTable.bags })
+    .from(pricingRulesTable)
+    .where(
+      and(
+        eq(pricingRulesTable.vehicleClass, vehicleClass),
+        eq(pricingRulesTable.isActive, true),
+      ),
+    );
+  return !!rule && rule.passengers != null && rule.bags != null
+    && passengers <= rule.passengers && luggage <= rule.bags;
 }
 
 // Hourly charter rates per vehicle class ($/hr, before tax) — only used when a
@@ -693,6 +713,14 @@ router.post("/quote", quoteLimiter(), optionalAuth, async (req, res): Promise<vo
   }
 
   const ext = readQuoteExtensions(req.body);
+  const luggage = parsed.data.luggage ?? 0;
+  if (!(await vehicleClassFits(parsed.data.vehicleClass, parsed.data.passengers, luggage))) {
+    res.status(409).json({
+      error: "This vehicle category cannot carry both the selected passengers and luggage.",
+      code: "VEHICLE_CAPACITY_EXCEEDED",
+    });
+    return;
+  }
   // Admins price bookings they take by phone, which are routinely inside the
   // customer-facing 2-hour lead time and sometimes below the charter minimum
   // (a shorter block agreed verbally). POST /bookings has always waived both
@@ -717,6 +745,26 @@ router.post("/quote", quoteLimiter(), optionalAuth, async (req, res): Promise<vo
   if (!outcome.ok) {
     res.status(outcome.status).json(outcome.body);
     return;
+  }
+
+  if (!isAdmin) {
+    const fleet = await fleetAvailability({
+      pickupPoint: outcome.quote.pickupPoint ?? null,
+      pickupAt: parsed.data.pickupAt,
+      estimatedDurationMinutes: outcome.quote.estimatedDuration,
+      charterMode: ext.charterMode,
+      charterHours: ext.charterHours,
+      vehicleClass: parsed.data.vehicleClass,
+      passengers: parsed.data.passengers,
+      luggageCount: luggage,
+    });
+    if (!fleet.available) {
+      res.status(409).json({
+        error: "No chauffeur and vehicle in this category are available for that time and area.",
+        code: "FLEET_CAPACITY_UNAVAILABLE",
+      });
+      return;
+    }
   }
 
   res.json(GetQuoteResponse.parse(outcome.quote));

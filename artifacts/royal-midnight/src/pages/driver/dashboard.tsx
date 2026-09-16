@@ -769,7 +769,18 @@ function BookingCard({ booking, authHeader, onRefresh }: { booking: BookingRow; 
   );
 }
 
-type DriverVehicle = { id: number; make: string | null; model: string | null; year: string | null; color: string | null; isDefault: boolean; regPlate: string | null };
+type DriverVehicle = {
+  id: number;
+  make: string | null;
+  model: string | null;
+  year: string | null;
+  color: string | null;
+  isDefault: boolean;
+  regPlate: string | null;
+  vehicleClass: string | null;
+  passengerCapacity: number | null;
+  luggageCapacity: number | null;
+};
 
 function AvailableRideCard({
   booking,
@@ -790,6 +801,11 @@ function AvailableRideCard({
   const [showVehiclePicker, setShowVehiclePicker] = useState(false);
   const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
   const { toast } = useToast();
+
+  const vehicleFitsTrip = (vehicle: DriverVehicle) =>
+    vehicle.vehicleClass === booking.vehicleClass &&
+    (vehicle.passengerCapacity ?? 0) >= (booking.passengers ?? 1) &&
+    (vehicle.luggageCapacity ?? 0) >= (booking.luggageCount ?? 0);
 
   const doAccept = async (vehicleId?: number) => {
     setAccepting(true);
@@ -818,15 +834,23 @@ function AvailableRideCard({
     if (vehicles === null) {
       const r = await fetch(`${API_BASE}/drivers/${driverId}/vehicles`, { headers: { Authorization: authHeader } });
       const data: DriverVehicle[] = r.ok ? await r.json() : [];
-      setVehicles(data);
-      if (data.length > 1) {
-        const def = data.find(v => v.isDefault);
-        setSelectedVehicleId(def?.id ?? data[0]?.id ?? null);
+      const compatible = data.filter(vehicleFitsTrip);
+      setVehicles(compatible);
+      if (compatible.length === 0) {
+        toast({
+          title: "No compatible vehicle",
+          description: "Register a vehicle in this category with enough passenger and luggage capacity before accepting this trip.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (compatible.length > 1) {
+        const def = compatible.find(v => v.isDefault);
+        setSelectedVehicleId(def?.id ?? compatible[0]?.id ?? null);
         setShowVehiclePicker(true);
         return;
       }
-      // 0 or 1 vehicle — accept immediately
-      await doAccept(data[0]?.id);
+      await doAccept(compatible[0]?.id);
       return;
     }
     if (vehicles.length > 1) {

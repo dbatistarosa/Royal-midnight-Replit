@@ -2,6 +2,7 @@ import { and, eq, isNull, isNotNull, lte, sql } from "drizzle-orm";
 import { db, bookingsTable, driversTable, bookingDriverBlocksTable, driverWarningsTable, WARNINGS_BEFORE_SUSPENSION } from "@workspace/db";
 import { logger } from "./logger";
 import { getDriverWindows } from "./driverWindows.js";
+import { expireUnassignedBookings } from "./expiredBookings.js";
 
 /**
  * Trip reminders and driver-confirmation enforcement.
@@ -70,6 +71,13 @@ function isLiveBooking() {
 }
 
 export async function sendTripReminders(): Promise<void> {
+  try {
+    const expired = await expireUnassignedBookings();
+    if (expired) logger.info({ expired }, "expired unassigned bookings queued for full refund");
+  } catch (err) {
+    logger.error({ err }, "expired booking sweep failed (non-fatal)");
+  }
+
   for (const stage of STAGES) {
     try {
       await runReminderStage(stage);

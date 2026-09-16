@@ -386,6 +386,7 @@ export const GetQuoteBody = zod.object({
   // computeQuote().
   vehicleClass: zod.string(),
   passengers: zod.number(),
+  luggage: zod.number().min(0).optional(),
   pickupAt: zod.string(),
   promoCode: zod.string().nullish(),
 });

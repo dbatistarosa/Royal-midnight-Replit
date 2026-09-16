@@ -1,3 +1,29 @@
+## CONTINUACIÓN 2026-09-16 — disponibilidad real y vencimiento automático
+
+Rama `fix/royal-midnight-reliability`, PR #9 todavía borrador. El commit publicado
+`7ada4c8` contiene el cobro de sobretiempo durable y transaccional. Encima de ese
+commit hay un bloque local verificado y pendiente de commit/push que:
+
+- exige pasajeros y maletas simultáneamente en cotización y creación;
+- muestra una categoría solo si hay conductor aprobado, zona, vehículo exacto y
+  espacio real en su agenda, descontando otras reservas abiertas del mismo mercado;
+- serializa todas las decisiones de cupo para evitar sobreventa entre categorías;
+- cancela reservas sin conductor cuando ya pasó la recogida y crea un job durable
+  para cancelar la autorización o devolver 100 %, más el aviso al pasajero;
+- valida la categoría de conductor en admin, sincroniza su vehículo por defecto y
+  filtra en el dashboard del conductor solamente vehículos compatibles;
+- añade `20260916093000_backfill_default_vehicle_capacity.sql` para completar solo
+  capacidades nulas de vehículos por defecto heredadas de perfiles antiguos.
+
+Verificación local: typecheck workspace PASS, 206 pruebas API + 3 web PASS y build
+completo PASS. Los avisos de sourcemap/chunks del frontend ya existían y no rompen
+el build. Antes de publicar: revisar diff, commit/push, aplicar migración primero en
+staging, probar cotización/cupo/vencimiento sin cargos reales, luego producción,
+merge/deploy y smoke. Stripe debe seguir TEST. No cobrar reserva histórica #13.
+
+Después continuar, en este orden: reutilización real de tarjeta guardada; mapa y
+distancia/tiempo en viajes disponibles; aviso de fin de servicio por hora y extensión.
+
 ## PAUSA POR CUOTA — 2026-09-10, PR #9 borrador
 
 Último código guardado f2160a9 en fix/royal-midnight-reliability.
