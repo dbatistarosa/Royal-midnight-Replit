@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { rows } from "./durability.js";
 
 export type AddonSnapshot = {
+  overtimeMinutes?: number;
   priced: Array<{ id: number; name: string; quantity: number; price: number }>;
   charge: { fare: number; taxAmount: number; cardProcessingFee: number; total: number };
 };

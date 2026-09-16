@@ -1,3 +1,4 @@
+import { overtimeOperation, loadOvertimeOperation, settleOvertime } from "../lib/overtimePayment.js";
 import { addonRequestHash, loadAddonOperation, createAddonOperation } from "../lib/addonOperation.js";
 import { payAddonCard, invoiceAddon } from "../lib/addonPayment.js";
 import { withMailScope, withMailTransaction } from "../lib/mailOutbox.js";
@@ -53,7 +54,6 @@ import {
 import { computePostTripCharge } from "../lib/pricing.js";
 import {
   saveFareBreakdown,
-  saveOverageBreakdown,
   incrementFareBreakdown,
   loadChargeRates,
   loadOverageFares,
@@ -98,7 +98,6 @@ import {
   sendDriverArrived,
   sendAccountInvitation,
   sendBookingAssignedDriver,
-  sendExtraTimeChargedEmail,
   sendAddonExtrasChargedEmail,
   sendAddonInvoiceToPassenger,
 } from "../lib/mailer.js";
@@ -302,8 +301,10 @@ function getStripe(): Stripe {
 async function chargeExtraTime(
   booking: { id: number; userId: number | null; passengerEmail: string },
   charge: { fare: number; taxAmount: number; cardProcessingFee: number; total: number },
+  minutes: number,
+  allowCreate: boolean,
   log?: { warn: (obj: object, msg: string) => void },
-): Promise<string | null> {
+) {
   const amount = charge.total;
   if (amount <= 0) return null;
 
@@ -326,13 +327,11 @@ async function chargeExtraTime(
 
     // The operation survives Stripe's idempotency retention window. Persist the
     // unconfirmed intent before charging; a lost success response retrieves it.
-    const operationId = 'extra-time:' + booking.id;
-    const requestHash = crypto.createHash('sha256').update(JSON.stringify(charge)).digest('hex');
-    const operation = await loadAddonOperation(operationId, booking.id, requestHash)
-      ?? await createAddonOperation(operationId, booking.id, requestHash, {priced: [], charge});
+    const operation = await overtimeOperation(booking.id, charge, minutes, allowCreate);
     const card = user?.stripeCustomerId && user.defaultPaymentMethodId
       ? {stripeCustomerId:user.stripeCustomerId, defaultPaymentMethodId:user.defaultPaymentMethodId} : null;
-    return await payAddonCard(getStripe(), operation, card, 'extra_time');
+    const paymentIntentId = await payAddonCard(getStripe(), operation, card, 'extra_time');
+    return {operation, paymentIntentId};
   } catch (err) {
     if (isMissingCustomerError(err) && booking.userId != null) {
       await forgetStaleStripeCustomer(booking.userId, log);
@@ -2623,18 +2622,19 @@ router.post(
     // which dispatch can chase from the booking screen instead.
     let overagePaymentIntentId: string | null = null;
     if (!useManual && charge.total > 0) {
-      overagePaymentIntentId = await chargeExtraTime(
+      const payment = await chargeExtraTime(
         updated,
         charge,
+        overage.overtimeMinutes,
+        true,
         req.log,
       );
+      if (payment) {
+        await settleOvertime(payment.operation, payment.paymentIntentId);
+        overagePaymentIntentId = payment.paymentIntentId;
+      }
     }
 
-    // Persist the provider reference before responding. The fare breakdown,
-    // ride counter and notification job already committed with completion.
-    if (overagePaymentIntentId) {
-      await db.execute(sql`UPDATE bookings SET extra_charge_payment_intent_id=${overagePaymentIntentId} WHERE id=${id}`);
-    }
     res.json({ ...parseBooking(updated), overage, overageCharge: charge, overagePaymentIntentId });
   }),
 );
@@ -2702,6 +2702,12 @@ router.post(
       return;
     }
 
+    const operation = await loadOvertimeOperation(id);
+    if (!operation) {
+      res.status(409).json({error:'This historical trip needs payment reconciliation before collecting extra time.',code:'OVERTIME_RECONCILIATION_REQUIRED'});
+      return;
+    }
+
     const overage = computeHourlyOverage({
       startedAt: booking.tripStartedAt,
       endedAt: booking.tripEndedAt,
@@ -2712,12 +2718,8 @@ router.post(
           : null,
     });
 
-    const rates = await loadChargeRates();
-    const charge = computePostTripCharge({
-      fare: overage.extraCharge,
-      taxRate: rates.taxRate,
-      cardProcessingFeeRate: rates.cardProcessingFeeRate,
-    });
+    const charge = operation.snapshot.charge;
+    overage.overtimeMinutes = operation.snapshot.overtimeMinutes ?? overage.overtimeMinutes;
 
     if (charge.total <= 0) {
       res.status(400).json({
@@ -2730,12 +2732,14 @@ router.post(
       return;
     }
 
-    const paymentIntentId = await chargeExtraTime(
+    const payment = await chargeExtraTime(
       booking,
       charge,
+      overage.overtimeMinutes,
+      false,
       req.log,
     );
-    if (!paymentIntentId) {
+    if (!payment) {
       res.status(402).json({
         error:
           "The card on file could not be charged. Check the passenger's saved payment method in Stripe, then try again.",
@@ -2744,56 +2748,9 @@ router.post(
       return;
     }
 
-    // Only now is the row rewritten. A failed charge must not leave the booking
-    // claiming a different amount than the one the customer was originally shown.
-    const totalPrice =
-      Math.round(
-        (parseFloat(String(booking.priceQuoted)) + charge.total) * 100,
-      ) / 100;
-    await db
-      .update(bookingsTable)
-      .set({
-        extraCharge: String(charge.total),
-        totalPrice: String(totalPrice),
-        updatedAt: new Date(),
-      })
-      .where(eq(bookingsTable.id, id));
+    const settled = await settleOvertime(payment.operation, payment.paymentIntentId);
+    res.json({ ...settled, overage });
 
-    await saveOverageBreakdown(
-      id,
-      {
-        overageFare: charge.fare,
-        overageTax: charge.taxAmount,
-        overageCardFee: charge.cardProcessingFee,
-        overageMinutes: overage.overtimeMinutes,
-        paymentIntentId,
-      },
-      req.log,
-    );
-
-    req.log?.warn(
-      { bookingId: id, amount: charge.total, paymentIntentId },
-      "extra_time_collected_manually",
-    );
-
-    res.json({ ok: true, paymentIntentId, charge, overage, totalPrice });
-
-    // Tell the passenger. The completion email went out when the chauffeur ended
-    // the trip, before this money was known to be collectable — and on older
-    // bookings it is being taken days afterwards. Fire-and-forget: the charge has
-    // already succeeded and a failed email must not suggest otherwise.
-    void sendExtraTimeChargedEmail({
-      bookingId: id,
-      passengerName: booking.passengerName,
-      passengerEmail: booking.passengerEmail,
-      overtimeMinutes: overage.overtimeMinutes,
-      fare: charge.fare,
-      taxAmount: charge.taxAmount,
-      cardProcessingFee: charge.cardProcessingFee,
-      total: charge.total,
-    }).catch((err) =>
-      console.error("[bookings] extra-time receipt email failed:", err),
-    );
   }),
 );
 

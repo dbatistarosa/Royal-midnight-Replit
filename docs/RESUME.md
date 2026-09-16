@@ -423,3 +423,15 @@ mejoras comerciales opcionales del informe no están implementadas.
 
 
 
+## REANUDACION 2026-09-16 — PR #9 listo para QA remoto
+
+El flujo de tiempo adicional ya guarda el PaymentIntent sin confirmar en
+booking_adjustments, congela importe y minutos, y luego confirma Stripe. La
+liquidacion local (importe, desglose, referencia, respuesta y recibo outbox) se
+confirma en una sola transaccion. collect-extra-time usa el lock de la reserva.
+Los viajes historicos sin operacion durable devuelven
+OVERTIME_RECONCILIATION_REQUIRED y nunca se cobran automaticamente. La busqueda
+TEST en acct_1Svjs2G4saqVjBnZ no encontro PaymentIntent extra_time para reserva
+13, pero eso no descarta otra cuenta y por eso sigue bloqueada para conciliacion.
+Tipos API PASS; suite 201 API + 3 web PASS. Pendiente: commit/push, CI y QA remoto
+con fixture nuevo; luego merge/deploy/smoke. Produccion aun esta en 4476e24.
