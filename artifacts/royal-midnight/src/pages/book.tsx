@@ -202,6 +202,7 @@ export default function Book() {
   const { vehicleClasses } = useVehicleClasses();
   const [isGettingQuotes, setIsGettingQuotes] = useState(false);
   const [paymentClientSecret, setPaymentClientSecret] = useState<string | null>(null);
+  const [customerSessionClientSecret, setCustomerSessionClientSecret] = useState<string | null>(null);
   const [paymentPublishableKey, setPaymentPublishableKey] = useState<string | null>(null);
   const [stripeReturnUrl, setStripeReturnUrl] = useState<string | null>(null);
   const [pendingBookingId, setPendingBookingId] = useState<number | null>(null);
@@ -875,9 +876,13 @@ export default function Book() {
         const errData = await intentRes.json().catch(() => ({})) as { error?: string };
         throw new Error(errData.error || "Could not initiate payment. Please try again.");
       }
-      const { clientSecret } = await intentRes.json() as { clientSecret: string };
+      const { clientSecret, customerSessionClientSecret: savedCardSession } = await intentRes.json() as {
+        clientSecret: string;
+        customerSessionClientSecret?: string | null;
+      };
 
       setPaymentClientSecret(clientSecret);
+      setCustomerSessionClientSecret(savedCardSession ?? null);
       setPaymentPublishableKey(publishableKey);
     } catch (err: any) {
       setPaymentError(err?.message || "Could not initiate payment. Please try again.");
@@ -984,6 +989,7 @@ export default function Book() {
   const handlePaymentError = (message: string) => {
     setPaymentError(message);
     setPaymentClientSecret(null);
+    setCustomerSessionClientSecret(null);
     setPaymentPublishableKey(null);
   };
 
@@ -1647,6 +1653,7 @@ export default function Book() {
                         <p className="text-xs text-gray-600 uppercase tracking-widest">Powered by Stripe</p>
                         <StripePaymentForm
                           clientSecret={paymentClientSecret}
+                          customerSessionClientSecret={customerSessionClientSecret}
                           publishableKey={paymentPublishableKey}
                           amount={effectiveTotal}
                           returnUrl={stripeReturnUrl ?? undefined}
@@ -1658,7 +1665,7 @@ export default function Book() {
                           }}
                         />
                         {paymentError && <p className="text-red-400 text-sm p-3 border border-red-900/40 bg-red-900/8">{paymentError}</p>}
-                        <button type="button" onClick={() => { setPaymentClientSecret(null); setPaymentPublishableKey(null); setStripeReturnUrl(null); setPaymentError(""); }} className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
+                        <button type="button" onClick={() => { setPaymentClientSecret(null); setCustomerSessionClientSecret(null); setPaymentPublishableKey(null); setStripeReturnUrl(null); setPaymentError(""); }} className="text-xs text-gray-700 hover:text-gray-500 transition-colors">
                           Cancel
                         </button>
                       </div>
@@ -1769,7 +1776,7 @@ export default function Book() {
                             <div>
                               <p className="text-xs uppercase tracking-widest text-primary mb-0.5">Card on File</p>
                               <p className="text-sm text-white capitalize">{savedCards[0].brand} ••••{savedCards[0].last4} · {savedCards[0].expMonth}/{savedCards[0].expYear}</p>
-                              <p className="text-xs text-gray-600 mt-0.5">This card can be charged for optional tips after your ride.</p>
+                              <p className="text-xs text-gray-600 mt-0.5">Choose a saved card below, or enter a different one. It remains available for tips and authorized trip adjustments.</p>
                             </div>
                           </div>
                         )}

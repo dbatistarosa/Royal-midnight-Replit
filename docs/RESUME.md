@@ -1,3 +1,22 @@
+## CHECKPOINT 2026-09-16 02:10 EDT — tarjetas, mapa, compatibilidad SUV y extensión por hora
+
+Producción permanece en `31c572f2a92345ddb52db2c83e882e9212753dcb`, con CI y smoke PASS,
+Stripe TEST. El bloque nuevo está guardado en la rama `fix/royal-midnight-reliability`.
+Incluye: Payment Element con CustomerSession para reutilizar tarjetas del propio pagador;
+mapa/ruta, millas y tiempo en viajes del conductor; regla central direccional que permite
+Premium SUV (`suv`) aceptar Classic Sedan (`business`) sin permitir lo inverso y conservando
+capacidad de pasajeros/maletas; aviso por correo e interfaz 20 minutos antes de terminar un
+charter; botón del pasajero para comprar una hora adicional con tarjeta guardada, precio
+congelado, Stripe idempotente y actualización transaccional de horas/recibo.
+
+Verificación: typecheck completo PASS, 209 pruebas API + 3 web PASS, build completo PASS.
+No hay migración nueva en este bloque. No se hicieron cobros de prueba ni cambios en Stripe.
+Antes de publicar: revisar el SHA del checkpoint, empujarlo si el push quedó pendiente por el
+límite, esperar CI/preview, probar visualmente las pantallas y el flujo TEST en staging, luego
+integrar a main, verificar deploy/healthz/smoke y comprobar el sweep de reservas #15/#16.
+El límite de 5 horas marcó 100% usado; hay dos créditos de reset disponibles, NO consumirlos
+sin autorización explícita del usuario.
+
 ## CONTINUACIÓN 2026-09-16 — disponibilidad real y vencimiento automático
 
 Rama `fix/royal-midnight-reliability`, PR #9 todavía borrador. El commit publicado

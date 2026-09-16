@@ -37,6 +37,7 @@ import {
 import { paymentLimiter } from "../lib/rateLimit.js";
 import { logger } from "../lib/logger.js";
 import { releasePromoUsage } from "./promos.js";
+import { createBookingCustomerSession } from "../lib/paymentCustomerSession.js";
 
 const router: IRouter = Router();
 
@@ -272,13 +273,17 @@ router.post('/payments/create-intent',paymentLimiter(),optionalAuth,async(req,re
      }
      return {status:409,body:{error:'Payment already received or processing. Refresh your reservation.'}};
     }
-    if(previous.amount===amount && previous.currency==='usd' && previous.status!=='canceled')
-      return {status:200,body:{clientSecret:previous.client_secret,paymentIntentId:previous.id}};
-    if(previous.status!=='canceled')await stripe.paymentIntents.cancel(previous.id,{}, {idempotencyKey:'cancel-repriced-'+previous.id});
+    if(previous.status!=='canceled' && !(previous.amount===amount && previous.currency==='usd'))
+      await stripe.paymentIntents.cancel(previous.id,{}, {idempotencyKey:'cancel-repriced-'+previous.id});
    }
+   // The person who pays owns the reusable card. For an executive assistant
+   // booking for a managed traveler that is booked_by_user_id; for the normal
+   // and just-created-account paths it remains the passenger account.
+   const paymentAccountUserId=caller && booking.bookedByUserId===caller.userId
+    ? caller.userId : booking.userId;
    let customerId:string|undefined;
-   if(booking.userId){
-    const [user]=await tx.select().from(usersTable).where(eq(usersTable.id,booking.userId));
+   if(paymentAccountUserId){
+    const [user]=await tx.select().from(usersTable).where(eq(usersTable.id,paymentAccountUserId));
     if(user){
      customerId=user.stripeCustomerId??undefined;
      const staleId=customerId;
@@ -290,13 +295,18 @@ router.post('/payments/create-intent',paymentLimiter(),optionalAuth,async(req,re
      }
     }
    }
+   const customerSessionClientSecret=await createBookingCustomerSession(stripe,{
+    customerId,paymentAccountUserId,callerUserId:caller?.userId,
+   });
+   if(previous && previous.amount===amount && previous.currency==='usd' && previous.status!=='canceled')
+    return {status:200,body:{clientSecret:previous.client_secret,paymentIntentId:previous.id,customerSessionClientSecret}};
    const intent=await stripe.paymentIntents.create({amount,currency:'usd',capture_method:'automatic',
      automatic_payment_methods:{enabled:true,allow_redirects:'never'},
-     metadata:{bookingId:String(bId)},description:'Royal Midnight — Reservation '+bId,
+     metadata:{bookingId:String(bId),paymentAccountUserId:String(paymentAccountUserId??'')},description:'Royal Midnight — Reservation '+bId,
      ...(customerId?{customer:customerId,setup_future_usage:'off_session' as const}:{})},
      {idempotencyKey:'booking-'+bId+'-amount-'+amount+'-after-'+(previous?.id??'initial')});
    await tx.update(bookings).set({stripePaymentIntentId:intent.id,updatedAt:new Date()}).where(eq(bookings.id,bId));
-   return {status:200,body:{clientSecret:intent.client_secret,paymentIntentId:intent.id}};
+   return {status:200,body:{clientSecret:intent.client_secret,paymentIntentId:intent.id,customerSessionClientSecret}};
   });
   res.status(result.status).json(result.body);
  }catch(err){sendStripeError(req,res,err,'Unable to initialize payment. Please retry.');}

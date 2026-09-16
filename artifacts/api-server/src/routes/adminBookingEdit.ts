@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, eq, ne, inArray, sql } from "drizzle-orm";
 import Stripe from "stripe";
 import { bookingAction, withLock, rows, setActor } from "../lib/durability.js";
-import { tripConflicts, vehicleFits } from "../lib/scheduling.js";
+import { tripConflicts, vehicleClassCovers, vehicleFits } from "../lib/scheduling.js";
 import { z } from "zod/v4";
 import {
   db,
@@ -394,7 +394,7 @@ router.patch(
             .where(eq(vehiclesTable.id, before.vehicleId));
           if (
             !vehicle ||
-            vehicle.vehicleClass !== candidate.vehicleClass ||
+            !vehicleClassCovers(vehicle.vehicleClass, candidate.vehicleClass) ||
             vehicle.capacity < candidate.passengers
           )
             throw Object.assign(

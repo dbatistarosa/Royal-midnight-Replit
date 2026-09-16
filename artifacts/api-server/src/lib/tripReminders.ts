@@ -3,6 +3,7 @@ import { db, bookingsTable, driversTable, bookingDriverBlocksTable, driverWarnin
 import { logger } from "./logger";
 import { getDriverWindows } from "./driverWindows.js";
 import { expireUnassignedBookings } from "./expiredBookings.js";
+import { withMailScope } from "./mailOutbox.js";
 
 /**
  * Trip reminders and driver-confirmation enforcement.
@@ -87,9 +88,42 @@ export async function sendTripReminders(): Promise<void> {
   }
 
   try {
+    await remindEndingCharters();
+  } catch (err) {
+    logger.error({ err }, "ending charter reminder sweep failed (non-fatal)");
+  }
+
+  try {
     await releaseUnconfirmedDrivers();
   } catch (err) {
     logger.error({ err }, "driver release sweep failed (non-fatal)");
+  }
+}
+
+async function remindEndingCharters(): Promise<void> {
+  const due = await db.execute(sql`
+    SELECT id, passenger_name, passenger_email, hourly_rate,
+      greatest(1, ceil(extract(epoch from
+        (trip_started_at + charter_hours * interval '1 hour' - now())) / 60))::int AS minutes_remaining,
+      charter_hours
+    FROM bookings
+    WHERE status='in_progress' AND charter_mode='hourly'
+      AND trip_started_at IS NOT NULL AND charter_hours > 0
+      AND trip_started_at + charter_hours * interval '1 hour' > now()
+      AND trip_started_at + charter_hours * interval '1 hour' <= now() + interval '20 minutes'
+  `);
+  const rows = (due as unknown as { rows?: Array<Record<string, unknown>> }).rows ?? [];
+  const { sendCharterEndingSoonEmail } = await import("./mailer.js");
+  for (const row of rows) {
+    const bookingId = Number(row["id"]);
+    const hours = Number(row["charter_hours"]);
+    await withMailScope(`charter-ending:${bookingId}:${hours}`, () => sendCharterEndingSoonEmail({
+      bookingId,
+      passengerName: String(row["passenger_name"] ?? "Passenger"),
+      passengerEmail: String(row["passenger_email"] ?? ""),
+      minutesRemaining: Number(row["minutes_remaining"]) || 1,
+      hourlyRate: Number(row["hourly_rate"]) || 0,
+    }));
   }
 }
 

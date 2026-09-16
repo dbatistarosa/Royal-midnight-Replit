@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, MapPinCheck, PlayCircle, FlagTriangleRight, Clock, BarChart2, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag, FileText, AlertTriangle, ShieldOff, XCircle, Upload } from "lucide-react";
+import { LayoutDashboard, History, DollarSign, User, Loader2, ChevronDown, ChevronUp, Star, MapPin, Phone, Car, Users, Briefcase, Plane, MessageSquare, Navigation, Route, MapPinCheck, PlayCircle, FlagTriangleRight, Clock, BarChart2, Thermometer, Music, Volume2, Coffee, DoorOpen, Tag, FileText, AlertTriangle, ShieldOff, XCircle, Upload } from "lucide-react";
 import { format, differenceInDays, parseISO, isValid } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useDriverStatus } from "@/contexts/driverStatus";
@@ -15,6 +15,7 @@ import { driverNavItems } from "@/config/portalNav";
 import { PassengerPreferencesPanel, type PassengerPreferences } from "@/components/PassengerPreferencesPanel";
 import { CharterBadge, CharterDetails, TripExtras, type TripExtra } from "@/components/TripExtrasAndCharter";
 import { CharterTimer } from "@/components/CharterTimer";
+import { TripRouteMap } from "@/components/maps/TripRouteMap";
 
 const LOCATION_LS_KEY = "rm_driver_location_sharing";
 
@@ -76,6 +77,8 @@ type BookingRow = {
   maxMilesPerHour?: number | null;
   hourlyRate?: number | null;
   tripStartedAt?: string | null;
+  estimatedDistanceMiles?: number | null;
+  estimatedDurationMinutes?: number | null;
   extraCharge?: number | string | null;
   passengerPreferences?: PassengerPreferences | null;
   checklistCompletedAt?: string | null;
@@ -342,8 +345,17 @@ function vehicleLabel(vc?: string | null) {
 }
 
 function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; showEarnings?: boolean }) {
+  const routeStops = [...(booking.itinerary ?? [])]
+    .filter(item => item.kind === "stop")
+    .sort((a, b) => a.sequence - b.sequence)
+    .map(item => item.address);
   return (
     <div className="mt-4 pt-4 border-t border-white/8 space-y-3">
+      <TripRouteMap
+        pickupAddress={booking.pickupAddress}
+        dropoffAddress={booking.dropoffAddress}
+        stops={routeStops}
+      />
       <div className="grid grid-cols-2 gap-x-4 gap-y-3">
         {booking.vehicleClass && (
           <div className="flex items-start gap-2">
@@ -739,6 +751,27 @@ function BookingCard({ booking, authHeader, onRefresh }: { booking: BookingRow; 
         </div>
       )}
 
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
+        {booking.estimatedDistanceMiles != null && (
+          <span className="inline-flex items-center gap-1.5">
+            <Route className="w-3.5 h-3.5 text-primary" />
+            {booking.estimatedDistanceMiles.toFixed(1)} miles
+          </span>
+        )}
+        {booking.estimatedDurationMinutes != null && (
+          <span className="inline-flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5 text-primary" />
+            About {Math.max(1, Math.round(booking.estimatedDurationMinutes))} min driving
+          </span>
+        )}
+        {booking.charterMode === "hourly" && booking.charterHours != null && (
+          <span className="inline-flex items-center gap-1.5 text-primary">
+            <Clock className="w-3.5 h-3.5" />
+            {booking.charterHours} hr service
+          </span>
+        )}
+      </div>
+
       {expanded && <BookingDetailPanel booking={booking} />}
 
       <button
@@ -803,7 +836,8 @@ function AvailableRideCard({
   const { toast } = useToast();
 
   const vehicleFitsTrip = (vehicle: DriverVehicle) =>
-    vehicle.vehicleClass === booking.vehicleClass &&
+    (vehicle.vehicleClass === booking.vehicleClass ||
+      (vehicle.vehicleClass === "suv" && booking.vehicleClass === "business")) &&
     (vehicle.passengerCapacity ?? 0) >= (booking.passengers ?? 1) &&
     (vehicle.luggageCapacity ?? 0) >= (booking.luggageCount ?? 0);
 

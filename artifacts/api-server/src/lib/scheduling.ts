@@ -26,6 +26,20 @@ export function tripConflicts(
     );
   });
 }
+
+/** Higher fleet categories may serve a lower category reservation. This is
+ * directional: an SUV can cover a sedan request, while a sedan cannot cover an
+ * SUV request. Keep the rule here so quoting, dispatch and driver acceptance
+ * all make the same decision. */
+export function vehicleClassCovers(
+  vehicleClass: string | null,
+  requestedClass: string,
+): boolean {
+  return vehicleClass === requestedClass || (
+    vehicleClass === "suv" && requestedClass === "business"
+  );
+}
+
 export function vehicleFits(
   vehicle: {
     vehicleClass: string | null;
@@ -35,7 +49,7 @@ export function vehicleFits(
   booking: { vehicleClass: string; passengers: number; luggageCount: number },
 ) {
   return (
-    vehicle.vehicleClass === booking.vehicleClass &&
+    vehicleClassCovers(vehicle.vehicleClass, booking.vehicleClass) &&
     (vehicle.passengerCapacity ?? 0) >= booking.passengers &&
     (vehicle.luggageCapacity ?? 0) >= booking.luggageCount
   );

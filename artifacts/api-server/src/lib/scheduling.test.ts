@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tripConflicts, vehicleFits } from "./scheduling";
+import { tripConflicts, vehicleClassCovers, vehicleFits } from "./scheduling";
 const trip = (time: string, duration = 60) => ({
   pickupAt: `2026-09-08T${time}:00Z`,
   estimatedDurationMinutes: duration,
@@ -39,5 +39,13 @@ describe("driver scheduling", () => {
         booking,
       ),
     ).toBe(true);
+  });
+  it("lets a Premium SUV cover Classic Sedan, but never the reverse", () => {
+    expect(vehicleClassCovers("suv", "business")).toBe(true);
+    expect(vehicleClassCovers("business", "suv")).toBe(false);
+    expect(vehicleFits(
+      { vehicleClass: "suv", passengerCapacity: 6, luggageCapacity: 6 },
+      { vehicleClass: "business", passengers: 3, luggageCount: 3 },
+    )).toBe(true);
   });
 });

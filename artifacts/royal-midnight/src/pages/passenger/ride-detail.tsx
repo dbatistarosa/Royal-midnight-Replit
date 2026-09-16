@@ -16,6 +16,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { StripePaymentForm } from "@/components/payment/StripePaymentForm";
 import { passengerNavItems } from "@/config/portalNav";
+import { CharterTimer } from "@/components/CharterTimer";
 
 
 type BookingDetail = {
@@ -44,6 +45,7 @@ type BookingDetail = {
   charterHours?: number | null;
   maxMilesPerHour?: number | null;
   hourlyRate?: number | null;
+  tripStartedAt?: string | null;
   extraCharge?: number | null;
   overageMinutes?: number | null;
   receipt?: StoredReceipt | null;
@@ -317,6 +319,8 @@ function PassengerRideDetailInner() {
   // Saved card for off-session tip charge
   type SavedCard = { id: string; brand: string; last4: string; expMonth: number; expYear: number };
   const [savedCard, setSavedCard] = useState<SavedCard | null>(null);
+  const [extendingCharter, setExtendingCharter] = useState(false);
+  const extensionKeyRef = useRef<string | null>(null);
 
   // Driver info (revealed within 48h of pickup)
   type DriverInfo = {
@@ -396,11 +400,40 @@ function PassengerRideDetailInner() {
     const interval = setInterval(() => {
       fetch(`${API_BASE}/bookings/${id}`, { headers: authHeaders(token) })
         .then(r => r.ok ? r.json() as Promise<BookingDetail> : Promise.reject())
-        .then(data => setBooking(prev => (prev?.status !== data.status ? data : prev)))
+        .then(data => setBooking(data))
         .catch(() => {});
     }, 15000);
     return () => clearInterval(interval);
   }, [id, token]);
+
+  const handleExtendCharter = async () => {
+    if (!isAuthenticated || !booking || extendingCharter) return;
+    setExtendingCharter(true);
+    try {
+      extensionKeyRef.current ??= `extend_${crypto.randomUUID().replace(/-/g, "")}`;
+      const res = await fetch(`${API_BASE}/bookings/${id}/extend-charter`, {
+        method: "POST",
+        headers: {
+          ...authHeaders(token),
+          "Content-Type": "application/json",
+          "Idempotency-Key": extensionKeyRef.current,
+        },
+        body: JSON.stringify({ hours: 1 }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string; booking?: BookingDetail; charge?: { total: number } };
+      if (!res.ok) throw new Error(data.error || "Could not extend the charter.");
+      if (data.booking) setBooking(prev => prev ? { ...prev, ...data.booking } : data.booking!);
+      extensionKeyRef.current = null;
+      toast({
+        title: "Charter extended",
+        description: `One hour was added${data.charge ? ` and $${data.charge.total.toFixed(2)} was charged to your saved card` : ""}.`,
+      });
+    } catch (err: unknown) {
+      toast({ title: "Could not add time", description: err instanceof Error ? err.message : "Try again.", variant: "destructive" });
+    } finally {
+      setExtendingCharter(false);
+    }
+  };
 
   const handleCancelPreview = async () => {
     if (!isAuthenticated) return;
@@ -712,6 +745,16 @@ function PassengerRideDetailInner() {
                   </div>
                 )}
               </div>
+              {booking.status === "in_progress" && booking.charterMode === "hourly" && (
+                <CharterTimer
+                  startedAt={booking.tripStartedAt}
+                  charterHours={booking.charterHours}
+                  hourlyRate={booking.hourlyRate}
+                  audience="passenger"
+                  onExtend={handleExtendCharter}
+                  extending={extendingCharter}
+                />
+              )}
             </div>
 
             {/* Awaiting Payment notice */}

@@ -1150,6 +1150,54 @@ export async function sendExtraTimeChargedEmail(p: {
   await send(p.passengerEmail, `Royal Midnight — additional time charged (${bookingRef})`, html, "extra_time_charged");
 }
 
+export async function sendCharterExtendedEmail(p: {
+  bookingId: number;
+  passengerName: string;
+  passengerEmail: string;
+  addedHours: number;
+  totalHours: number;
+  fare: number;
+  taxAmount: number;
+  cardProcessingFee: number;
+  total: number;
+}) {
+  const bookingRef = `RM-${String(p.bookingId).padStart(4, "0")}`;
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Charter extended — ${bookingRef}</h2>
+<p style="color:#e8e0d0">Hello ${escapeHtml(String(p.passengerName ?? "").split(" ")[0] ?? "")},</p>
+<p style="color:#9ca3af;line-height:1.6">
+  You added ${p.addedHours} hour${p.addedHours === 1 ? "" : "s"} to your chauffeur service.
+  Your reservation now includes ${p.totalHours} hours. We charged the card on file:
+</p>
+<table style="width:100%;border-collapse:collapse;margin:20px 0">
+  ${row("Additional charter time", `$${p.fare.toFixed(2)}`)}
+  ${p.taxAmount > 0 ? row("Florida tax", `$${p.taxAmount.toFixed(2)}`) : ""}
+  ${p.cardProcessingFee > 0 ? row("Card processing", `$${p.cardProcessingFee.toFixed(2)}`) : ""}
+  ${row("Total charged", `<strong style="color:#c9a84c;font-size:16px">$${p.total.toFixed(2)}</strong>`)}
+</table>`);
+  await send(p.passengerEmail, `Royal Midnight — charter extended (${bookingRef})`, html, "charter_extended");
+}
+
+export async function sendCharterEndingSoonEmail(p: {
+  bookingId: number;
+  passengerName: string;
+  passengerEmail: string;
+  minutesRemaining: number;
+  hourlyRate: number;
+}) {
+  const bookingRef = `RM-${String(p.bookingId).padStart(4, "0")}`;
+  const html = wrap(`
+<h2 style="color:#c9a84c;font-family:Georgia,serif;margin:0 0 6px">Your charter is ending soon — ${bookingRef}</h2>
+<p style="color:#e8e0d0">Hello ${escapeHtml(String(p.passengerName ?? "").split(" ")[0] ?? "")},</p>
+<p style="color:#9ca3af;line-height:1.6">
+  About ${p.minutesRemaining} minutes remain in your reserved chauffeur time. Open your trip in the passenger portal if you would like to add another hour now.
+</p>
+<p style="color:#9ca3af;line-height:1.6">
+  There is a 20-minute allowance after the reserved time. Once that allowance is exceeded, each additional hour is billed in full${p.hourlyRate > 0 ? ` at $${p.hourlyRate.toFixed(2)} before tax and card processing` : ""}.
+</p>`);
+  await send(p.passengerEmail, `Your charter is ending soon — ${bookingRef}`, html, "charter_ending_soon");
+}
+
 /** Confirms an add-on charged to the saved card after the original booking was
  *  already paid — e.g. a pet or car seat the passenger called in to add. */
 export async function sendAddonExtrasChargedEmail(p: {

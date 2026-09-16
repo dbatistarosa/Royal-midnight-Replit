@@ -27,11 +27,15 @@ export function CharterTimer({
   charterHours,
   hourlyRate,
   audience = "driver",
+  onExtend,
+  extending = false,
 }: {
   startedAt: string | null | undefined;
   charterHours: number | string | null | undefined;
   hourlyRate?: number | string | null;
-  audience?: "driver" | "admin";
+  audience?: "driver" | "admin" | "passenger";
+  onExtend?: () => void;
+  extending?: boolean;
 }) {
   // Same defensive coercion as the charter panels: a `numeric` column can reach
   // the browser as a string, and arithmetic on one silently yields NaN while
@@ -128,6 +132,22 @@ export function CharterTimer({
           Started at {new Date(started).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
           Finishing early does not reduce the fare.
         </p>
+      )}
+
+      {audience === "passenger" && remainingMin <= 30 && onExtend && (
+        <div className="mt-3 pt-3 border-t border-white/10 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
+          <p className="text-[11px] text-gray-300">
+            Add an hour now to keep the chauffeur reserved. Your saved card will be charged for one hourly block, tax and card processing.
+          </p>
+          <button
+            type="button"
+            disabled={extending}
+            onClick={onExtend}
+            className="shrink-0 border border-primary/50 bg-primary/10 px-3 py-2 text-xs uppercase tracking-wider text-primary hover:bg-primary/20 disabled:opacity-50"
+          >
+            {extending ? "Adding…" : "Add 1 hour"}
+          </button>
+        </div>
       )}
     </div>
   );

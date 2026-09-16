@@ -6,7 +6,7 @@ import { commitTripCompletion, recordTripCompletion } from "../lib/tripCompletio
 import { enqueueBookingNotification } from "../lib/bookingJobs.js";
 import { ValidatedBookingBody } from "../lib/bookingInput.js";
 import { bookingAction, withLock, setActor, rows } from "../lib/durability.js";
-import { tripConflicts, tripDurationMinutes, vehicleFits, type TripWindowInput } from "../lib/scheduling.js";
+import { tripConflicts, tripDurationMinutes, vehicleClassCovers, vehicleFits, type TripWindowInput } from "../lib/scheduling.js";
 import { Router, type IRouter } from "express";
 import crypto from "node:crypto";
 import Stripe from "stripe";
@@ -102,6 +102,7 @@ import {
   sendBookingAssignedDriver,
   sendAddonExtrasChargedEmail,
   sendAddonInvoiceToPassenger,
+  sendCharterExtendedEmail,
 } from "../lib/mailer.js";
 import {
   sendDriverOnWaySms,
@@ -1761,7 +1762,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
       if(hasConflict(before,windows))throw Object.assign(new Error('Driver schedule conflict'),{status:409});
       if(parsed.data.vehicleId!=null){
         const [vehicle]=await tx.select().from(vehiclesTable).where(eq(vehiclesTable.id,parsed.data.vehicleId));
-        if(!vehicle||vehicle.driverId!==nextDriverId||!vehicle.isAvailable||vehicle.vehicleClass!==before.vehicleClass||vehicle.capacity<before.passengers)throw Object.assign(new Error('The vehicle does not belong to this driver or cannot serve this trip'),{status:409});
+        if(!vehicle||vehicle.driverId!==nextDriverId||!vehicle.isAvailable||!vehicleClassCovers(vehicle.vehicleClass,before.vehicleClass)||vehicle.capacity<before.passengers)throw Object.assign(new Error('The vehicle does not belong to this driver or cannot serve this trip'),{status:409});
         updateData.selectedVehicleId=null;
       }else if(nextDriverId!==before.driverId){
         const candidates=await tx.select().from(driverVehiclesTable).where(eq(driverVehiclesTable.driverId,nextDriverId));
@@ -2949,6 +2950,69 @@ router.post(
       return response;
     });
     res.json({...result,extras:await loadExtrasFor(id)});
+  }),
+);
+
+// Passenger: pre-purchase more time while an hourly charter is running. The
+// operation is frozen before Stripe is called and can be retried with the same
+// key after a network or database failure without charging twice.
+router.post(
+  "/bookings/:id/extend-charter",
+  requireAuth,
+  bookingAction(async (req, res): Promise<void> => {
+    const id = parseInt(String(req.params["id"] ?? ""), 10);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
+    const caller = req.currentUser!;
+    if (!['passenger','corporate'].includes(caller.role)) { res.status(403).json({ error: "Access denied" }); return; }
+    const parsed = z.object({ hours: z.number().int().min(1).max(4) }).safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: z.prettifyError(parsed.error) }); return; }
+    const key=req.get('Idempotency-Key');
+    if(!key || !/^[a-zA-Z0-9_-]{16,100}$/.test(key)){res.status(400).json({error:'A stable Idempotency-Key is required. Refresh the page and retry.'});return;}
+    const operationId=`charter-extension:${caller.userId}:${key}`;
+    const hash=crypto.createHash('sha256').update(JSON.stringify({hours:parsed.data.hours})).digest('hex');
+    let operation=await loadAddonOperation(operationId,id,hash);
+    if(operation?.response){res.json(operation.response);return;}
+
+    const [booking]=await db.select().from(bookingsTable).where(eq(bookingsTable.id,id));
+    if(!booking){res.status(404).json({error:'Booking not found'});return;}
+    if(booking.userId!==caller.userId){res.status(403).json({error:'Access denied'});return;}
+    if(booking.status!=='in_progress'||booking.charterMode!=='hourly'||!booking.tripStartedAt){res.status(409).json({error:'Extra time can only be added while an hourly charter is in progress.'});return;}
+    const currentHours=Number(booking.charterHours);
+    const hourlyRate=Number(booking.hourlyRate);
+    if(!Number.isFinite(currentHours)||currentHours<=0||!Number.isFinite(hourlyRate)||hourlyRate<=0){res.status(409).json({error:'This charter does not have a valid hourly rate.'});return;}
+    if(currentHours+parsed.data.hours>24){res.status(400).json({error:'A charter cannot exceed 24 reserved hours.'});return;}
+    const card=await findCardOnFile(caller.userId);
+    if(!card){res.status(409).json({error:'No saved payment method is available. Add a card to your account before extending the charter.'});return;}
+    const rates=await loadChargeRates();
+    const charge=computePostTripCharge({fare:hourlyRate*parsed.data.hours,taxRate:rates.taxRate,cardProcessingFeeRate:rates.cardProcessingFeeRate});
+    if(!operation)operation=await createAddonOperation(operationId,id,hash,{
+      priced:[],charge,charterExtensionHours:parsed.data.hours,previousCharterHours:currentHours,
+    });
+    const frozenHours=operation.snapshot.charterExtensionHours;
+    const frozenPrevious=operation.snapshot.previousCharterHours;
+    if(!Number.isInteger(frozenHours)||!Number.isInteger(frozenPrevious)){res.status(409).json({error:'The saved extension needs review before collection.'});return;}
+    const paymentIntentId=await payAddonCard(getStripe(),operation,card,'extra_time');
+    const totalHours=frozenPrevious!+frozenHours!;
+    const result=await db.transaction(async tx=>{
+      const [updated]=await tx.update(bookingsTable).set({
+        charterHours:totalHours,
+        fareSubtotal:sql`coalesce(${bookingsTable.fareSubtotal}, ${bookingsTable.priceQuoted}) + ${operation!.snapshot.charge.fare}`,
+        priceQuoted:sql`${bookingsTable.priceQuoted} + ${operation!.snapshot.charge.total}`,
+        totalPrice:sql`CASE WHEN ${bookingsTable.totalPrice} IS NULL THEN NULL ELSE ${bookingsTable.totalPrice} + ${operation!.snapshot.charge.total} END`,
+        updatedAt:new Date(),
+      }).where(and(eq(bookingsTable.id,id),eq(bookingsTable.status,'in_progress'),eq(bookingsTable.charterHours,frozenPrevious!))).returning();
+      if(!updated)throw new Error('Charter changed after payment; operation remains recoverable');
+      await tx.execute(sql`UPDATE bookings SET tax_amount=coalesce(tax_amount,0)+${operation!.snapshot.charge.taxAmount},
+        card_fee=coalesce(card_fee,0)+${operation!.snapshot.charge.cardProcessingFee} WHERE id=${id}`);
+      await withMailScope(operationId,()=>withMailTransaction(tx,()=>sendCharterExtendedEmail({
+        bookingId:id,passengerName:booking.passengerName,passengerEmail:booking.passengerEmail,
+        addedHours:frozenHours!,totalHours,...operation!.snapshot.charge,
+      })));
+      const response={ok:true,booking:parseBooking(updated),paymentIntentId,charge:operation!.snapshot.charge};
+      await tx.execute(sql`UPDATE booking_adjustments SET response=${JSON.stringify(response)}::jsonb,applied_at=now() WHERE id=${operationId}`);
+      return response;
+    });
+    res.json(result);
   }),
 );
 

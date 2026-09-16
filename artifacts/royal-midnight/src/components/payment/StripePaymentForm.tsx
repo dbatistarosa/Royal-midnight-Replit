@@ -185,6 +185,7 @@ function CheckoutForm({ amount, isTestMode, returnUrl, onSuccess, onProcessing, 
 
 interface StripePaymentFormProps {
   clientSecret: string;
+  customerSessionClientSecret?: string | null;
   publishableKey: string;
   amount: number;
   returnUrl?: string;
@@ -195,6 +196,7 @@ interface StripePaymentFormProps {
 
 export function StripePaymentForm({
   clientSecret,
+  customerSessionClientSecret,
   publishableKey,
   amount,
   returnUrl,
@@ -226,7 +228,7 @@ export function StripePaymentForm({
   }
 
   return (
-    <Elements stripe={stripePromise} options={{ clientSecret, appearance }}>
+    <Elements stripe={stripePromise} options={{ clientSecret, customerSessionClientSecret: customerSessionClientSecret ?? undefined, appearance }}>
       <CheckoutForm
         amount={amount}
         isTestMode={isTestMode}
