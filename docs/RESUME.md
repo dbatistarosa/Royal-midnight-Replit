@@ -21,6 +21,12 @@ tarjeta guardada, propinas, cargos extra y extensión por hora; revisar Mapbox e
 pantallas del conductor; después priorizar push móvil, MFA/admin security,
 restauración/backups operativos y cobertura por zonas/conductores.
 
+QA adicional del formulario público `/book`: `/api/quote` en producción rechazó
+Classic Sedan con 3 pasajeros + 4 maletas (`409`) y aceptó SUV con la misma combinación
+(`200`). En navegador, después de esperar datos de pricing, 3 pasajeros + 4 maletas
+mostró solo Royal Luxury SUV; 3 pasajeros + 3 maletas mostró Classic Sedan y Royal
+Luxury SUV. No se creó reserva ni se hizo cargo para esta prueba.
+
 ## CHECKPOINT 2026-09-16 02:10 EDT — tarjetas, mapa, compatibilidad SUV y extensión por hora
 
 Producción permanece en `31c572f2a92345ddb52db2c83e882e9212753dcb`, con CI y smoke PASS,
