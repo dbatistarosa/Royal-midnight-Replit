@@ -1,3 +1,26 @@
+## CHECKPOINT 2026-09-16 09:40 EDT — `88b053a` publicado y cron reparado
+
+Producción quedó publicada manualmente desde Vercel en `88b053a2ef75f74a33342c7b09071570dbdb6814`.
+Deployment final `dpl_Anday9Vs8iG4Dic8C2KxrJ539jCv` Ready, alias aplicado a
+`https://www.royalmidnight.com`. Verificación post-deploy: `/api/healthz` 200 con
+SHA exacto `88b053a2ef75f74a33342c7b09071570dbdb6814`; `/api/payments/config` 200
+con `pk_test_`, por lo que Stripe sigue en TEST.
+
+Durante la revisión de logs apareció un `401` en `POST /api/cron/trip-reminders`.
+Se corrigió rotando y sincronizando un secreto nuevo en Vercel production
+(`CRON_SECRET` y `CRON_WORKER_SECRET`) y GitHub Actions (`CRON_SECRET`), sin imprimir
+secretos. Se hizo redeploy para cargar las variables nuevas. Prueba manual del workflow
+`trip-reminders-cron.yml` terminó `success` en GitHub Actions run `35103186724`,
+head SHA `88b053a2ef75f74a33342c7b09071570dbdb6814`; logs Vercel confirmaron
+`POST /api/cron/trip-reminders` 200 a las 09:38 EDT. No hubo cambios de código en esa
+corrección externa de secretos.
+
+Siguiente bloque: verificar con más detalle el estado de reservas vencidas/jobs desde
+la app o con acceso seguro a base de datos si está disponible; continuar QA real de
+tarjeta guardada, propinas, cargos extra y extensión por hora; revisar Mapbox en las
+pantallas del conductor; después priorizar push móvil, MFA/admin security,
+restauración/backups operativos y cobertura por zonas/conductores.
+
 ## CHECKPOINT 2026-09-16 02:10 EDT — tarjetas, mapa, compatibilidad SUV y extensión por hora
 
 Producción permanece en `31c572f2a92345ddb52db2c83e882e9212753dcb`, con CI y smoke PASS,
