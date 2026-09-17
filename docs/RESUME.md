@@ -1,3 +1,39 @@
+## VERIFICADO 2026-09-17 11:51 EDT - programador reparado
+
+PR #10 https://github.com/dbatistarosa/Royal-midnight-Replit/pull/10 MERGED.
+Produccion 3335e6bc33dbf32b3c655cb500c0de53b005c631; Vercel deployment
+dpl_F5SCQDZWW6jvPnFHCmVSDFJyhFCF Ready con www.royalmidnight.com.
+CI PR 35242221391, CI main 35242436210 y smoke 35242654207: success.
+healthz 200 con SHA exacto, payments/config TEST, cron sin autenticacion 401.
+
+CRON_WORKER_SECRET exclusivo sincronizado en Vercel production y Vault
+royal_midnight_worker_secret. GitHub CRON_SECRET conservado. La descarga de
+variables de Vercel devolvio valores vacios; no usar .env.scheduler.local.
+Vault no concede acceso a decrypted_secrets a anon/authenticated/PUBLIC.
+
+SQL de scripts/configure-worker-cron.sql aplicado despues del despliegue y de
+verificar worker autenticado 200. Schedules activos: trip-reminders jobid 2 cada
+5 minutos, booking-jobs jobid 7 y mail-outbox jobid 8 cada minuto. Jobid 1 existente
+check-reservation-status intacto. GitHub Actions queda como respaldo.
+
+Prueba desde pg_net/Vault trip-reminders request 135409: HTTP 200. Primera
+ejecucion automatica de workers 15:51 UTC: cron_runs success, respuestas pg_net
+135410-135412 HTTP 200 sin timeout. Cero app_jobs pendientes y cero mail_outbox
+pendientes; el review_request retenido se proceso por el worker normal.
+No se crearon reservas ni cobros QA. Reservas historicas 15/16 canceladas y sus
+jobs done/1 intento; cero reservas vencidas abiertas al revisar.
+
+La revision automatica rechazo push directo a main. Se resolvio por PR #10 con
+CI aprobado y merge normal mediante credenciales Git existentes (conector GitHub
+solo lectura/403). No hace falta autorizacion adicional pendiente para este bloque.
+Este checkpoint documental posterior queda en la rama de reparacion; no cambia
+el codigo desplegado ni requiere otro build de aplicacion.
+
+Siguiente: QA autenticado tarjeta guardada, propinas, cargos extras/extension y
+mapa driver. Pendientes generales: push movil, MFA, restauracion y conciliacion.
+Mantener Stripe TEST y no cobrar reserva historica 13. Respetar pausa al 3 %;
+no consumir reset sin instruccion. No declarar el proyecto entero terminado.
+
 ## CONTINUACION 2026-09-17 - revision del programador
 
 Base recuperada: produccion y rama en b038ca2. Reservas 15 y 16 canceladas,
