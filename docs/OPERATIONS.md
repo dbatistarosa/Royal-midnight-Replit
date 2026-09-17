@@ -39,6 +39,27 @@ está pendiente de aprobación: consultar RESUME.md antes de ejecutar.
 
 ## Notificaciones y diagnóstico
 
+### Programador de workers en produccion
+
+GitHub Actions puede retrasar los horarios varias horas. El programador primario
+de recordatorios y colas usa Supabase pg_cron/pg_net: `trip-reminders` cada cinco
+minutos; `booking-jobs` y `mail-outbox` cada minuto. Actions queda como respaldo.
+Los workers conservan sus locks, leases e idempotencia para llamadas concurrentes.
+
+Configuracion reproducible: `scripts/configure-worker-cron.sql`, exclusivamente
+en el proyecto de produccion `qpqmefenkleyzwnlleih`. Primero provisionar el mismo
+secreto en Vercel production `CRON_WORKER_SECRET` y Supabase Vault
+`royal_midnight_worker_secret`; desplegar Vercel para cargarlo y comprobar HTTP
+200 autenticado antes de aplicar el SQL. No cambiar `CRON_SECRET` de GitHub.
+No guardar secretos en el SQL ni en `cron.job.command`. La rotacion debe actualizar
+Vault y Vercel y terminar con otro despliegue y verificacion HTTP.
+
+`cron.job_run_details.status = succeeded` solo confirma que PostgreSQL encolo la
+peticion. Verificar tambien `net._http_response.status_code`, `cron_runs` y los
+estados de `app_jobs`/`mail_outbox`. Un 401 puede coexistir con un cron succeeded.
+Para pausar los workers usar `cron.alter_job(jobid, active := false)` sobre sus IDs;
+conservar los workflows de Actions y el job existente de check-reservation-status.
+
 `GET /api/admin/system-health` requiere administrador y muestra colas, cron,
 entorno, base de datos y configuración; no devuelve secretos. Los workers son
 `POST /api/cron/booking-jobs` y `POST /api/cron/mail-outbox`. Autenticarlos con
