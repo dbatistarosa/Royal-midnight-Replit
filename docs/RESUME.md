@@ -1,3 +1,26 @@
+## CONTINUACION 2026-09-17 - revision del programador
+
+Base recuperada: produccion y rama en b038ca2. Reservas 15 y 16 canceladas,
+jobs de cancelacion done/1 intento; cero reservas vencidas abiertas. Todos los
+jobs observados done; un review_request pendiente esperando el worker de correo.
+Actions success pero con intervalos de horas. Se descubrio un segundo programador
+Supabase trip-reminders cada 5 minutos: SQL succeeded pero HTTP 401 persistente.
+
+Preparada credencial exclusiva CRON_WORKER_SECRET en Vercel production y Vault
+royal_midnight_worker_secret. CRON_SECRET de GitHub conservado. El archivo local
+.vercel/.cron-worker-secret es obsoleto; no usarlo. Credencial nueva solo en archivo
+ignorado .vercel/.supabase-worker-secret. No imprimir credenciales.
+
+scripts/configure-worker-cron.sql verificado en transaccion con ROLLBACK. Repara
+trip-reminders y programa booking-jobs/mail-outbox cada minuto usando Vault.
+En este checkpoint falta: desplegar Vercel para cargar la variable, comprobar
+autenticacion, aplicar SQL y verificar respuestas HTTP y colas. No considerar
+cerrada la reparacion hasta registrar la evidencia posterior.
+
+Siguiente bloque funcional: QA autenticado de tarjetas/propinas/extension y mapa
+driver; luego push movil, MFA y restauracion. Mantener Stripe TEST, no cobrar
+reserva historica 13, parar al 3 % restante y no consumir resets sin instruccion.
+
 ## CHECKPOINT 2026-09-16 09:40 EDT — `88b053a` publicado y cron reparado
 
 Producción quedó publicada manualmente desde Vercel en `88b053a2ef75f74a33342c7b09071570dbdb6814`.
