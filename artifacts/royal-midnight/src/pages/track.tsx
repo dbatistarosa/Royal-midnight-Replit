@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRoute } from "wouter";
 import { API_BASE } from "@/lib/constants";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { Loader2, MapPin, Navigation, Clock, CheckCircle2 } from "lucide-react";
 
 type PublicBooking = {
@@ -17,9 +17,23 @@ type PublicBooking = {
 const STATUS_COLORS: Record<string, string> = {
   pending: "text-yellow-400 border-yellow-400/30 bg-yellow-400/10",
   confirmed: "text-primary border-primary/30 bg-primary/10",
+  driver_assigned: "text-primary border-primary/30 bg-primary/10",
+  on_way: "text-sky-400 border-sky-400/30 bg-sky-400/10",
+  on_location: "text-violet-400 border-violet-400/30 bg-violet-400/10",
   in_progress: "text-blue-400 border-blue-400/30 bg-blue-400/10",
   completed: "text-green-400 border-green-400/30 bg-green-400/10",
   cancelled: "text-gray-400 border-gray-400/30 bg-gray-400/10",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Awaiting confirmation",
+  confirmed: "Booking confirmed",
+  driver_assigned: "Chauffeur assigned",
+  on_way: "Chauffeur en route",
+  on_location: "Chauffeur at pickup",
+  in_progress: "Journey in progress",
+  completed: "Journey complete",
+  cancelled: "Booking cancelled",
 };
 
 export default function Track() {
@@ -28,15 +42,27 @@ export default function Track() {
 
   const [booking, setBooking] = useState<PublicBooking | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+
+  const loadBooking = useCallback(async () => {
+    if (!token) { setIsLoading(false); return; }
+    try {
+      const response = await fetch(`${API_BASE}/bookings/track/${encodeURIComponent(token)}`, { cache: "no-store" });
+      if (!response.ok) { setBooking(null); return; }
+      setBooking(await response.json() as PublicBooking);
+      setLastChecked(new Date());
+    } catch {
+      // Keep the last known status visible during a transient network failure.
+    } finally {
+      setIsLoading(false);
+    }
+  }, [token]);
 
   useEffect(() => {
-    if (!token) { setIsLoading(false); return; }
-    fetch(`${API_BASE}/bookings/track/${encodeURIComponent(token)}`)
-      .then(r => r.ok ? r.json() as Promise<PublicBooking> : Promise.resolve(null))
-      .then(data => setBooking(data))
-      .catch(() => setBooking(null))
-      .finally(() => setIsLoading(false));
-  }, [token]);
+    void loadBooking();
+    const interval = setInterval(() => void loadBooking(), 15000);
+    return () => clearInterval(interval);
+  }, [loadBooking]);
 
   if (isLoading) {
     return (
@@ -66,6 +92,14 @@ export default function Track() {
     if (booking.status === "completed") return "done";
     if (booking.status === "cancelled") return "cancelled";
     if (booking.status === "in_progress") {
+      if (stepIndex <= 3) return "done";
+      return "pending";
+    }
+    if (booking.status === "on_location") {
+      if (stepIndex <= 3) return "done";
+      return "pending";
+    }
+    if (booking.status === "on_way") {
       if (stepIndex <= 2) return "done";
       if (stepIndex === 3) return "active";
       return "pending";
@@ -85,9 +119,10 @@ export default function Track() {
 
           <div className="bg-black border border-white/10 p-8 mb-8">
             <h3 className="text-xs uppercase tracking-widest text-gray-500 mb-6">Current Status</h3>
-            <div className={`inline-block px-4 py-2 border uppercase tracking-widest text-xs font-bold mb-6 ${STATUS_COLORS[booking.status] ?? "text-gray-400 border-gray-400/30"}`}>
-              {booking.status.replace("_", " ")}
+            <div className={`inline-block px-4 py-2 border uppercase tracking-widest text-xs font-bold mb-6 ${STATUS_COLORS[booking.status] ?? "text-gray-400 border-gray-400/30"}`} aria-live="polite">
+              {STATUS_LABELS[booking.status] ?? booking.status.replaceAll("_", " ")}
             </div>
+            {lastChecked && <p className="text-xs text-gray-500 mb-6">Updates automatically · checked {formatDistanceToNow(lastChecked)} ago</p>}
 
             <div className="space-y-6 border-t border-white/10 pt-6">
               <div>

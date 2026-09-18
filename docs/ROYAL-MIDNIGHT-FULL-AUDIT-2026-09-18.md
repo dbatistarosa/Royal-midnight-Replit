@@ -123,3 +123,39 @@ Añadir navegación por teclado completa, foco visible consistente, mensajes de 
 - Correcciones aplicadas: tracking con cookie, cleanup del mapa, timestamp real de GPS, hidratación estable, logo transparente.
 - Validación: tests y typecheck PASS.
 - Pendiente de validación externa: dispositivo físico, permisos nativos background, prueba E2E autenticada de una reserva activa y verificación final de Mapbox en cada ambiente.
+
+## Continuación — mejoras aplicadas después del primer cierre
+
+En la segunda pasada se buscaron regresiones y variantes de los hallazgos anteriores antes de añadir cambios. Se encontraron y corrigieron dos pendientes distintos:
+
+### RM-004 — Acciones del viaje fallaban después de recargar la sesión
+
+- Severidad: Alta funcionalidad.
+- Área: detalle de viaje del pasajero.
+- Causa: cancelar, guardar chauffeur, consultar datos del chauffeur, propina y rating enviaban solo el Bearer en memoria. Después de una recarga el usuario seguía autenticado por cookie HttpOnly, pero esas acciones podían responder 401.
+- Corrección: todas esas llamadas usan `authHeaders(token)` y conservan el Bearer cuando existe, permitiendo que la cookie de sesión sea la fuente de autenticación tras recargar.
+- Archivo: `artifacts/royal-midnight/src/pages/passenger/ride-detail.tsx`.
+
+### RM-005 — Tracking público no refrescaba el estado y omitía estados activos
+
+- Severidad: Media funcional/UX.
+- Área: `/track/:token`.
+- Causa: la página cargaba una sola vez y trataba `on_way`/`on_location` como estados desconocidos en la línea de progreso.
+- Corrección: refresco seguro cada 15 segundos con `cache: no-store`, etiquetas de estado legibles, colores para estados activos y timeline coherente para llegada/en ruta.
+- Archivo: `artifacts/royal-midnight/src/pages/track.tsx`.
+
+### RM-006 — Mapa podía arrebatar el control al pasajero y no indicaba señal atrasada
+
+- Severidad: Media UX/accesibilidad.
+- Área: mapa de tracking autenticado.
+- Corrección: el mapa centra al conductor solo en el primer ping, añade control “Center”, marca señal con más de 60 segundos como atrasada y expone el estado mediante `aria-live` y etiqueta accesible del mapa.
+- Archivo: `artifacts/royal-midnight/src/pages/passenger/ride-detail.tsx`.
+
+### Verificación de la continuación
+
+- Typecheck focalizado de web: PASS.
+- Web: 3 pruebas PASS.
+- API: 27 archivos y 209 pruebas PASS.
+- `git diff --check`: PASS.
+- Build local: limitado por `lightningcss.win32-x64-msvc.node` ausente en el entorno Windows/OneDrive; sin cambios de lockfile. El build de CI/Vercel es la compuerta de despliegue.
+- Se volvió a buscar el patrón de Bearer-only en el detalle de viaje: solo queda el header condicional interno del mapa, que conserva compatibilidad con Bearer y usa cookie mediante `credentials: include`.
