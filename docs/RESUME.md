@@ -1,3 +1,87 @@
+## VERIFICADO 2026-09-18 — QA autenticada completada y entorno estable
+
+Se reparó el layout de dependencias regenerando únicamente `node_modules` desde
+`pnpm-lock.yaml`; no se cambiaron versiones ni archivos fuente. Suite final:
+`pnpm test` PASS con 27 archivos/209 pruebas API y 1 archivo/3 pruebas web.
+`pnpm run typecheck` PASS para librerías, API, web, móvil, mockup y scripts.
+
+QA remota en preview `royal-midnight-14yj8lrdv-dbatistarosas-projects.vercel.app`
+con Stripe TEST: se creó pasajero QA id 7 con correo `.invalid`, login PASS,
+GET de tarjetas guardadas PASS con cero tarjetas y GET de reservas PASS sin
+reservas. La cotización controlada devolvió 409 por capacidad de la categoría,
+sin insertar reserva ni iniciar pago. No se creó PaymentIntent.
+
+Limpieza verificada directamente en staging `tktdvxodcitwlcqcrssu`: usuario QA,
+sesiones, reservas, jobs y correo quedaron en cero. Se eliminaron del disco los
+archivos temporales que contenían contraseña/token QA y el respaldo de
+dependencias incompletas. Producción no recibió escrituras.
+
+El flujo de tarjeta guardada no puede certificar un cobro TEST porque la fixture
+no tenía tarjeta guardada y el preview sigue mezclando claves LIVE/TEST para el
+checkout UI. El mapa del conductor requiere una fixture aprobada con conductor,
+viaje y Mapbox operativo. Siguen fuera de alcance verificado: push móvil con
+credenciales/dispositivo, MFA, ensayo de restauración, conciliación histórica,
+corporate settlement completo y E2E 3DS/webhook.
+
+## VERIFICADO 2026-09-18 — staging limpio y producción estable
+
+Se continuó desde `310b25b` respetando Stripe TEST, sin tocar producción con
+datos QA y sin consumir resets. Staging `tktdvxodcitwlcqcrssu` quedó confirmado
+limpio: 0 usuarios, 0 reservas, 0 app_jobs pendientes, 0 correos pendientes y
+0 booking_adjustments.
+
+Comprobación pública de producción: healthz 200 con revisión
+`3335e6bc33dbf32b3c655cb500c0de53b005c631`, payments/config devuelve publishable
+key `pk_test_` y el cron sin autenticación devuelve 401.
+
+La fixture QA nueva aún no se creó. El intento de levantar el API local contra
+staging fue detenido porque una reconstrucción de pnpm dejó incompletos los
+enlaces del `node_modules`; `pnpm install --frozen-lockfile` reporta el lockfile
+intacto pero no restaura los ejecutables. No se borraron archivos fuente ni se
+modificaron dependencias declaradas. Resolver este entorno antes de crear filas
+QA, para poder registrar y limpiar toda la prueba mediante el API.
+
+Siguiente acción: reparar el layout local de dependencias, levantar el API con
+la configuración preview/staging sin imprimir secretos, crear una fixture QA
+identificable y ejecutar tarjeta guardada, propina, extras, extensión y mapa;
+limpiar después todas sus filas, jobs, correos y PaymentIntents TEST.
+
+## VERIFICADO 2026-09-17 11:51 EDT - programador reparado
+
+PR #10 https://github.com/dbatistarosa/Royal-midnight-Replit/pull/10 MERGED.
+Produccion 3335e6bc33dbf32b3c655cb500c0de53b005c631; Vercel deployment
+dpl_F5SCQDZWW6jvPnFHCmVSDFJyhFCF Ready con www.royalmidnight.com.
+CI PR 35242221391, CI main 35242436210 y smoke 35242654207: success.
+healthz 200 con SHA exacto, payments/config TEST, cron sin autenticacion 401.
+
+CRON_WORKER_SECRET exclusivo sincronizado en Vercel production y Vault
+royal_midnight_worker_secret. GitHub CRON_SECRET conservado. La descarga de
+variables de Vercel devolvio valores vacios; no usar .env.scheduler.local.
+Vault no concede acceso a decrypted_secrets a anon/authenticated/PUBLIC.
+
+SQL de scripts/configure-worker-cron.sql aplicado despues del despliegue y de
+verificar worker autenticado 200. Schedules activos: trip-reminders jobid 2 cada
+5 minutos, booking-jobs jobid 7 y mail-outbox jobid 8 cada minuto. Jobid 1 existente
+check-reservation-status intacto. GitHub Actions queda como respaldo.
+
+Prueba desde pg_net/Vault trip-reminders request 135409: HTTP 200. Primera
+ejecucion automatica de workers 15:51 UTC: cron_runs success, respuestas pg_net
+135410-135412 HTTP 200 sin timeout. Cero app_jobs pendientes y cero mail_outbox
+pendientes; el review_request retenido se proceso por el worker normal.
+No se crearon reservas ni cobros QA. Reservas historicas 15/16 canceladas y sus
+jobs done/1 intento; cero reservas vencidas abiertas al revisar.
+
+La revision automatica rechazo push directo a main. Se resolvio por PR #10 con
+CI aprobado y merge normal mediante credenciales Git existentes (conector GitHub
+solo lectura/403). No hace falta autorizacion adicional pendiente para este bloque.
+Este checkpoint documental posterior queda en la rama de reparacion; no cambia
+el codigo desplegado ni requiere otro build de aplicacion.
+
+Siguiente: QA autenticado tarjeta guardada, propinas, cargos extras/extension y
+mapa driver. Pendientes generales: push movil, MFA, restauracion y conciliacion.
+Mantener Stripe TEST y no cobrar reserva historica 13. Respetar pausa al 3 %;
+no consumir reset sin instruccion. No declarar el proyecto entero terminado.
+
 ## CONTINUACION 2026-09-17 - revision del programador
 
 Base recuperada: produccion y rama en b038ca2. Reservas 15 y 16 canceladas,
@@ -532,3 +616,33 @@ TEST en acct_1Svjs2G4saqVjBnZ no encontro PaymentIntent extra_time para reserva
 13, pero eso no descarta otra cuenta y por eso sigue bloqueada para conciliacion.
 Tipos API PASS; suite 201 API + 3 web PASS. Pendiente: commit/push, CI y QA remoto
 con fixture nuevo; luego merge/deploy/smoke. Produccion aun esta en 4476e24.
+## VERIFICADO 2026-09-18 — suite completa del bloque de pagos y conductor
+
+Se recuperó este resumen y se continuó con las mismas reglas: Stripe permanece
+en TEST, no se cobró ninguna tarjeta, no se tocó la reserva histórica 13 y no se
+usó ningún reset de cuota.
+
+Verificación local completa después del checkpoint de producción `3335e6b`:
+`pnpm test` PASS con 27 archivos/209 pruebas API y 1 archivo/3 pruebas web.
+`pnpm run typecheck` PASS para librerías, API, web, móvil, mockup y scripts.
+La suite dirigida del siguiente bloque también pasó: 9 archivos/70 pruebas para
+tarjeta guardada/CustomerSession, propinas y pagos suplementarios, extras,
+extensión por hora, disponibilidad/elegibilidad de flota y zonas de servicio.
+
+No se ejecutó QA remoto de cobro en esta reanudación: no hay una fixture QA
+autenticada vigente documentada y el preview disponible mezcla claves Stripe
+LIVE/TEST, por lo que probar la UI de checkout allí no sería una verificación
+válida. No se inventaron credenciales ni se reutilizaron reservas históricas.
+El mapa del conductor queda pendiente de una fixture autenticada y un entorno
+con Mapbox configurado; el código y el typecheck ya pasan.
+
+El árbol conserva un cambio preexistente no relacionado en
+`artifacts/mockup-sandbox/src/.generated/mockup-components.ts`; no se incluyó en
+este checkpoint.
+
+Siguiente acción autorizada: preparar una fixture QA nueva en staging con claves
+Stripe TEST de la misma cuenta, ejecutar tarjeta guardada/propina/extras/
+extensión y limpiar únicamente sus filas y objetos de prueba; después revisar
+visualmente el mapa del conductor. Mantener Stripe TEST y no declarar terminado
+el proyecto completo: siguen pendientes push móvil, MFA, restauración y
+conciliación.
