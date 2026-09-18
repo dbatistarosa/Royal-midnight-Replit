@@ -13,7 +13,7 @@ Este archivo es el punto de continuidad para futuras sesiones de Codex. Debe lee
 
 ## Estado que ya funciona
 
-- Production Vercel estaba estable en `45a6614cf10b134108ab368f55c08f939cb28fd2`.
+- Production Vercel está estable en `1302fb77b52740f18f7b91c4e45da6a6b7f3bf34`.
 - `GET /api/healthz` devuelve 200.
 - `GET /api/payments/config` devuelve publishable key `pk_test_`.
 - Cron sin autenticación devuelve 401.
@@ -85,4 +85,3 @@ Actualizar este documento solo con hechos verificados, añadir checkpoint a `doc
 - Pendiente exacto:
 - Uso restante observado:
 ```
-
