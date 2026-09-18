@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle, Navigation, Star, BarChart2 } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle, Navigation, LocateFixed, Star, BarChart2 } from "lucide-react";
 import { generateInvoicePdf } from "@/lib/generateInvoicePdf";
 import { Link, useParams, useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
@@ -64,6 +64,8 @@ type DriverLocation = {
   driverName?: string;
   locationUpdatedAt?: string | null;
   reason?: string;
+  pickupAddress?: string;
+  dropoffAddress?: string;
 };
 
 type CancelPreview = {
@@ -122,10 +124,12 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
   const mapRef = useRef<HTMLDivElement>(null);
   const mapboxMapRef = useRef<mapboxgl.Map | null>(null);
   const driverMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const hasCenteredOnDriverRef = useRef(false);
   const [mapsReady, setMapsReady] = useState(false);
   const [mapsError, setMapsError] = useState<string | null>(null);
   const [location, setLocation] = useState<DriverLocation | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const isLocationStale = lastUpdated != null && Date.now() - lastUpdated.getTime() > 60_000;
 
   const fetchLocation = useCallback(async () => {
     try {
@@ -169,6 +173,7 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
       driverMarkerRef.current = null;
       map.remove();
       mapboxMapRef.current = null;
+      hasCenteredOnDriverRef.current = false;
     };
   }, [mapsReady]);
 
@@ -202,9 +207,18 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
       driverMarkerRef.current.setLngLat(driverPos);
     }
 
-    // Center map on driver
-    map.panTo(driverPos);
+    // Center only on the first valid ping so passengers can explore the map
+    // without being pulled back every ten seconds.
+    if (!hasCenteredOnDriverRef.current) {
+      map.flyTo({ center: driverPos, zoom: 14, duration: 700 });
+      hasCenteredOnDriverRef.current = true;
+    }
   }, [location]);
+
+  const recenterOnDriver = () => {
+    if (!mapboxMapRef.current || !location?.available || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return;
+    mapboxMapRef.current.flyTo({ center: [location.lng as number, location.lat as number], zoom: 14, duration: 500 });
+  };
 
   // Status label
   const trackingLabel =
@@ -228,27 +242,26 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
   return (
     <div className="bg-card border border-border overflow-hidden">
       {/* Header bar */}
-      <div className={`flex items-center justify-between px-5 py-3 border-b ${trackingColor} border-opacity-30`} style={{ borderColor: status === "on_way" ? "rgb(56 189 248 / 0.2)" : "rgb(167 139 250 / 0.2)" }}>
+      <div className={`flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b ${trackingColor} border-opacity-30`} style={{ borderColor: status === "on_way" ? "rgb(56 189 248 / 0.2)" : "rgb(167 139 250 / 0.2)" }} aria-live="polite">
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full animate-pulse ${status === "on_way" ? "bg-sky-400" : "bg-violet-400"}`} />
           <span className="text-xs uppercase tracking-widest font-medium">{trackingLabel}</span>
         </div>
-        {lastUpdated && (
-          <span className="text-[10px] text-muted-foreground">
-            Updated {formatDistanceToNow(lastUpdated)} ago
-          </span>
-        )}
+        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+          {lastUpdated && <span className={isLocationStale ? "text-amber-300" : undefined}>{isLocationStale ? "Signal may be delayed" : `Updated ${formatDistanceToNow(lastUpdated)} ago`}</span>}
+          {location?.available && <button type="button" onClick={recenterOnDriver} className="inline-flex items-center gap-1 text-primary hover:text-primary/80" aria-label="Center map on driver"><LocateFixed className="w-3.5 h-3.5" /> Center</button>}
+        </div>
       </div>
 
       {/* Map */}
-      <div ref={mapRef} style={{ height: 280 }} className="w-full" />
+      <div ref={mapRef} style={{ height: 280 }} className="w-full" role="img" aria-label="Live map showing the driver's location" />
 
       {/* Driver name + no-location fallback */}
       <div className="px-5 py-3 border-t border-border flex items-center justify-between text-sm">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Car className="w-4 h-4 text-primary" />
           {location?.available && location.driverName ? (
-            <span>{location.driverName} · Live tracking</span>
+            <span>{location.driverName} · {isLocationStale ? "Location delayed" : "Live tracking"}</span>
           ) : location && !location.available && location.reason === "no_location" ? (
             <span>Driver location sharing is off — they are en route</span>
           ) : (
@@ -288,7 +301,7 @@ function PassengerRideDetailInner() {
     try {
       const res = await fetch(`${API_BASE}/users/${authUser.id}/favorite-drivers/${driverId}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(token),
       });
       if (!res.ok) throw new Error("Failed");
       setDriverSaved(true);
@@ -356,7 +369,7 @@ function PassengerRideDetailInner() {
   useEffect(() => {
     if (!id || !isAuthenticated || !booking?.driverId) { setDriverInfo(null); return; }
     fetch(`${API_BASE}/bookings/${id}/driver-info`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(token),
     })
       .then(r => r.ok ? r.json() as Promise<DriverInfo> : Promise.resolve(null))
       .then(data => setDriverInfo(data))
@@ -458,7 +471,7 @@ function PassengerRideDetailInner() {
     setCancelLoading(true);
     try {
       const res = await fetch(`${API_BASE}/bookings/${id}/cancel-preview`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(token),
       });
       if (!res.ok) throw new Error("Could not load cancellation policy.");
       const data = await res.json() as CancelPreview;
@@ -476,7 +489,7 @@ function PassengerRideDetailInner() {
     try {
       const res = await fetch(`${API_BASE}/bookings/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(token),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({})) as { error?: string };
@@ -497,7 +510,7 @@ function PassengerRideDetailInner() {
     try {
       const res = await fetch(`${API_BASE}/payments/tip/${id}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: authHeaders(token, { "Content-Type": "application/json" }),
         body: JSON.stringify({ tipAmount: amount }),
       });
       if (!res.ok) {
@@ -528,7 +541,7 @@ function PassengerRideDetailInner() {
     try {
       const res = await fetch(`${API_BASE}/payments/tip-checkout/${id}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: authHeaders(token, { "Content-Type": "application/json" }),
         body: JSON.stringify({ tipAmount: amount }),
       });
       if (!res.ok) {
@@ -551,7 +564,7 @@ function PassengerRideDetailInner() {
     try {
       const res = await fetch(`${API_BASE}/payments/tip-confirm/${id}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: authHeaders(token, { "Content-Type": "application/json" }),
         body: JSON.stringify({ paymentIntentId }),
       });
       if (!res.ok) {
@@ -599,7 +612,7 @@ function PassengerRideDetailInner() {
     try {
       const res = await fetch(`${API_BASE}/bookings/${id}/rate`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        headers: authHeaders(token, { "Content-Type": "application/json" }),
         body: JSON.stringify({ rating: ratingValue, comment: ratingComment || undefined }),
       });
       if (!res.ok) {

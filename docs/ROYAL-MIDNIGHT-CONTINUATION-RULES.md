@@ -29,6 +29,7 @@ Este archivo es el punto de continuidad para futuras sesiones de Codex. Debe lee
 - Navbar, footer, login, signup y reset-password usan el logo transparente.
 - Asset de marca: `artifacts/royal-midnight/public/royal-midnight-logo-transparent.png`.
 - Reporte detallado: `docs/ROYAL-MIDNIGHT-FULL-AUDIT-2026-09-18.md`.
+- Continuación: acciones de viaje usan `authHeaders` para sobrevivir a recargas; tracking público refresca cada 15 segundos y reconoce estados `on_way`/`on_location`; mapa autenticado añade frescura, alerta de señal atrasada y botón de recentrado.
 
 ## Fases obligatorias para cada continuación
 
@@ -71,6 +72,7 @@ Actualizar este documento solo con hechos verificados, añadir checkpoint a `doc
 - Push Firebase/APNs y MFA con credenciales/dispositivo reales.
 - Ensayo de restauración, conciliación histórica y liquidación corporativa.
 - Realtime para tracking con fallback polling, ETA/ruta y freshness indicator.
+- Persistencia de preferencias de lujo y concierge con endpoints y auditoría de acciones.
 
 ## Formato de checkpoint
 
