@@ -568,3 +568,33 @@ TEST en acct_1Svjs2G4saqVjBnZ no encontro PaymentIntent extra_time para reserva
 13, pero eso no descarta otra cuenta y por eso sigue bloqueada para conciliacion.
 Tipos API PASS; suite 201 API + 3 web PASS. Pendiente: commit/push, CI y QA remoto
 con fixture nuevo; luego merge/deploy/smoke. Produccion aun esta en 4476e24.
+## VERIFICADO 2026-09-18 — suite completa del bloque de pagos y conductor
+
+Se recuperó este resumen y se continuó con las mismas reglas: Stripe permanece
+en TEST, no se cobró ninguna tarjeta, no se tocó la reserva histórica 13 y no se
+usó ningún reset de cuota.
+
+Verificación local completa después del checkpoint de producción `3335e6b`:
+`pnpm test` PASS con 27 archivos/209 pruebas API y 1 archivo/3 pruebas web.
+`pnpm run typecheck` PASS para librerías, API, web, móvil, mockup y scripts.
+La suite dirigida del siguiente bloque también pasó: 9 archivos/70 pruebas para
+tarjeta guardada/CustomerSession, propinas y pagos suplementarios, extras,
+extensión por hora, disponibilidad/elegibilidad de flota y zonas de servicio.
+
+No se ejecutó QA remoto de cobro en esta reanudación: no hay una fixture QA
+autenticada vigente documentada y el preview disponible mezcla claves Stripe
+LIVE/TEST, por lo que probar la UI de checkout allí no sería una verificación
+válida. No se inventaron credenciales ni se reutilizaron reservas históricas.
+El mapa del conductor queda pendiente de una fixture autenticada y un entorno
+con Mapbox configurado; el código y el typecheck ya pasan.
+
+El árbol conserva un cambio preexistente no relacionado en
+`artifacts/mockup-sandbox/src/.generated/mockup-components.ts`; no se incluyó en
+este checkpoint.
+
+Siguiente acción autorizada: preparar una fixture QA nueva en staging con claves
+Stripe TEST de la misma cuenta, ejecutar tarjeta guardada/propina/extras/
+extensión y limpiar únicamente sus filas y objetos de prueba; después revisar
+visualmente el mapa del conductor. Mantener Stripe TEST y no declarar terminado
+el proyecto completo: siguen pendientes push móvil, MFA, restauración y
+conciliación.
