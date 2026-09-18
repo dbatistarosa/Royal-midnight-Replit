@@ -1,3 +1,28 @@
+## VERIFICADO 2026-09-18 — QA autenticada completada y entorno estable
+
+Se reparó el layout de dependencias regenerando únicamente `node_modules` desde
+`pnpm-lock.yaml`; no se cambiaron versiones ni archivos fuente. Suite final:
+`pnpm test` PASS con 27 archivos/209 pruebas API y 1 archivo/3 pruebas web.
+`pnpm run typecheck` PASS para librerías, API, web, móvil, mockup y scripts.
+
+QA remota en preview `royal-midnight-14yj8lrdv-dbatistarosas-projects.vercel.app`
+con Stripe TEST: se creó pasajero QA id 7 con correo `.invalid`, login PASS,
+GET de tarjetas guardadas PASS con cero tarjetas y GET de reservas PASS sin
+reservas. La cotización controlada devolvió 409 por capacidad de la categoría,
+sin insertar reserva ni iniciar pago. No se creó PaymentIntent.
+
+Limpieza verificada directamente en staging `tktdvxodcitwlcqcrssu`: usuario QA,
+sesiones, reservas, jobs y correo quedaron en cero. Se eliminaron del disco los
+archivos temporales que contenían contraseña/token QA y el respaldo de
+dependencias incompletas. Producción no recibió escrituras.
+
+El flujo de tarjeta guardada no puede certificar un cobro TEST porque la fixture
+no tenía tarjeta guardada y el preview sigue mezclando claves LIVE/TEST para el
+checkout UI. El mapa del conductor requiere una fixture aprobada con conductor,
+viaje y Mapbox operativo. Siguen fuera de alcance verificado: push móvil con
+credenciales/dispositivo, MFA, ensayo de restauración, conciliación histórica,
+corporate settlement completo y E2E 3DS/webhook.
+
 ## VERIFICADO 2026-09-18 — staging limpio y producción estable
 
 Se continuó desde `310b25b` respetando Stripe TEST, sin tocar producción con
