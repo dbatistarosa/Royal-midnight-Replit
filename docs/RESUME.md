@@ -1,3 +1,26 @@
+## VERIFICADO 2026-09-18 — staging limpio y producción estable
+
+Se continuó desde `310b25b` respetando Stripe TEST, sin tocar producción con
+datos QA y sin consumir resets. Staging `tktdvxodcitwlcqcrssu` quedó confirmado
+limpio: 0 usuarios, 0 reservas, 0 app_jobs pendientes, 0 correos pendientes y
+0 booking_adjustments.
+
+Comprobación pública de producción: healthz 200 con revisión
+`3335e6bc33dbf32b3c655cb500c0de53b005c631`, payments/config devuelve publishable
+key `pk_test_` y el cron sin autenticación devuelve 401.
+
+La fixture QA nueva aún no se creó. El intento de levantar el API local contra
+staging fue detenido porque una reconstrucción de pnpm dejó incompletos los
+enlaces del `node_modules`; `pnpm install --frozen-lockfile` reporta el lockfile
+intacto pero no restaura los ejecutables. No se borraron archivos fuente ni se
+modificaron dependencias declaradas. Resolver este entorno antes de crear filas
+QA, para poder registrar y limpiar toda la prueba mediante el API.
+
+Siguiente acción: reparar el layout local de dependencias, levantar el API con
+la configuración preview/staging sin imprimir secretos, crear una fixture QA
+identificable y ejecutar tarjeta guardada, propina, extras, extensión y mapa;
+limpiar después todas sus filas, jobs, correos y PaymentIntents TEST.
+
 ## VERIFICADO 2026-09-17 11:51 EDT - programador reparado
 
 PR #10 https://github.com/dbatistarosa/Royal-midnight-Replit/pull/10 MERGED.
