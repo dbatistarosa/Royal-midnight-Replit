@@ -653,3 +653,13 @@ Se completó una segunda revisión del website, booking, passenger, driver, corp
 `pnpm test` PASS: 27 archivos/209 pruebas API y 1 archivo/3 pruebas web. `pnpm run typecheck` PASS en todos los paquetes. El build local sigue limitado por el binario opcional Windows de `lightningcss`; no se modificó el lockfile. El reporte completo está en `docs/ROYAL-MIDNIGHT-FULL-AUDIT-2026-09-18.md` y las reglas permanentes en `docs/ROYAL-MIDNIGHT-CONTINUATION-RULES.md`.
 
 PR #12 fue fusionado después de CI PASS. Production Vercel quedó Ready con revisión `1302fb77b52740f18f7b91c4e45da6a6b7f3bf34`. Smoke final: healthz 200, payments/config en Stripe TEST, cron sin autenticación 401, logo transparente visible en el home y consola del navegador sin errores. La búsqueda repetida no encontró de nuevo React #418 ni referencias activas al logo antiguo en las áreas actualizadas.
+
+## CHECKPOINT 2026-09-18 — mejoras de journey tracking y resiliencia de sesión
+
+Se continuó desde el checkpoint anterior sin repetir sus correcciones. Se corrigieron RM-004/RM-005/RM-006: las acciones del detalle de viaje ahora usan `authHeaders` y funcionan con cookie HttpOnly después de recargar; `/track/:token` actualiza el estado cada 15 segundos y reconoce `on_way`/`on_location`; el mapa autenticado centra una sola vez, ofrece recentrado, señal atrasada y estado accesible.
+
+Commit de trabajo `c3d19cf76ca340427d2e057576894a293217bd31`; PR #14 pasó CI completo y fue fusionado a `main` como `cdf497076dd145a966f60d9377b9fa145cd47495`. Typecheck web PASS; 3 pruebas web PASS; 27 archivos/209 pruebas API PASS; `git diff --check` PASS. El build local continúa limitado exclusivamente por el binario opcional `lightningcss.win32-x64-msvc.node` ausente en Windows/OneDrive; CI/Vercel compiló correctamente.
+
+Production Vercel quedó Ready en `https://royal-midnight-49ygv0ko7-dbatistarosas-projects.vercel.app`; dominio `www.royalmidnight.com` sirve revisión `cdf497076dd145a966f60d9377b9fa145cd47495`. Smoke final: healthz 200, payments/config `pk_test_`, cron sin autenticación 401, tracking público responde correctamente para token inválido y consola limpia. Logo transparente visible. No se pudo declarar E2E autenticada de mapa ni permisos nativos móviles porque requieren fixture/dispositivo real.
+
+Siguiente pendiente exacto: fixture QA nueva con Stripe TEST para ejecutar E2E autenticada de conductor → GPS → booking `on_way` → mapa pasajero, prueba física iOS/Android, Realtime con fallback, concierge/preferencias persistentes y scanners SAST dedicados si se instalan en CI. Uso observado por encima del umbral de pausa; no se consumieron créditos de reset.
