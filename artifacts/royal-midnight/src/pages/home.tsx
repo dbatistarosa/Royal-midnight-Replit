@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { AIRPORTS } from "@/lib/constants";
 import { useVehicleClasses } from "@/hooks/useVehicleClasses";
@@ -11,7 +11,12 @@ export default function Home() {
   const [, setLocation] = useLocation();
   const [pickup, setPickup] = useState("");
   const [dropoff, setDropoff] = useState("");
+  const [isMounted, setIsMounted] = useState(false);
   const { vehicleClasses } = useVehicleClasses();
+
+  // Pricing rules are loaded client-side. Keep the first client render equal
+  // to the prerendered HTML so React can hydrate without replacing the page.
+  useEffect(() => setIsMounted(true), []);
 
   const handleBook = (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,7 +131,7 @@ export default function Home() {
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-8">
-            {vehicleClasses.slice(0, 3).map((vehicle) => (
+            {isMounted && vehicleClasses.slice(0, 3).map((vehicle) => (
               <div key={vehicle.id} className="group relative overflow-hidden bg-black border border-white/5 aspect-[4/3]">
                 <img
                   src={vehicle.image}

@@ -114,7 +114,7 @@ function createPickupMarker(): string {
 
 interface DriverTrackingMapProps {
   bookingId: number;
-  token: string;
+  token?: string | null;
   status: string;
 }
 
@@ -130,12 +130,15 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
   const fetchLocation = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/bookings/${bookingId}/driver-location`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (!res.ok) return;
       const data = await res.json() as DriverLocation;
       setLocation(data);
-      if (data.available) setLastUpdated(new Date());
+      if (data.available && data.locationUpdatedAt) {
+        setLastUpdated(new Date(data.locationUpdatedAt));
+      }
     } catch {
       // silent — will retry
     }
@@ -158,7 +161,15 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
       center: [-80.3, 25.9],
       zoom: 14,
     });
-    mapboxMapRef.current.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+    const map = mapboxMapRef.current;
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+    map.on("error", () => setMapsError("Maps are temporarily unavailable."));
+    return () => {
+      driverMarkerRef.current?.remove();
+      driverMarkerRef.current = null;
+      map.remove();
+      mapboxMapRef.current = null;
+    };
   }, [mapsReady]);
 
   // Fetch location on mount and every 10 seconds
@@ -170,9 +181,16 @@ function DriverTrackingMap({ bookingId, token, status }: DriverTrackingMapProps)
 
   // Update map markers when location changes
   useEffect(() => {
-    if (!mapboxMapRef.current || !location?.available || !location.lat || !location.lng) return;
+    if (
+      !mapboxMapRef.current ||
+      !location?.available ||
+      !Number.isFinite(location.lat) ||
+      !Number.isFinite(location.lng)
+    ) return;
     const map = mapboxMapRef.current;
-    const driverPos: [number, number] = [location.lng, location.lat];
+    const lat = location.lat as number;
+    const lng = location.lng as number;
+    const driverPos: [number, number] = [lng, lat];
 
     // Create or move driver marker
     if (!driverMarkerRef.current) {
@@ -634,7 +652,7 @@ function PassengerRideDetailInner() {
         <div className="grid md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-5">
             {/* Live driver tracking — shown only when driver is on the way or on location */}
-            {isTracking && token && (
+            {isTracking && isAuthenticated && (
               <DriverTrackingMap
                 bookingId={id}
                 token={token}
