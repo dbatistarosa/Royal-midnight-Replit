@@ -29,6 +29,7 @@ Este archivo es el punto de continuidad para futuras sesiones de Codex. Debe lee
 - Navbar, footer, login, signup y reset-password usan el logo transparente.
 - Asset de marca: `artifacts/royal-midnight/public/royal-midnight-logo-transparent.png`.
 - Reporte detallado: `docs/ROYAL-MIDNIGHT-FULL-AUDIT-2026-09-18.md`.
+- Guía para entregar bloqueadores externos: `docs/GUIA-ENTREGA-PENDIENTES-ROYAL-MIDNIGHT.md`.
 - Continuación: acciones de viaje usan `authHeaders` para sobrevivir a recargas; tracking público refresca cada 15 segundos y reconoce estados `on_way`/`on_location`; mapa autenticado añade frescura, alerta de señal atrasada y botón de recentrado.
 
 ## Fases obligatorias para cada continuación
