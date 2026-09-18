@@ -652,4 +652,4 @@ Se completó una segunda revisión del website, booking, passenger, driver, corp
 
 `pnpm test` PASS: 27 archivos/209 pruebas API y 1 archivo/3 pruebas web. `pnpm run typecheck` PASS en todos los paquetes. El build local sigue limitado por el binario opcional Windows de `lightningcss`; no se modificó el lockfile. El reporte completo está en `docs/ROYAL-MIDNIGHT-FULL-AUDIT-2026-09-18.md` y las reglas permanentes en `docs/ROYAL-MIDNIGHT-CONTINUATION-RULES.md`.
 
-Los cambios de este checkpoint aún no están desplegados a production. Siguiente paso autorizado: commit/PR, CI, deploy y smoke verification; mantener Stripe TEST y repetir la búsqueda de los fallos corregidos antes de publicar.
+PR #12 fue fusionado después de CI PASS. Production Vercel quedó Ready con revisión `1302fb77b52740f18f7b91c4e45da6a6b7f3bf34`. Smoke final: healthz 200, payments/config en Stripe TEST, cron sin autenticación 401, logo transparente visible en el home y consola del navegador sin errores. La búsqueda repetida no encontró de nuevo React #418 ni referencias activas al logo antiguo en las áreas actualizadas.
