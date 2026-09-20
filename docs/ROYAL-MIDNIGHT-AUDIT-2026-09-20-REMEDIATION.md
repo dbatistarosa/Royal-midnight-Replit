@@ -2,9 +2,9 @@
 
 ## Resultado
 
-La remediación local queda compilable y probada. El código corregido todavía
-requiere el deploy de producción y el smoke test remoto para certificar el
-estado final del servicio.
+La remediación local queda compilable, probada y desplegada. Vercel dejó READY
+el deployment `dpl_7NXStP6XVwLFtWzR8m3r6oATqbER`; la migración nueva se aplicó
+durante el build y el dominio principal quedó actualizado.
 
 ## Hallazgos corregidos
 
@@ -44,18 +44,20 @@ estado final del servicio.
   ignorados por las excepciones SCA documentadas para `image-size` dentro de
   Metro/Expo (dependencia de tooling, no del runtime desplegado).
 - `git diff --check`: PASS.
+- Smoke remoto: `/api/healthz` 200 con revisión `f7c5bb6`, home y `/book` 200,
+  `/api/reviews` 200, `/api/vehicles` 401 sin sesión, `/api/auth/me` 401 y
+  cron protegido 401; headers CSP/HSTS/X-Frame-Options presentes.
+- UI remota: home y `/book` con contenido, formulario y navegación; sin
+  overlay de error ni errores de consola de la aplicación.
 
 ## Pendientes reales
 
-1. Ejecutar el deploy de Vercel y comprobar que el build remoto aplica la
-   migración con las variables de producción; después validar healthz, rutas
-   públicas, login/admin, step-up, reveal auditado y una navegación web.
-2. Push móvil real: hace falta una build EAS con credenciales APNs/FCM y un
+1. Push móvil real: hace falta una build EAS con credenciales APNs/FCM y un
    dispositivo para certificar entrega de notificaciones, permisos de ubicación
    y navegación nativa.
-3. QA E2E autenticada con Stripe TEST y datos efímeros para cobro, propina,
+2. QA E2E autenticada con Stripe TEST y datos efímeros para cobro, propina,
    extras, extensión, GPS y Realtime/fallback; no se deben usar reservas reales.
-4. Restauración de backup, RLS/pg_net y controles operativos de Supabase siguen
+3. Restauración de backup, RLS/pg_net y controles operativos de Supabase siguen
    dependiendo de acceso administrativo a la infraestructura y no se pueden
    certificar desde el workspace.
 
