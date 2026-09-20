@@ -1,3 +1,26 @@
+## CHECKPOINT 2026-09-20 — deploy final de la remediación continua
+
+La corrección quedó publicada y subida a GitHub en la rama
+`fix/royal-midnight-reliability`, con commits `449194b` y `bf3a99b`. Se corrigió
+el React #418 de hidratación del home eliminando todos los `<a><button>` y se
+aseguró la cadena Metro/Expo con `image-size@2.0.4`,
+`patches/metro@0.84.4.patch` y pnpm `11.7.0` fijado en el proyecto.
+
+Vercel instaló el lockfile congelado en un entorno limpio, aplicó migraciones y
+dejó READY el deployment `dpl_3VWo64nSUmM4r69KfUmEhYkczdS3`. El dominio
+`https://www.royalmidnight.com` sirve la revisión
+`bf3a99b4852b80716f44546d817405e11ab5a936`. Smoke final: home y `/book` 200,
+healthz 200, endpoints protegidos 401 sin sesión, CSP/HSTS/X-Frame-Options
+presentes; navegador sin overlay, sin React #418, sin errores/warnings y con
+`a button = 0`.
+
+El driver app también quedó protegido con error boundary y push nativo
+desactivado hasta configurar APNs/FCM; no se presenta como funcionalidad nativa
+certificada. El export EAS local quedó pendiente por un error de SHA-1 de Metro
+en OneDrive sobre `whatwg-fetch`. Siguen pendientes únicamente las pruebas que
+requieren infraestructura o hardware: EAS/APNs/FCM con dispositivo, E2E
+autenticada Stripe TEST/GPS/Realtime y restauración/RLS/pg_net de Supabase.
+
 ## VERIFICADO 2026-09-18 — QA autenticada completada y entorno estable
 
 Se reparó el layout de dependencias regenerando únicamente `node_modules` desde

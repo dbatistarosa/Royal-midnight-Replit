@@ -3,12 +3,20 @@
 ## Resultado
 
 La remediación local queda compilable, probada y desplegada. Vercel dejó READY
-el deployment `dpl_71ipxfqQioLChXTLsGLsxpUCdfS8`; la migración nueva se aplicó
-durante el build y el dominio principal quedó actualizado.
+el deployment final `dpl_3VWo64nSUmM4r69KfUmEhYkczdS3` desde `bf3a99b`; la
+migración nueva se aplicó durante el build y el dominio principal quedó
+actualizado en `https://www.royalmidnight.com`.
 
 La revisión posterior de dependencias eliminó el último residuo SCA: Metro/Expo
-queda resuelto a `image-size@2.0.4`, compatible con la API default que Metro
-consume, y el gate de producción ya no requiere excepciones ignoradas.
+queda resuelto a `image-size@2.0.4` mediante `patches/metro@0.84.4.patch`, y el
+gestor queda fijado a pnpm 11.7.0.
+El build limpio de Vercel confirmó instalación congelada y `pnpm audit` quedó
+en `No known vulnerabilities found`.
+
+Después de la auditoría inicial se detectó en navegador un React #418 de
+hidratación. La causa era HTML inválido producido por botones dentro de links;
+se corrigieron todos esos casos con `Button asChild` y un único elemento
+interactivo.
 
 ## Hallazgos corregidos
 
@@ -31,9 +39,14 @@ consume, y el gate de producción ya no requiere excepciones ignoradas.
 - Seguridad de base: `DB_TLS_INSECURE=1` falla fuera de desarrollo local; se
   añadió la migración de `sessions.step_up_until`, auditoría sensible e índice
   de reseñas.
-- Validación y flujo: límites de soporte, OpenAPI/Zod y push notifications del
-  driver app quedaron implementados; la app registra el token Expo y enruta
-  ofertas/asignaciones hacia la pantalla correcta.
+- Validación y flujo: límites de soporte y OpenAPI/Zod quedaron implementados.
+  El driver app ahora tiene un error boundary visible y el registro de push
+  nativo queda explícitamente desactivado hasta contar con credenciales
+  APNs/FCM, evitando fallos de arranque; el centro de notificaciones in-app
+  sigue disponible.
+- Hidratación y accesibilidad: se eliminaron los anidamientos `<a><button>`
+  en home, fleet, navbar, confirmación, corporate y not-found; esto elimina el
+  React #418 observado en producción y mantiene la semántica de teclado.
 - Deploy: Vercel ejecutará `pnpm db:migrate` antes de compilar, para que el
   esquema acompañe al código que lo necesita. El remoto tiene deriva histórica
   en el backfill idempotente de capacidad; el guard sigue siendo estricto por
@@ -41,25 +54,32 @@ consume, y el gate de producción ya no requiere excepciones ignoradas.
 
 ## Verificación ejecutada
 
-- `pnpm typecheck`: PASS en librerías, API, web, móvil, mockup y scripts.
+- `pnpm typecheck`: PASS en la verificación previa de librerías, API, web,
+  móvil, mockup y scripts antes del commit final; la reinstalación posterior
+  en OneDrive quedó limitada por un `EPERM` al renombrar `esbuild`.
 - `pnpm test`: PASS — API 31 archivos/221 pruebas; web 1 archivo/3 pruebas.
-- `pnpm build`: PASS — API, frontend y prerender.
+- `pnpm build`: PASS — API, frontend y prerender; el build remoto final de
+  Vercel también pasó en un filesystem limpio.
 - `pnpm audit --prod --audit-level high`: PASS; `No known vulnerabilities found`
   después de fijar `image-size@2.0.4` para Metro/Expo.
-- `pnpm install --frozen-lockfile`: PASS; el lockfile conserva la política de
-  supply chain y resuelve `image-size@2.0.4`.
+- `pnpm install --frozen-lockfile`: PASS en Vercel con pnpm 11.7.0; el intento
+  local posterior queda documentado como bloqueado por OneDrive/`esbuild`, no
+  por el lockfile.
 - `git diff --check`: PASS.
-- Smoke remoto: `/api/healthz` 200 con revisión `62588a0`, home y `/book` 200,
-  `/api/reviews` 200, `/api/vehicles` 401 sin sesión, `/api/auth/me` 401 y
-  cron protegido 401; headers CSP/HSTS/X-Frame-Options presentes.
-- UI remota: home y `/book` con contenido, formulario y navegación; sin
-  overlay de error ni errores de consola de la aplicación.
+- Smoke remoto: `/api/healthz` 200 con revisión
+  `bf3a99b4852b80716f44546d817405e11ab5a936`, home y `/book` 200,
+  `/api/vehicles`, `/api/auth/me` y cron protegido 401 sin sesión; headers
+  CSP/HSTS/X-Frame-Options presentes en las respuestas públicas.
+- UI remota: home y `/book` con contenido, formulario y navegación; `a button`
+  quedó en cero, sin overlay de error, sin React #418 y sin errores/warnings de
+  consola de la aplicación.
 
 ## Pendientes reales
 
 1. Push móvil real: hace falta una build EAS con credenciales APNs/FCM y un
    dispositivo para certificar entrega de notificaciones, permisos de ubicación
-   y navegación nativa.
+   y navegación nativa. El intento de export local quedó limitado por el error
+   SHA-1 de Metro sobre `whatwg-fetch` en OneDrive; no se declara como PASS.
 2. QA E2E autenticada con Stripe TEST y datos efímeros para cobro, propina,
    extras, extensión, GPS y Realtime/fallback; no se deben usar reservas reales.
 3. Restauración de backup, RLS/pg_net y controles operativos de Supabase siguen
@@ -71,4 +91,6 @@ consume, y el gate de producción ya no requiere excepciones ignoradas.
 Los hallazgos CN-001–CN-007 de la auditoría del 18/09 ya estaban corregidos o
 quedaron reforzados en esta pasada. CN-008 queda resuelto en el árbol actual:
 el escaneo SCA devuelve `No known vulnerabilities found` y ya no existe una
-excepción `ignoreGhsas` para `image-size`.
+excepción `ignoreGhsas` para `image-size`. La comparación adicional detectó y
+resolvió el React #418 que la auditoría anterior no había retenido; permanecen
+solo pruebas que requieren infraestructura externa, credenciales o hardware.
