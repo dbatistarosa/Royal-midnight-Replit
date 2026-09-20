@@ -3,7 +3,7 @@
 ## Resultado
 
 La remediación local queda compilable, probada y desplegada. Vercel dejó READY
-el deployment `dpl_7NXStP6XVwLFtWzR8m3r6oATqbER`; la migración nueva se aplicó
+el deployment `dpl_71ipxfqQioLChXTLsGLsxpUCdfS8`; la migración nueva se aplicó
 durante el build y el dominio principal quedó actualizado.
 
 ## Hallazgos corregidos
@@ -44,7 +44,7 @@ durante el build y el dominio principal quedó actualizado.
   ignorados por las excepciones SCA documentadas para `image-size` dentro de
   Metro/Expo (dependencia de tooling, no del runtime desplegado).
 - `git diff --check`: PASS.
-- Smoke remoto: `/api/healthz` 200 con revisión `f7c5bb6`, home y `/book` 200,
+- Smoke remoto: `/api/healthz` 200 con revisión `62588a0`, home y `/book` 200,
   `/api/reviews` 200, `/api/vehicles` 401 sin sesión, `/api/auth/me` 401 y
   cron protegido 401; headers CSP/HSTS/X-Frame-Options presentes.
 - UI remota: home y `/book` con contenido, formulario y navegación; sin

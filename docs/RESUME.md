@@ -676,7 +676,7 @@ validación de soporte y push notifications nativas.
 También se añadió la migración
 `supabase/migrations/20260920153000_sensitive_action_hardening.sql` y Vercel la
 aplicó durante el build de producción. El deployment
-`dpl_7NXStP6XVwLFtWzR8m3r6oATqbER` quedó READY y el dominio
+`dpl_71ipxfqQioLChXTLsGLsxpUCdfS8` quedó READY y el dominio
 `https://www.royalmidnight.com` fue actualizado. La documentación detallada está en
 `docs/ROYAL-MIDNIGHT-AUDIT-2026-09-20-REMEDIATION.md`.
 
