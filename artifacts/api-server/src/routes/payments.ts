@@ -13,7 +13,7 @@ import {
   settingsTable,
   usersTable,
 } from "@workspace/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import {
   sendBookingConfirmationPassenger,
   sendNewBookingAdmin,
@@ -24,7 +24,7 @@ import {
 import { sendBookingConfirmationSms } from "../lib/sms.js";
 import { sendNewRideOfferPush } from "../lib/push.js";
 import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
-import { encryptField, safeDecryptField } from "../lib/encrypt.js";
+import { encryptField, isEncryptedField, safeDecryptField } from "../lib/encrypt.js";
 import { sendStripeError } from "../lib/stripeError.js";
 import {
   isMissingCustomerError,
@@ -97,11 +97,42 @@ async function getWebhookSecret(): Promise<string | null> {
     .from(settingsTable)
     .where(eq(settingsTable.key, "stripe_webhook_secret"))
     .limit(1);
-  return safeDecryptField(row?.value) ?? null;
+  const secret = safeDecryptField(row?.value) ?? null;
+  if (secret && row?.value && !isEncryptedField(row.value)) {
+    await db
+      .update(settingsTable)
+      .set({ value: encryptField(secret), updatedAt: new Date() })
+      .where(eq(settingsTable.key, "stripe_webhook_secret"));
+  }
+  return secret;
 }
 
 /** Third copy of this lookup, folded into the shared one. */
 const getCommissionPct = fetchCommissionPct;
+
+function parseTipCents(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const cents = Math.round(value * 100);
+  return Number.isSafeInteger(cents) && cents >= 100 && cents <= 50000
+    ? cents
+    : null;
+}
+
+function tipMetadataMatches(
+  intent: Stripe.PaymentIntent,
+  bookingId: number,
+  userId: number,
+): boolean {
+  return (
+    intent.metadata.bookingId === String(bookingId) &&
+    intent.metadata.type === "tip" &&
+    intent.metadata.userId === String(userId)
+  );
+}
+
+function tipDollars(cents: number): number {
+  return cents / 100;
+}
 
 export async function firePostPaymentEmails(bookingId: number): Promise<void> {
   const [booking] = await db
@@ -756,21 +787,19 @@ router.post(
 
 // ─── Admin: cancel a Stripe authorization (manual-capture PI) and release the hold
 
-router.post('/admin/payments/cancel-auth/:bookingId',requireAdmin,bookingAction(async(req,res):Promise<void>=>{
+router.post('/admin/payments/cancel-auth/:bookingId',requireAdmin,bookingAction(async(req,res,_next,tx):Promise<void>=>{
  const id=Number(req.params.bookingId);
  if(!Number.isInteger(id)||id<1){res.status(400).json({error:'Invalid booking id'});return;}
- const result=await db.transaction(async tx=>{
-  await setActor(tx,req.currentUser!.userId);
-  const [booking]=await tx.select().from(bookings).where(eq(bookings.id,id));
-  if(!booking)return {status:404,body:{error:'Booking not found'}};
-  if(booking.status!=='authorized')return {status:409,body:{error:'Booking is not authorized'}};
-  await tx.update(bookings).set({status:'cancelled',cancelledAt:new Date(),cancelledBy:'admin',updatedAt:new Date()}).where(and(eq(bookings.id,id),eq(bookings.status,'authorized')));
-  if(booking.promoCode)await tx.execute(sql`UPDATE promo_codes SET used_count=GREATEST(0,used_count-1) WHERE lower(code)=lower(${booking.promoCode})`);
-  const payload={intentId:booking.stripePaymentIntentId,refundCents:Math.round(Number(booking.priceQuoted)*100),feeAmount:0};
-  await tx.execute(sql`INSERT INTO app_jobs(key,kind,booking_id,payload) VALUES(${'booking-cancellation:'+id},'booking-cancellation',${id},${JSON.stringify(payload)}::jsonb) ON CONFLICT DO NOTHING`);
-  return {status:200,body:{success:true,message:'Cancellation recorded; card settlement is queued.',settlementStatus:'queued'}};
- });
- res.status(result.status).json(result.body);
+ await setActor(tx,req.currentUser!.userId);
+ const [booking]=await tx.select().from(bookings).where(eq(bookings.id,id));
+ if(!booking){res.status(404).json({error:'Booking not found'});return;}
+ if(booking.status!=='authorized'){res.status(409).json({error:'Booking is not authorized'});return;}
+ const [updated]=await tx.update(bookings).set({status:'cancelled',cancelledAt:new Date(),cancelledBy:'admin',updatedAt:new Date()}).where(and(eq(bookings.id,id),eq(bookings.status,'authorized'))).returning({id:bookings.id});
+ if(!updated){res.status(409).json({error:'Booking changed before cancellation'});return;}
+ if(booking.promoCode)await tx.execute(sql`UPDATE promo_codes SET used_count=GREATEST(0,used_count-1) WHERE lower(code)=lower(${booking.promoCode})`);
+ const payload={intentId:booking.stripePaymentIntentId,refundCents:Math.round(Number(booking.priceQuoted)*100),feeAmount:0};
+ await tx.execute(sql`INSERT INTO app_jobs(key,kind,booking_id,payload) VALUES(${'booking-cancellation:'+id},'booking-cancellation',${id},${JSON.stringify(payload)}::jsonb) ON CONFLICT DO NOTHING`);
+ res.status(200).json({success:true,message:'Cancellation recorded; card settlement is queued.',settlementStatus:'queued'});
 }));
 
 // ─── Admin: send a Stripe Invoice to the passenger's email for manual bookings
@@ -1162,93 +1191,99 @@ router.post(
       return;
     }
 
-    const { tipAmount } = req.body as { tipAmount?: number };
-    if (!tipAmount || tipAmount <= 0 || tipAmount > 500) {
+    const amountCents = parseTipCents(req.body?.tipAmount);
+    if (amountCents == null) {
       res.status(400).json({ error: "Tip amount must be between $1 and $500" });
       return;
     }
 
     const caller = req.currentUser!;
 
-    const [booking] = await db
-      .select()
-      .from(bookings)
-      .where(eq(bookings.id, bId));
-
-    if (!booking) {
-      res.status(404).json({ error: "Booking not found" });
-      return;
-    }
-
-    if (booking.userId !== caller.userId) {
-      res.status(403).json({ error: "You can only tip on your own bookings" });
-      return;
-    }
-
-    if (booking.status !== "completed") {
-      res
-        .status(400)
-        .json({ error: "Tips can only be added to completed trips" });
-      return;
-    }
-
-    if (booking.tipAmount != null) {
-      res
-        .status(409)
-        .json({ error: "A tip has already been added to this booking" });
-      return;
-    }
-
-    const [user] = await db
-      .select({
-        stripeCustomerId: usersTable.stripeCustomerId,
-        defaultPaymentMethodId: usersTable.defaultPaymentMethodId,
-      })
-      .from(usersTable)
-      .where(eq(usersTable.id, caller.userId));
-
-    if (!user?.stripeCustomerId || !user.defaultPaymentMethodId) {
-      res
-        .status(400)
-        .json({
-          error:
-            "No saved payment method on file. Please contact support to add a tip.",
-        });
-      return;
-    }
-
     try {
-      const stripe = getStripe();
-      const intent = await stripe.paymentIntents.create({
-        amount: Math.round(tipAmount * 100),
-        currency: "usd",
-        customer: user.stripeCustomerId,
-        payment_method: user.defaultPaymentMethodId,
-        confirm: true,
-        off_session: true,
-        description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
-        metadata: { bookingId: String(bId), type: "tip" },
+      const result = await withLock(`tip:${bId}`, async (tx) => {
+        const [booking] = await tx
+          .select()
+          .from(bookings)
+          .where(eq(bookings.id, bId));
+        if (!booking) return { status: 404 as const, body: { error: "Booking not found" } };
+        if (booking.userId !== caller.userId) {
+          return { status: 403 as const, body: { error: "You can only tip on your own bookings" } };
+        }
+        if (booking.status !== "completed") {
+          return { status: 400 as const, body: { error: "Tips can only be added to completed trips" } };
+        }
+        if (booking.tipAmount != null) {
+          return { status: 409 as const, body: { error: "A tip has already been added to this booking" } };
+        }
+
+        const [user] = await tx
+          .select({
+            stripeCustomerId: usersTable.stripeCustomerId,
+            defaultPaymentMethodId: usersTable.defaultPaymentMethodId,
+          })
+          .from(usersTable)
+          .where(eq(usersTable.id, caller.userId));
+        if (!user?.stripeCustomerId || !user.defaultPaymentMethodId) {
+          return {
+            status: 400 as const,
+            body: { error: "No saved payment method on file. Please contact support to add a tip." },
+          };
+        }
+
+        const stripe = getStripe();
+        if (booking.tipPaymentIntentId) {
+          // A pending/succeeded intent is a durable guard against a second
+          // charge, even if the previous request died before its DB commit.
+          const existing = await stripe.paymentIntents.retrieve(booking.tipPaymentIntentId);
+          if (!tipMetadataMatches(existing, bId, caller.userId) || existing.amount !== amountCents) {
+            return { status: 409 as const, body: { error: "A different tip payment is already in progress; reconcile it before retrying." } };
+          }
+          if (existing.status !== "canceled") {
+            if (existing.status !== "succeeded") {
+              return { status: 402 as const, body: { error: `Tip charge did not succeed (status: ${existing.status}). Please contact support.` } };
+            }
+            const [saved] = await tx
+              .update(bookings)
+              .set({ tipAmount: String(tipDollars(amountCents)), updatedAt: new Date() })
+              .where(and(eq(bookings.id, bId), isNull(bookings.tipAmount), eq(bookings.tipPaymentIntentId, existing.id)))
+              .returning({ id: bookings.id });
+            if (!saved) return { status: 409 as const, body: { error: "A tip has already been recorded" } };
+            return { status: 200 as const, body: { success: true, tipAmount: tipDollars(amountCents), paymentIntentId: existing.id } };
+          }
+        }
+
+        const intent = await stripe.paymentIntents.create(
+          {
+            amount: amountCents,
+            currency: "usd",
+            customer: user.stripeCustomerId,
+            payment_method: user.defaultPaymentMethodId,
+            confirm: true,
+            off_session: true,
+            description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
+            metadata: { bookingId: String(bId), type: "tip", userId: String(caller.userId) },
+          },
+          // Stable for the booking/user, so a retry after a network failure
+          // replays the same Stripe operation instead of charging again.
+          { idempotencyKey: `tip:${bId}:${caller.userId}` },
+        );
+        if (intent.status !== "succeeded") {
+          await tx
+            .update(bookings)
+            .set({ tipPaymentIntentId: intent.id, updatedAt: new Date() })
+            .where(and(eq(bookings.id, bId), isNull(bookings.tipAmount)));
+          return { status: 402 as const, body: { error: `Tip charge did not succeed (status: ${intent.status}). Please contact support.` } };
+        }
+
+        const [saved] = await tx
+          .update(bookings)
+          .set({ tipAmount: String(tipDollars(amountCents)), tipPaymentIntentId: intent.id, updatedAt: new Date() })
+          .where(and(eq(bookings.id, bId), isNull(bookings.tipAmount)))
+          .returning({ id: bookings.id });
+        if (!saved) return { status: 409 as const, body: { error: "A tip has already been recorded" } };
+        return { status: 200 as const, body: { success: true, tipAmount: tipDollars(amountCents), paymentIntentId: intent.id } };
       });
-
-      if (intent.status !== "succeeded") {
-        res
-          .status(402)
-          .json({
-            error: `Tip charge did not succeed (status: ${intent.status}). Please contact support.`,
-          });
-        return;
-      }
-
-      await db
-        .update(bookings)
-        .set({
-          tipAmount: String(tipAmount),
-          tipPaymentIntentId: intent.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(bookings.id, bId));
-
-      res.json({ success: true, tipAmount, paymentIntentId: intent.id });
+      res.status(result.status).json(result.body);
     } catch (err: any) {
       // The saved card belongs to a customer Stripe no longer has. Off-session
       // charging is impossible, so say so plainly and drop the dead reference —
@@ -1281,38 +1316,13 @@ router.post(
       return;
     }
 
-    const { tipAmount } = req.body as { tipAmount?: number };
-    if (!tipAmount || tipAmount <= 0 || tipAmount > 500) {
+    const amountCents = parseTipCents(req.body?.tipAmount);
+    if (amountCents == null) {
       res.status(400).json({ error: "Tip amount must be between $1 and $500" });
       return;
     }
 
     const caller = req.currentUser!;
-
-    const [booking] = await db
-      .select()
-      .from(bookings)
-      .where(eq(bookings.id, bId));
-    if (!booking) {
-      res.status(404).json({ error: "Booking not found" });
-      return;
-    }
-    if (booking.userId !== caller.userId) {
-      res.status(403).json({ error: "You can only tip on your own bookings" });
-      return;
-    }
-    if (booking.status !== "completed") {
-      res
-        .status(400)
-        .json({ error: "Tips can only be added to completed trips" });
-      return;
-    }
-    if (booking.tipAmount != null) {
-      res
-        .status(409)
-        .json({ error: "A tip has already been added to this booking" });
-      return;
-    }
 
     const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
     if (!publishableKey) {
@@ -1322,17 +1332,45 @@ router.post(
 
     try {
       const stripe = getStripe();
-      const intent = await stripe.paymentIntents.create({
-        amount: Math.round(tipAmount * 100),
-        currency: "usd",
-        description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
-        metadata: {
-          bookingId: String(bId),
-          type: "tip",
-          userId: String(caller.userId),
-        },
+      const result = await withLock(`tip:${bId}`, async (tx) => {
+        const [booking] = await tx.select().from(bookings).where(eq(bookings.id, bId));
+        if (!booking) return { status: 404 as const, body: { error: "Booking not found" } };
+        if (booking.userId !== caller.userId) return { status: 403 as const, body: { error: "You can only tip on your own bookings" } };
+        if (booking.status !== "completed") return { status: 400 as const, body: { error: "Tips can only be added to completed trips" } };
+        if (booking.tipAmount != null) return { status: 409 as const, body: { error: "A tip has already been added to this booking" } };
+
+        if (booking.tipPaymentIntentId) {
+          const existing = await stripe.paymentIntents.retrieve(booking.tipPaymentIntentId);
+          if (!tipMetadataMatches(existing, bId, caller.userId) || existing.amount !== amountCents) {
+            return { status: 409 as const, body: { error: "A different tip payment is already in progress; finish or cancel it before changing the amount." } };
+          }
+          if (existing.status === "succeeded") {
+            const [saved] = await tx.update(bookings).set({ tipAmount: String(tipDollars(amountCents)), updatedAt: new Date() })
+              .where(and(eq(bookings.id, bId), isNull(bookings.tipAmount), eq(bookings.tipPaymentIntentId, existing.id)))
+              .returning({ id: bookings.id });
+            if (!saved) return { status: 409 as const, body: { error: "A tip has already been recorded" } };
+            return { status: 200 as const, body: { success: true, tipAmount: tipDollars(amountCents), paymentIntentId: existing.id, publishableKey } };
+          }
+          if (existing.status !== "canceled") {
+            return { status: 200 as const, body: { clientSecret: existing.client_secret, paymentIntentId: existing.id, publishableKey } };
+          }
+        }
+
+        const intent = await stripe.paymentIntents.create(
+          {
+            amount: amountCents,
+            currency: "usd",
+            description: `Royal Midnight — Gratuity for Booking #RM-${String(bId).padStart(4, "0")}`,
+            metadata: { bookingId: String(bId), type: "tip", userId: String(caller.userId) },
+          },
+          { idempotencyKey: `tip-checkout:${bId}:${caller.userId}:${amountCents}` },
+        );
+        if (!intent.client_secret) throw new Error("Stripe returned no tip client secret");
+        await tx.update(bookings).set({ tipPaymentIntentId: intent.id, updatedAt: new Date() })
+          .where(and(eq(bookings.id, bId), isNull(bookings.tipAmount)));
+        return { status: 200 as const, body: { clientSecret: intent.client_secret, paymentIntentId: intent.id, publishableKey } };
       });
-      res.json({ clientSecret: intent.client_secret, publishableKey });
+      res.status(result.status).json(result.body);
     } catch (err: any) {
       sendStripeError(req, res, err, "Could not initiate tip payment.");
     }
@@ -1353,98 +1391,54 @@ router.post(
     }
 
     const { paymentIntentId } = req.body as { paymentIntentId?: string };
-    if (!paymentIntentId) {
+    if (typeof paymentIntentId !== "string" || !/^pi_[A-Za-z0-9]+$/.test(paymentIntentId)) {
       res.status(400).json({ error: "paymentIntentId is required" });
       return;
     }
 
     const caller = req.currentUser!;
 
-    const [booking] = await db
-      .select()
-      .from(bookings)
-      .where(eq(bookings.id, bId));
-    if (!booking) {
-      res.status(404).json({ error: "Booking not found" });
-      return;
-    }
-    if (booking.userId !== caller.userId) {
-      res.status(403).json({ error: "You can only tip on your own bookings" });
-      return;
-    }
-    if (booking.tipAmount != null) {
-      res
-        .status(409)
-        .json({ error: "A tip has already been added to this booking" });
-      return;
-    }
-
     try {
       const stripe = getStripe();
-      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      const result = await withLock(`tip:${bId}`, async (tx) => {
+        const [booking] = await tx.select().from(bookings).where(eq(bookings.id, bId));
+        if (!booking) return { status: 404 as const, body: { error: "Booking not found" } };
+        if (booking.userId !== caller.userId) return { status: 403 as const, body: { error: "You can only tip on your own bookings" } };
+        if (booking.tipAmount != null && booking.tipPaymentIntentId === paymentIntentId) {
+          return { status: 200 as const, body: { success: true, tipAmount: Number(booking.tipAmount), paymentIntentId } };
+        }
+        if (booking.tipAmount != null) return { status: 409 as const, body: { error: "A tip has already been added to this booking" } };
+        if (booking.tipPaymentIntentId !== paymentIntentId) {
+          return { status: 400 as const, body: { error: "Payment intent is not the active tip for this booking" } };
+        }
 
-      // Verify intent succeeded
-      if (intent.status !== "succeeded") {
-        res
-          .status(402)
-          .json({
-            error: `Payment has not succeeded (status: ${intent.status})`,
-          });
-        return;
-      }
+        const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+        if (!tipMetadataMatches(intent, bId, caller.userId)) {
+          return { status: 400 as const, body: { error: "Payment intent does not match this booking" } };
+        }
+        if (intent.status !== "succeeded") {
+          return { status: 402 as const, body: { error: `Payment has not succeeded (status: ${intent.status})` } };
+        }
+        const confirmedCents = intent.amount_received ?? intent.amount;
+        if (parseTipCents(confirmedCents / 100) == null) {
+          return { status: 400 as const, body: { error: "Confirmed tip amount is out of valid range" } };
+        }
 
-      // Validate all metadata to prevent cross-booking and cross-user attacks
-      const meta = intent.metadata as Record<string, string>;
-      if (
-        meta["bookingId"] !== String(bId) ||
-        meta["type"] !== "tip" ||
-        meta["userId"] !== String(caller.userId)
-      ) {
-        res
-          .status(400)
-          .json({ error: "Payment intent does not match this booking" });
-        return;
-      }
+        const [saved] = await tx
+          .update(bookings)
+          .set({ tipAmount: String(tipDollars(confirmedCents)), updatedAt: new Date() })
+          .where(and(eq(bookings.id, bId), isNull(bookings.tipAmount), eq(bookings.tipPaymentIntentId, intent.id)))
+          .returning({ id: bookings.id });
+        if (!saved) return { status: 409 as const, body: { error: "A tip has already been recorded" } };
 
-      // Derive canonical amount from Stripe — never trust the client
-      const confirmedCents = intent.amount_received ?? intent.amount;
-      const confirmedAmount = confirmedCents / 100;
-      if (confirmedAmount <= 0 || confirmedAmount > 500) {
-        res
-          .status(400)
-          .json({ error: "Confirmed tip amount is out of valid range" });
-        return;
-      }
-
-      await db
-        .update(bookings)
-        .set({
-          tipAmount: String(confirmedAmount),
-          tipPaymentIntentId: intent.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(bookings.id, bId));
-
-      res.json({
-        success: true,
-        tipAmount: confirmedAmount,
-        paymentIntentId: intent.id,
+        const pm = intent.payment_method;
+        if (pm) {
+          const pmId = typeof pm === "string" ? pm : pm.id;
+          await tx.update(usersTable).set({ defaultPaymentMethodId: pmId }).where(eq(usersTable.id, caller.userId));
+        }
+        return { status: 200 as const, body: { success: true, tipAmount: tipDollars(confirmedCents), paymentIntentId: intent.id } };
       });
-
-      // Save the payment method used for this tip as the default for future off-session charges
-      const pm = intent.payment_method;
-      if (pm) {
-        const pmId = typeof pm === "string" ? pm : pm.id;
-        db.update(usersTable)
-          .set({ defaultPaymentMethodId: pmId })
-          .where(eq(usersTable.id, caller.userId))
-          .catch((e: any) =>
-            console.warn(
-              "[payments] tip-confirm: could not save PM:",
-              e?.message,
-            ),
-          );
-      }
+      res.status(result.status).json(result.body);
     } catch (err: any) {
       sendStripeError(req, res, err, "Could not confirm tip payment.");
     }

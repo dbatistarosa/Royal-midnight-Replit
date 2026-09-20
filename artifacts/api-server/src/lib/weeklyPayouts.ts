@@ -20,6 +20,7 @@ import { sql, eq } from "drizzle-orm";
 import { db, bookingsTable, driversTable, settingsTable } from "@workspace/db";
 import { parseCommissionPct } from "./commission.js";
 import { loadPayoutExtrasByDriver } from "./fareBreakdown.js";
+import { encryptField, isEncryptedField } from "./encrypt.js";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -142,5 +143,19 @@ export function emptyWeekEarnings(driverId: number): DriverWeekEarnings {
 
 /** Approved chauffeurs, name-ordered — the roster both callers iterate. */
 export async function loadApprovedDrivers(): Promise<(typeof driversTable.$inferSelect)[]> {
-  return db.select().from(driversTable).where(sql`approval_status = 'approved'`).orderBy(driversTable.name);
+  const drivers = await db.select().from(driversTable).where(sql`approval_status = 'approved'`).orderBy(driversTable.name);
+  for (const driver of drivers) {
+    const legacy: Record<string, string> = {};
+    if (driver.payoutRoutingNumber && !isEncryptedField(driver.payoutRoutingNumber)) {
+      legacy.payoutRoutingNumber = encryptField(driver.payoutRoutingNumber);
+    }
+    if (driver.payoutAccountNumber && !isEncryptedField(driver.payoutAccountNumber)) {
+      legacy.payoutAccountNumber = encryptField(driver.payoutAccountNumber);
+    }
+    if (Object.keys(legacy).length > 0) {
+      await db.update(driversTable).set(legacy).where(eq(driversTable.id, driver.id));
+      Object.assign(driver, legacy);
+    }
+  }
+  return drivers;
 }

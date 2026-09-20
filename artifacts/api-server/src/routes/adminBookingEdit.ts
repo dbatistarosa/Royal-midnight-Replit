@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { and, eq, ne, inArray, sql } from "drizzle-orm";
 import Stripe from "stripe";
-import { bookingAction, withLock, rows, setActor } from "../lib/durability.js";
+import { bookingAction, lockInTransaction, rows, setActor, type Transaction } from "../lib/durability.js";
 import { tripConflicts, vehicleClassCovers, vehicleFits } from "../lib/scheduling.js";
 import { z } from "zod/v4";
 import {
@@ -121,7 +121,7 @@ const when = (iso: string | Date) =>
 router.patch(
   "/admin/bookings/:id/details",
   requireAdmin,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (!Number.isFinite(id) || id <= 0) {
       res.status(400).json({ error: "Invalid booking id" });
@@ -135,7 +135,7 @@ router.patch(
     }
     const body = parsed.data;
 
-    const [before] = await db
+    const [before] = await tx
       .select()
       .from(bookingsTable)
       .where(eq(bookingsTable.id, id));
@@ -269,7 +269,7 @@ router.patch(
     } | null = null;
     if (changedPriceFields.length > 0) {
       const [invoice] = rows<{ stripe_invoice_id: string | null }>(
-        await db.execute(
+        await tx.execute(
           sql`SELECT stripe_invoice_id FROM bookings WHERE id=${id}`,
         ),
       );
@@ -281,7 +281,7 @@ router.patch(
           });
         return;
       }
-      const extras = await db
+      const extras = await tx
         .select()
         .from(bookingExtrasTable)
         .where(eq(bookingExtrasTable.bookingId, id));
@@ -349,9 +349,11 @@ router.patch(
 
     updates.updatedAt = new Date();
 
-    const updated = await withLock(
+    await lockInTransaction(
+      tx,
       "driver-schedule:" + (before.driverId ?? "unassigned"),
-      async (tx) => {
+    );
+    const updated = await (async () => {
         await setActor(tx, req.currentUser!.userId);
         const candidate = { ...before, ...updates };
         if (before.driverId) {
@@ -446,8 +448,7 @@ router.patch(
             sql`UPDATE bookings SET tax_amount=${breakdown.taxAmount},card_fee=${breakdown.cardProcessingFee},airport_fee=${breakdown.airportFee},extras_total=${breakdown.extrasTotal} WHERE id=${id}`,
           );
         return saved;
-      },
-    );
+    })();
 
     if (!updated) {
       res.status(404).json({ error: "Booking not found" });

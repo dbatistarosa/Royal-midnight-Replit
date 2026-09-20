@@ -17,7 +17,7 @@ const config: ExpoConfig = {
         "Royal Midnight needs your location to show nearby ride offers and share your position with dispatch.",
       NSLocationAlwaysAndWhenInUseUsageDescription:
         "Royal Midnight tracks your location during an active trip so dispatch and the passenger can see your live position, including while your screen is off.",
-      UIBackgroundModes: ["location"],
+      UIBackgroundModes: ["location", "remote-notification"],
     },
   },
   android: {
@@ -38,6 +38,7 @@ const config: ExpoConfig = {
   plugins: [
     "expo-router",
     "expo-secure-store",
+    "expo-notifications",
     [
       "expo-location",
       {

@@ -36,6 +36,9 @@ function buildSsl(): { rejectUnauthorized: boolean; ca?: string[] } | undefined 
   // Vercel restores service in one redeploy without a code change. It is not the
   // default, because the default silently unverified is how this started.
   if (process.env.DB_TLS_INSECURE === "1") {
+    if (process.env.NODE_ENV === "production" || process.env.VERCEL_ENV) {
+      throw new Error("DB_TLS_INSECURE=1 is forbidden outside local development");
+    }
     console.warn("[db] DB_TLS_INSECURE=1 — TLS certificate verification is DISABLED (CN-010).");
     return { rejectUnauthorized: false };
   }

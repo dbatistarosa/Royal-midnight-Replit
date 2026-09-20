@@ -153,8 +153,8 @@ router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void
   }
 
   const message = (req.body?.message as string | undefined)?.trim();
-  if (!message || message.length === 0) {
-    res.status(400).json({ error: "message is required" });
+  if (!message || message.length === 0 || message.length > 10000) {
+    res.status(400).json({ error: "message is required and must be at most 10000 characters" });
     return;
   }
 

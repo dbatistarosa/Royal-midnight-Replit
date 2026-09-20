@@ -1,7 +1,8 @@
 import { Router, type IRouter } from "express";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { db, reviewsTable, bookingsTable, driversTable } from "@workspace/db";
 import { requireAuth } from "../middleware/auth.js";
+import { withLock } from "../lib/durability.js";
 import {
   ListReviewsQueryParams,
   CreateReviewBody,
@@ -19,6 +20,10 @@ router.get("/reviews", async (req, res): Promise<void> => {
   const conditions = [];
   if (parsed.data.driverId != null) conditions.push(eq(reviewsTable.driverId, parsed.data.driverId));
   if (parsed.data.bookingId != null) conditions.push(eq(reviewsTable.bookingId, parsed.data.bookingId));
+  const rawLimit = Number(req.query.limit ?? 50);
+  const rawOffset = Number(req.query.offset ?? 0);
+  const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
+  const offset = Number.isInteger(rawOffset) ? Math.max(rawOffset, 0) : 0;
 
   // This endpoint is public. Returning whole rows meant userId and bookingId
   // came with every review, which is enough to correlate which passenger rode
@@ -33,7 +38,10 @@ router.get("/reviews", async (req, res): Promise<void> => {
       createdAt: reviewsTable.createdAt,
     })
     .from(reviewsTable)
-    .where(conditions.length > 0 ? and(...conditions) : undefined);
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(reviewsTable.createdAt))
+    .limit(limit)
+    .offset(offset);
 
   res.json(reviews.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })));
 });
@@ -45,46 +53,82 @@ router.post("/reviews", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // Verify the booking belongs to the caller and is completed
-  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, parsed.data.bookingId));
-  if (!booking) {
-    res.status(404).json({ error: "Booking not found" });
-    return;
-  }
-  if (req.currentUser!.role !== "admin" && booking.userId !== req.currentUser!.userId) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
-  }
-  if (booking.status !== "completed") {
-    res.status(400).json({ error: "Reviews can only be submitted for completed rides" });
-    return;
-  }
+  const caller = req.currentUser!;
+  const result = await withLock(
+    `review:${caller.userId}:${parsed.data.bookingId}`,
+    async (tx) => {
+      // Verify ownership and completion inside the same transaction that
+      // inserts the review. The client-supplied driverId/userId are never
+      // trusted; the booking is the source of truth.
+      const [booking] = await tx
+        .select()
+        .from(bookingsTable)
+        .where(eq(bookingsTable.id, parsed.data.bookingId));
+      if (!booking) return { status: 404 as const, body: { error: "Booking not found" } };
+      if (caller.role !== "admin" && booking.userId !== caller.userId) {
+        return { status: 403 as const, body: { error: "Forbidden" } };
+      }
+      if (booking.status !== "completed") {
+        return {
+          status: 400 as const,
+          body: { error: "Reviews can only be submitted for completed rides" },
+        };
+      }
+      if (booking.driverId == null) {
+        return {
+          status: 409 as const,
+          body: { error: "This completed ride has no assigned driver to review" },
+        };
+      }
 
-  const [review] = await db.insert(reviewsTable).values({ ...parsed.data, userId: req.currentUser!.userId }).returning();
+      const [existing] = await tx
+        .select({ id: reviewsTable.id })
+        .from(reviewsTable)
+        .where(
+          and(
+            eq(reviewsTable.bookingId, booking.id),
+            eq(reviewsTable.userId, caller.userId),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        return { status: 409 as const, body: { error: "This booking has already been reviewed" } };
+      }
 
-  // Recalculate avg rating for the driver and update the drivers table
-  if (booking.driverId) {
-    const [agg] = await db
-      .select({
-        avgRating: sql<number>`coalesce(avg(rating::numeric), 0)::float`,
-        totalCount: sql<number>`count(*)::int`,
-      })
-      .from(reviewsTable)
-      .where(eq(reviewsTable.driverId, booking.driverId));
+      const [review] = await tx
+        .insert(reviewsTable)
+        .values({
+          bookingId: booking.id,
+          driverId: booking.driverId,
+          userId: caller.userId,
+          rating: parsed.data.rating,
+          comment: parsed.data.comment ?? null,
+        })
+        .returning();
+      if (!review) throw new Error("Review insert returned no row");
 
-    await db
-      .update(driversTable)
-      .set({
-        // `rating` is numeric(3,2) — drizzle represents that as a string to
-        // preserve precision, so a raw JS number here is a type (and, on the
-        // next precision-sensitive column, a real) bug.
-        rating: agg ? String(Math.round(agg.avgRating * 10) / 10) : null,
-      })
-      .where(eq(driversTable.id, booking.driverId));
-  }
+      const [agg] = await tx
+        .select({
+          avgRating: sql<number>`coalesce(avg(rating::numeric), 0)::float`,
+        })
+        .from(reviewsTable)
+        .where(eq(reviewsTable.driverId, booking.driverId));
 
+      await tx
+        .update(driversTable)
+        .set({
+          rating: agg ? String(Math.round(agg.avgRating * 10) / 10) : null,
+        })
+        .where(eq(driversTable.id, booking.driverId));
 
-  res.status(201).json({ ...review, createdAt: review.createdAt.toISOString() });
+      return {
+        status: 201 as const,
+        body: { ...review, createdAt: review.createdAt.toISOString() },
+      };
+    },
+  );
+
+  res.status(result.status).json(result.body);
 });
 
 export default router;

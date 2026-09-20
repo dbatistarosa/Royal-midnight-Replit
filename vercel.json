@@ -1,6 +1,6 @@
 {
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "BASE_PATH=/ pnpm --filter @workspace/royal-midnight run build && pnpm --filter @workspace/api-server run build",
+  "buildCommand": "pnpm db:migrate && BASE_PATH=/ pnpm --filter @workspace/royal-midnight run build && pnpm --filter @workspace/api-server run build",
   "outputDirectory": "artifacts/royal-midnight/dist/public",
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/index" },

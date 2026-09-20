@@ -1,16 +1,16 @@
 import { Router, type IRouter } from "express";
 import rateLimit from "express-rate-limit";
-import { eq, sql } from "drizzle-orm";
-import { db, usersTable, driversTable, passwordResetTokensTable, corporateAccountsTable, objectOwnersTable } from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
+import { db, usersTable, driversTable, passwordResetTokensTable, corporateAccountsTable, objectOwnersTable, sessionsTable } from "@workspace/db";
 import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/api-zod";
 import crypto from "crypto";
 import { z } from "zod";
-import { requireAdmin, requireAuth, SESSION_COOKIE } from "../middleware/auth.js";
+import { readSessionToken, requireAdmin, requireAuth, SESSION_COOKIE } from "../middleware/auth.js";
 import { hashPassword, verifyPassword, isLegacyHash } from "../lib/hash.js";
 import { sendPasswordResetEmail, sendDriverApplicationReceived, sendNewDriverApplicationAdmin } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
 import { storeOtp, verifyOtp } from "../lib/otpStore.js";
-import { createSession, revokeSession, revokeAllSessionsForUser, SESSION_TTL_MS } from "../lib/session.js";
+import { createSession, hashSessionToken, revokeSession, revokeAllSessionsForUser, SESSION_TTL_MS } from "../lib/session.js";
 import { validatePassword } from "../lib/passwordPolicy.js";
 import { recordAcceptances } from "../lib/legalAcceptance.js";
 import { ensureUniqueReferralCode, issueRefereeWelcomePromo } from "../lib/referrals.js";
@@ -20,6 +20,8 @@ import { createDriverVehicle } from "../lib/driverVehicles.js";
 import { formatZodError } from "../lib/zodError.js";
 import { storeFor } from "../lib/rateLimit.js";
 import { NATIVE_CLIENT_HEADER, withNativeToken } from "../lib/authResponse.js";
+import { hashOneTimeToken } from "../lib/tokenHash.js";
+import { withLock } from "../lib/durability.js";
 
 const router: IRouter = Router();
 
@@ -242,6 +244,42 @@ router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
     },
     ...(driverId != null ? { driverId } : {}),
   });
+});
+
+/** Re-authenticate the current session for a short-lived sensitive action. */
+router.post("/auth/step-up", credentialLimiter, requireAuth, async (req, res): Promise<void> => {
+  const password = req.body?.password;
+  if (typeof password !== "string" || password.length === 0) {
+    res.status(400).json({ error: "password is required" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  const [user] = await db
+    .select({ passwordHash: usersTable.passwordHash })
+    .from(usersTable)
+    .where(eq(usersTable.id, caller.userId));
+  if (!user?.passwordHash || !verifyPassword(password, user.passwordHash)) {
+    res.status(401).json({ error: "Password verification failed" });
+    return;
+  }
+
+  const token = readSessionToken(req);
+  if (!token) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  const stepUpUntil = new Date(Date.now() + 10 * 60 * 1000);
+  const [updated] = await db
+    .update(sessionsTable)
+    .set({ stepUpUntil })
+    .where(eq(sessionsTable.token, hashSessionToken(token)))
+    .returning({ id: sessionsTable.id });
+  if (!updated) {
+    res.status(401).json({ error: "Invalid or expired session" });
+    return;
+  }
+  res.json({ stepUpUntil: stepUpUntil.toISOString() });
 });
 
 /** End the current session.
@@ -680,7 +718,11 @@ router.post("/auth/forgot-password", credentialLimiter, async (req, res): Promis
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
 
-  await db.insert(passwordResetTokensTable).values({ userId: user.id, token, expiresAt });
+  await db.insert(passwordResetTokensTable).values({
+    userId: user.id,
+    token: hashOneTimeToken(token),
+    expiresAt,
+  });
 
   const APP_URL = process.env.APP_URL ?? "https://royalmidnight.com";
   const resetLink = `${APP_URL}/auth/reset-password?token=${token}`;
@@ -707,41 +749,61 @@ router.post("/auth/reset-password", credentialLimiter, async (req, res): Promise
     return;
   }
 
-  const [resetToken] = await db
-    .select()
-    .from(passwordResetTokensTable)
-    .where(eq(passwordResetTokensTable.token, token));
+  const tokenHash = hashOneTimeToken(token);
+  const result = await withLock(`password-reset:${tokenHash}`, async (tx) => {
+    // Plaintext lookup is only for links issued before this hardening. New
+    // links are stored and resolved by hash.
+    let [resetToken] = await tx
+      .select()
+      .from(passwordResetTokensTable)
+      .where(eq(passwordResetTokensTable.token, tokenHash));
+    if (!resetToken) {
+      [resetToken] = await tx
+        .select()
+        .from(passwordResetTokensTable)
+        .where(eq(passwordResetTokensTable.token, token));
+    }
 
-  if (!resetToken) {
-    res.status(400).json({ error: "Invalid or expired reset token" });
-    return;
-  }
+    if (!resetToken) return { error: "Invalid or expired reset token" as const };
+    if (resetToken.usedAt) return { error: "Reset token has already been used" as const };
+    if (new Date() > resetToken.expiresAt) return { error: "Reset token has expired" as const };
 
-  if (resetToken.usedAt) {
-    res.status(400).json({ error: "Reset token has already been used" });
-    return;
-  }
+    if (resetToken.token !== tokenHash) {
+      await tx
+        .update(passwordResetTokensTable)
+        .set({ token: tokenHash })
+        .where(eq(passwordResetTokensTable.id, resetToken.id));
+    }
 
-  if (new Date() > resetToken.expiresAt) {
-    res.status(400).json({ error: "Reset token has expired" });
-    return;
-  }
+    const [consumed] = await tx
+      .update(passwordResetTokensTable)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(passwordResetTokensTable.id, resetToken.id),
+          eq(passwordResetTokensTable.token, tokenHash),
+          sql`${passwordResetTokensTable.usedAt} IS NULL`,
+        ),
+      )
+      .returning({ userId: passwordResetTokensTable.userId });
+    if (!consumed) return { error: "Reset token has already been used" as const };
 
-  await db.transaction(async (tx) => {
     await tx
       .update(usersTable)
       .set({ passwordHash: hashPassword(password) })
-      .where(eq(usersTable.id, resetToken.userId));
-    await tx
-      .update(passwordResetTokensTable)
-      .set({ usedAt: new Date() })
-      .where(eq(passwordResetTokensTable.id, resetToken.id));
+      .where(eq(usersTable.id, consumed.userId));
+    return { userId: consumed.userId };
   });
+
+  if ("error" in result) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
 
   // Recovering an account has to mean the attacker loses it. Without this, a
   // session they opened before the reset stays valid for the rest of its
   // 30-day TTL and the victim has no way to end it.
-  await revokeAllSessionsForUser(resetToken.userId);
+  await revokeAllSessionsForUser(result.userId);
 
   res.json({ message: "Password updated successfully. You can now sign in." });
 });

@@ -4,6 +4,7 @@ import { resolveSession } from "../lib/session.js";
 export interface AuthUser {
   userId: number;
   role: string;
+  stepUpUntil?: Date | null;
 }
 
 declare global {
@@ -25,7 +26,7 @@ export const SESSION_COOKIE = "rm_session";
  *  The React Native driver app has no cookie jar and stores its token in
  *  expo-secure-store — already the right place — so it keeps sending a bearer
  *  header, and both paths are accepted here. */
-function readSessionToken(req: Request): string | null {
+export function readSessionToken(req: Request): string | null {
   const cookies = req.cookies as Record<string, string> | undefined;
   const fromCookie = cookies?.[SESSION_COOKIE];
   if (fromCookie && fromCookie.trim()) return fromCookie.trim();
@@ -64,7 +65,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
     return;
   }
 
-  req.currentUser = { userId: session.userId, role: session.role };
+  req.currentUser = { userId: session.userId, role: session.role, stepUpUntil: session.stepUpUntil };
   next();
 }
 
@@ -83,7 +84,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  req.currentUser = { userId: session.userId, role: session.role };
+  req.currentUser = { userId: session.userId, role: session.role, stepUpUntil: session.stepUpUntil };
   next();
 }
 
@@ -93,7 +94,7 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
   if (token) {
     const session = await resolveSession(token);
     if (session) {
-      req.currentUser = { userId: session.userId, role: session.role };
+      req.currentUser = { userId: session.userId, role: session.role, stepUpUntil: session.stepUpUntil };
     }
   }
   next();

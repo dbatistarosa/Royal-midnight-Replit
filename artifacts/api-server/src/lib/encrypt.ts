@@ -128,6 +128,10 @@ export function safeDecryptField(stored: string | null | undefined): string | nu
   return decryptField(stored);
 }
 
+export function isEncryptedField(stored: string | null | undefined): boolean {
+  return typeof stored === "string" && stored.startsWith("enc:");
+}
+
 /**
  * Extract the last N digits from an encrypted or plaintext field.
  * Returns null if the field is missing.

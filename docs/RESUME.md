@@ -664,6 +664,25 @@ Production Vercel quedó Ready en `https://royal-midnight-49ygv0ko7-dbatistarosa
 
 Siguiente pendiente exacto: fixture QA nueva con Stripe TEST para ejecutar E2E autenticada de conductor → GPS → booking `on_way` → mapa pasajero, prueba física iOS/Android, Realtime con fallback, concierge/preferencias persistentes y scanners SAST dedicados si se instalan en CI. Uso observado por encima del umbral de pausa; no se consumieron créditos de reset.
 
+## CHECKPOINT 2026-09-20 — auditoría de seguridad y remediación continua
+
+Se corrigieron las fallas encontradas en la auditoría de seguimiento: propinas
+idempotentes con CAS/metadata, reseñas con propietario y rating canónico,
+vehículos protegidos, transacciones de `bookingAction` realmente compartidas,
+reset/setup tokens hasheados, step-up para datos bancarios con auditoría durable,
+re-cifrado lazy de payout legacy, TLS inseguro bloqueado fuera de desarrollo,
+validación de soporte y push notifications nativas.
+
+También se añadió la migración
+`supabase/migrations/20260920153000_sensitive_action_hardening.sql` y Vercel la
+ejecutará antes del build. La documentación detallada está en
+`docs/ROYAL-MIDNIGHT-AUDIT-2026-09-20-REMEDIATION.md`.
+
+Verificado localmente: tests API 31/221, web 1/3, typecheck, build completo,
+SCA high gate con 2 excepciones documentadas y `git diff --check`. Pendiente:
+deploy/smoke remoto, aplicación confirmada de la migración, QA E2E Stripe TEST,
+build EAS con APNs/FCM, dispositivo físico y controles Supabase operativos.
+
 ## CHECKPOINT 2026-09-19 — remediación CN-003 a CN-006 y SCA
 
 Se continuó desde `AUDIT-COMPLETA-2026-09-18.md` y se corrigieron los siguientes
