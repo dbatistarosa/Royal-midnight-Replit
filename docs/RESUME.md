@@ -706,3 +706,18 @@ web), `pnpm typecheck` PASS, `pnpm build` PASS completo, y `git diff --check`
 PASS. Stripe continúa en TEST; no se usaron créditos de reset, no se tocaron
 datos externos y no se hizo deploy. El siguiente paso sigue siendo QA E2E con
 fixture TEST autenticada y dispositivo físico, antes de considerar producción.
+## CHECKPOINT 2026-09-20 — residuo SCA cerrado
+
+La revisión de seguimiento eliminó la última excepción de dependencias: Metro
+resuelve `image-size@2.0.4` mediante el override raíz y se retiró `auditConfig`
+con los dos GHSA ignorados. Se verificó que la versión 2.0.4 conserva la API
+default que Metro consume y que calcula correctamente una imagen PNG de 1×1.
+
+Verificación posterior: `pnpm install --frozen-lockfile`, `pnpm typecheck`,
+`pnpm test` (31 suites API/221 pruebas y 1 suite web/3 pruebas), `pnpm build` y
+`pnpm audit --prod --audit-level high` PASS; este último devuelve
+`No known vulnerabilities found`. El cambio está listo para commit, push y un
+nuevo deploy de producción. Siguen pendientes únicamente las pruebas que
+requieren infraestructura externa o hardware: EAS/APNs/FCM con dispositivo,
+E2E autenticada Stripe TEST/GPS/Realtime y ensayo operativo de restauración,
+RLS/pg_net de Supabase.

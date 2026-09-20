@@ -6,6 +6,10 @@ La remediación local queda compilable, probada y desplegada. Vercel dejó READY
 el deployment `dpl_71ipxfqQioLChXTLsGLsxpUCdfS8`; la migración nueva se aplicó
 durante el build y el dominio principal quedó actualizado.
 
+La revisión posterior de dependencias eliminó el último residuo SCA: Metro/Expo
+queda resuelto a `image-size@2.0.4`, compatible con la API default que Metro
+consume, y el gate de producción ya no requiere excepciones ignoradas.
+
 ## Hallazgos corregidos
 
 - Propinas: bloqueo por booking, verificación de propietario y metadata,
@@ -40,9 +44,10 @@ durante el build y el dominio principal quedó actualizado.
 - `pnpm typecheck`: PASS en librerías, API, web, móvil, mockup y scripts.
 - `pnpm test`: PASS — API 31 archivos/221 pruebas; web 1 archivo/3 pruebas.
 - `pnpm build`: PASS — API, frontend y prerender.
-- `pnpm audit --prod --audit-level high`: exit 0; quedan 2 avisos high
-  ignorados por las excepciones SCA documentadas para `image-size` dentro de
-  Metro/Expo (dependencia de tooling, no del runtime desplegado).
+- `pnpm audit --prod --audit-level high`: PASS; `No known vulnerabilities found`
+  después de fijar `image-size@2.0.4` para Metro/Expo.
+- `pnpm install --frozen-lockfile`: PASS; el lockfile conserva la política de
+  supply chain y resuelve `image-size@2.0.4`.
 - `git diff --check`: PASS.
 - Smoke remoto: `/api/healthz` 200 con revisión `62588a0`, home y `/book` 200,
   `/api/reviews` 200, `/api/vehicles` 401 sin sesión, `/api/auth/me` 401 y
@@ -64,6 +69,6 @@ durante el build y el dominio principal quedó actualizado.
 ## Comparación con la auditoría anterior
 
 Los hallazgos CN-001–CN-007 de la auditoría del 18/09 ya estaban corregidos o
-quedaron reforzados en esta pasada. CN-008 deja de estar sin verificar: el
-escaneo SCA respondió y su resultado actual es 2 high ignorados por las
-excepciones explícitas del proyecto; no se afirma que sean cero vulnerabilidades.
+quedaron reforzados en esta pasada. CN-008 queda resuelto en el árbol actual:
+el escaneo SCA devuelve `No known vulnerabilities found` y ya no existe una
+excepción `ignoreGhsas` para `image-size`.
