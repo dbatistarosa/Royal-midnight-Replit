@@ -10,6 +10,12 @@ const normalize = (sql) => sql.replaceAll("\r", "").trim();
 const checksum = (sql) =>
   createHash("sha256").update(normalize(sql)).digest("hex");
 const apply = process.argv.includes("--apply");
+const explicitlyAllowedDrift = new Set(
+  (process.env.ALLOW_MIGRATION_DRIFT ?? "")
+    .split(",")
+    .map((file) => file.trim())
+    .filter(Boolean),
+);
 if (!process.env.DATABASE_URL)
   throw new Error(
     "Set DATABASE_URL for the intended database; credentials are never logged.",
@@ -58,8 +64,11 @@ try {
       if (history.length > 1)
         throw new Error("Duplicate migration name: " + name);
       if (history.length) {
-        if (checksum(history[0].statements.join("\n")) !== checksum(source))
-          throw new Error("Migration drift: " + file);
+        if (checksum(history[0].statements.join("\n")) !== checksum(source)) {
+          if (!explicitlyAllowedDrift.has(file))
+            throw new Error("Migration drift: " + file);
+          console.warn("Accepted explicitly allowlisted migration drift: " + file);
+        }
         console.log("Verified", file, "remote version", history[0].version);
       } else if (apply) {
         await client.query(source);

@@ -31,7 +31,9 @@ estado final del servicio.
   driver app quedaron implementados; la app registra el token Expo y enruta
   ofertas/asignaciones hacia la pantalla correcta.
 - Deploy: Vercel ejecutará `pnpm db:migrate` antes de compilar, para que el
-  esquema acompañe al código que lo necesita.
+  esquema acompañe al código que lo necesita. El remoto tiene deriva histórica
+  en el backfill idempotente de capacidad; el guard sigue siendo estricto por
+  defecto y Vercel solo permite explícitamente ese archivo ya aplicado.
 
 ## Verificación ejecutada
 
