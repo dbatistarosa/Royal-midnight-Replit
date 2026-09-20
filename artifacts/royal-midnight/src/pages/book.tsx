@@ -306,7 +306,10 @@ export default function Book() {
       if (!bookingId || !bookingToken) {
         // Ask the server which booking this PI belongs to
         try {
-          const lookupRes = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`);
+          const lookupRes = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`, {
+            credentials: "include",
+            headers: savedToken ? { "X-Booking-Tracking-Token": savedToken } : undefined,
+          });
           if (lookupRes.ok) {
             const lookup = await lookupRes.json() as { bookingId?: number; trackingToken?: string | null };
             if (lookup.bookingId) bookingId = lookup.bookingId;
@@ -658,7 +661,7 @@ export default function Book() {
   const ensureAccount = useCallback(async (name: string, email: string, phone: string, password: string): Promise<number | null> => {
     if (user) return user.id;
 
-    type AuthResponse = { token: string; user: { id: number; name: string; email: string; phone: string | null; role: "passenger" | "driver" | "admin" } };
+    type AuthResponse = { user: { id: number; name: string; email: string; phone: string | null; role: "passenger" | "driver" | "admin" } };
 
     const regRes = await fetch(`${API_BASE}/auth/register`, {
       method: "POST",
@@ -668,7 +671,7 @@ export default function Book() {
 
     if (regRes.ok) {
       const data = await regRes.json() as AuthResponse;
-      login(data.user, data.token);
+      login(data.user);
       return data.user.id;
     }
 
@@ -685,7 +688,7 @@ export default function Book() {
       });
       if (loginRes.ok) {
         const data = await loginRes.json() as AuthResponse;
-        login(data.user, data.token);
+        login(data.user);
         return data.user.id;
       }
       toast({ title: "Incorrect password", description: "An account exists with this email. The password you entered is incorrect.", variant: "destructive" });

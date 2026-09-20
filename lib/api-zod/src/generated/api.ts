@@ -67,7 +67,7 @@ export const LoginBody = zod.object({
 });
 
 export const LoginResponse = zod.object({
-  token: zod.string(),
+  token: zod.string().optional(),
   user: zod.object({
     id: zod.number(),
     name: zod.string(),
@@ -98,7 +98,7 @@ export const VerifyOtpBody = zod.object({
 });
 
 export const VerifyOtpResponse = zod.object({
-  token: zod.string(),
+  token: zod.string().optional(),
   user: zod.object({
     id: zod.number(),
     name: zod.string(),

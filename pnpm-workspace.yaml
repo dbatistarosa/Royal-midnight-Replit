@@ -62,6 +62,9 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # GHSA-vcc3-ghjq-m6fr: Expo's query-string dependency accepted the vulnerable
+  # decoder range; 0.5.0 keeps the same API and removes the exponential decode.
+  decode-uri-component: '0.5.0'
   browserslist: ">=4.28.7 <5"
   # vitest pins its own vite, which kept 7.3.2 alive after the catalog moved to
   # 7.3.5. Both advisories (GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3) cover
@@ -121,7 +124,6 @@ overrides:
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-arm64-musl': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-x64-musl': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-arm64-msvc': '-'
-  '@tailwindcss/oxide>@tailwindcss/oxide-win32-x64-msvc': '-'
   esbuild: '>=0.28.1'
   esbuild>@esbuild/aix-ppc64: '-'
   esbuild>@esbuild/android-arm: '-'
@@ -157,7 +159,6 @@ overrides:
   lightningcss>lightningcss-linux-arm64-musl: '-'
   lightningcss>lightningcss-linux-x64-musl: '-'
   lightningcss>lightningcss-win32-arm64-msvc: '-'
-  lightningcss>lightningcss-win32-x64-msvc: '-'
   lodash: '>=4.18.0'
   path-to-regexp: '>=8.4.0'
   picomatch: '>=2.3.2'

@@ -663,3 +663,25 @@ Commit de trabajo `c3d19cf76ca340427d2e057576894a293217bd31`; PR #14 pasó CI co
 Production Vercel quedó Ready en `https://royal-midnight-49ygv0ko7-dbatistarosas-projects.vercel.app`; dominio `www.royalmidnight.com` sirve revisión `cdf497076dd145a966f60d9377b9fa145cd47495`. Smoke final: healthz 200, payments/config `pk_test_`, cron sin autenticación 401, tracking público responde correctamente para token inválido y consola limpia. Logo transparente visible. No se pudo declarar E2E autenticada de mapa ni permisos nativos móviles porque requieren fixture/dispositivo real.
 
 Siguiente pendiente exacto: fixture QA nueva con Stripe TEST para ejecutar E2E autenticada de conductor → GPS → booking `on_way` → mapa pasajero, prueba física iOS/Android, Realtime con fallback, concierge/preferencias persistentes y scanners SAST dedicados si se instalan en CI. Uso observado por encima del umbral de pausa; no se consumieron créditos de reset.
+
+## CHECKPOINT 2026-09-19 — remediación CN-003 a CN-006 y SCA
+
+Se continuó desde `AUDIT-COMPLETA-2026-09-18.md` y se corrigieron los siguientes
+hallazgos sin desplegar a producción: las respuestas de autenticación web ya no
+exponen bearer tokens; el driver app opta explícitamente con `X-RM-Client:
+driver-app`; las mutaciones con cookie exigen Origin/Referer confiable; el
+escape hatch de cron solo funciona en desarrollo local; y
+`payments/find-booking` exige sesión propietaria/admin o el tracking token,
+además de rate limit y respuesta sin caché. Se actualizó el contrato OpenAPI y
+los tipos generados, y la recuperación 3DS admin envía la cookie HttpOnly.
+
+La auditoría SCA con registro quedó en 0 críticas, 0 moderadas y 2 altas ya
+cubiertas por las excepciones documentadas del proyecto. Se fijó
+`decode-uri-component@0.5.0` y se restauraron los binarios Windows opcionales de
+Lightning CSS/Tailwind Oxide para que el build local sea reproducible.
+
+Verificación: `pnpm test` PASS (31 suites/221 pruebas API y 1 suite/3 pruebas
+web), `pnpm typecheck` PASS, `pnpm build` PASS completo, y `git diff --check`
+PASS. Stripe continúa en TEST; no se usaron créditos de reset, no se tocaron
+datos externos y no se hizo deploy. El siguiente paso sigue siendo QA E2E con
+fixture TEST autenticada y dispositivo físico, antes de considerar producción.

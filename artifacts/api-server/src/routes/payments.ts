@@ -314,9 +314,13 @@ router.post('/payments/create-intent',paymentLimiter(),optionalAuth,async(req,re
 
 // Lookup which booking a PaymentIntent belongs to (via PI metadata) — used by
 // the frontend 3DS recovery path when sessionStorage is unavailable.
-router.get("/payments/find-booking", async (req, res): Promise<void> => {
+router.get(
+  "/payments/find-booking",
+  optionalAuth,
+  paymentLimiter(),
+  async (req, res): Promise<void> => {
   const { paymentIntentId } = req.query as { paymentIntentId?: string };
-  if (!paymentIntentId) {
+  if (!paymentIntentId || !/^pi_[A-Za-z0-9]+$/.test(paymentIntentId)) {
     res.status(400).json({ error: "paymentIntentId is required" });
     return;
   }
@@ -330,37 +334,41 @@ router.get("/payments/find-booking", async (req, res): Promise<void> => {
         .json({ error: "No booking linked to this PaymentIntent" });
       return;
     }
-    // Hand back the tracking token too, so a 3DS return whose sessionStorage was
-    // wiped can still reach the confirmation page (CN-005). Safe here: the
-    // caller had to present the PaymentIntent id, which is itself unguessable
-    // and is only ever given to the person who started this payment.
-    let trackingToken: string | null = null;
-    try {
-      const [b] = await db
-        .select({ trackingToken: bookings.trackingToken })
-        .from(bookings)
-        .where(eq(bookings.id, bId));
-      trackingToken = b?.trackingToken ?? null;
-    } catch (lookupErr: unknown) {
-      // Migration 0004 not applied yet — degrade instead of failing the lookup.
-      // Drizzle wraps driver errors, so the pg code sits down the cause chain.
-      let cur: unknown = lookupErr;
-      let undefinedColumn = false;
-      for (let d = 0; cur && d < 5; d++) {
-        if ((cur as { code?: string }).code === "42703") {
-          undefinedColumn = true;
-          break;
-        }
-        cur = (cur as { cause?: unknown }).cause;
-      }
-      if (!undefinedColumn) throw lookupErr;
+    const [booking] = await db
+      .select({
+        userId: bookings.userId,
+        bookedByUserId: bookings.bookedByUserId,
+        trackingToken: bookings.trackingToken,
+      })
+      .from(bookings)
+      .where(eq(bookings.id, bId));
+    if (!booking) {
+      res.status(404).json({ error: "Booking not found" });
+      return;
+    }
+
+    const trackingToken = req.headers["x-booking-tracking-token"];
+    const caller = req.currentUser;
+    const callerOwnsBooking =
+      !!caller &&
+      (caller.role === "admin" ||
+        booking.userId === caller.userId ||
+        booking.bookedByUserId === caller.userId);
+    const tokenOwnsBooking = matchesTrackingToken(
+      booking.trackingToken,
+      Array.isArray(trackingToken) ? trackingToken[0] : trackingToken,
+    );
+    if (!callerOwnsBooking && !tokenOwnsBooking) {
+      res.status(403).json({ error: "Payment does not belong to this caller" });
+      return;
     }
     res.set("Cache-Control", "no-store");
-    res.json({ bookingId: bId, trackingToken });
+    res.json({ bookingId: bId, trackingToken: booking.trackingToken ?? null });
   } catch (err: any) {
     sendStripeError(req, res, err);
   }
-});
+  },
+);
 
 // Retrieve the client_secret and status for an existing PaymentIntent — used by
 // admin "Charge Card" to reuse a PI created in a previous attempt instead of

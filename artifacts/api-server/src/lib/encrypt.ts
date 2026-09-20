@@ -3,8 +3,6 @@ import crypto from "crypto";
 const ALGORITHM = "aes-256-gcm";
 const KEY_ENV = "FIELD_ENCRYPTION_KEY";
 
-let _warnedMissingKey = false;
-
 /**
  * A malformed key is a deployment problem, not a request problem.
  *
@@ -49,15 +47,9 @@ function describeKeyProblem(hex: string): string | null {
 function getKey(): Buffer | null {
   const hex = process.env[KEY_ENV];
   if (!hex) {
-    if (!_warnedMissingKey) {
-      _warnedMissingKey = true;
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[security] ${KEY_ENV} is not set. Sensitive driver fields (SSN, routing, account) ` +
-        `will be stored as plaintext. Set a 64-hex-char key to enable encryption.`
-      );
-    }
-    return null;
+    throw new FieldEncryptionConfigError(
+      `${KEY_ENV} is not set. Sensitive driver fields cannot be stored securely until a 64-hex-character key is configured.`,
+    );
   }
   const problem = describeKeyProblem(hex);
   if (problem) throw new FieldEncryptionConfigError(problem);
@@ -70,7 +62,12 @@ function getKey(): Buffer | null {
  */
 export function getFieldEncryptionStatus(): { state: "enabled" | "disabled" | "misconfigured"; reason?: string } {
   const hex = process.env[KEY_ENV];
-  if (!hex) return { state: "disabled" };
+  if (!hex) {
+    return {
+      state: "misconfigured",
+      reason: `${KEY_ENV} is not set. Sensitive driver fields cannot be stored securely.`,
+    };
+  }
   const problem = describeKeyProblem(hex);
   return problem ? { state: "misconfigured", reason: problem } : { state: "enabled" };
 }
@@ -78,7 +75,8 @@ export function getFieldEncryptionStatus(): { state: "enabled" | "disabled" | "m
 /**
  * Encrypt a plaintext string with AES-256-GCM.
  * Returns a portable "enc:<iv>:<authTag>:<ciphertext>" string.
- * If FIELD_ENCRYPTION_KEY is not set, returns the plaintext unchanged (with a startup warning).
+ * If FIELD_ENCRYPTION_KEY is not set, throws a configuration error. Sensitive
+ * fields must never silently fall back to plaintext storage.
  */
 export function encryptField(plaintext: string): string {
   const key = getKey();
@@ -121,7 +119,8 @@ export function decryptField(stored: string): string {
 
 /**
  * Safely decrypt a nullable field. Returns null if field is null/undefined.
- * Returns plaintext if FIELD_ENCRYPTION_KEY is not set (backward compat).
+ * Legacy plaintext values are passed through for controlled migration/reading;
+ * new writes always go through encryptField and therefore require the key.
  */
 export function safeDecryptField(stored: string | null | undefined): string | null {
   if (!stored) return null;

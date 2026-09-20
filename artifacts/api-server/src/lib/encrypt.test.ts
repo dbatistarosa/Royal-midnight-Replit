@@ -53,8 +53,10 @@ describe("no key configured", () => {
     delete process.env[KEY_ENV];
   });
 
-  it("stores plaintext rather than failing, for backwards compatibility", () => {
-    expect(encryptField("021000021")).toBe("021000021");
+  it("refuses to store plaintext when the key is missing", () => {
+    expect(() => encryptField("021000021")).toThrow(
+      /FIELD_ENCRYPTION_KEY is not set/,
+    );
   });
 
   it("passes plaintext through the decrypt helpers", () => {
@@ -62,8 +64,12 @@ describe("no key configured", () => {
     expect(lastN("411061967035", 4)).toBe("7035");
   });
 
-  it("reports itself as disabled", () => {
-    expect(getFieldEncryptionStatus()).toEqual({ state: "disabled" });
+  it("reports the missing key as misconfigured", () => {
+    expect(getFieldEncryptionStatus()).toEqual({
+      state: "misconfigured",
+      reason:
+        "FIELD_ENCRYPTION_KEY is not set. Sensitive driver fields cannot be stored securely.",
+    });
   });
 
   it("refuses to silently mangle a value that was encrypted under a key", () => {

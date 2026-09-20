@@ -80,7 +80,10 @@ export default function BookingConfirmation() {
     // is itself unguessable and only the payer has it.
     void (async () => {
       try {
-        const lookup = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`);
+        const lookup = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`, {
+          credentials: "include",
+          headers: routeTokenIsValid ? { "X-Booking-Tracking-Token": routeToken } : undefined,
+        });
         if (!lookup.ok) return;
         const { bookingId, trackingToken } = await lookup.json() as { bookingId?: number; trackingToken?: string | null };
         if (trackingToken) setRecoveredToken(trackingToken);

@@ -262,7 +262,9 @@ export default function AdminBookings() {
     window.history.replaceState({}, "", window.location.pathname);
 
     // Find which booking this PI belongs to via its metadata, then confirm it
-    fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`)
+    fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`, {
+      credentials: "include",
+    })
       .then(r => r.ok ? r.json() as Promise<{ bookingId: number }> : Promise.reject("not found"))
       .then(({ bookingId }) =>
         fetch(`${API_BASE}/payments/confirm/${bookingId}`, {

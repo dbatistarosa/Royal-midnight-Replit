@@ -19,6 +19,7 @@ import { canonicalObjectPath } from "./storage.js";
 import { createDriverVehicle } from "../lib/driverVehicles.js";
 import { formatZodError } from "../lib/zodError.js";
 import { storeFor } from "../lib/rateLimit.js";
+import { NATIVE_CLIENT_HEADER, withNativeToken } from "../lib/authResponse.js";
 
 const router: IRouter = Router();
 
@@ -53,8 +54,8 @@ const otpLimiter = rateLimit({
  *  The web app used to keep this token in localStorage, where any script on the
  *  origin could read it — a single XSS anywhere in the SPA exfiltrated a full
  *  30-day admin session (CN-014). As a cookie it is invisible to page
- *  JavaScript. The token is still returned in the response body because the
- *  React Native driver app has no cookie jar and stores it in expo-secure-store.
+ *  JavaScript. The token is returned only when the React Native driver app opts
+ *  in with X-RM-Client: driver-app; browser responses stay cookie-only.
  *
  *  SameSite=Lax is correct here: the SPA calls the API on its own origin via the
  *  Vercel /api rewrite, so the cookie is never a cross-site request. */
@@ -135,8 +136,7 @@ router.post("/auth/register", credentialLimiter, async (req, res): Promise<void>
       .catch(err => console.error("[auth] referral welcome promo failed (non-fatal):", err));
   }
 
-  res.status(201).json({
-    token,
+  res.status(201).json(withNativeToken({
     user: {
       id: user.id,
       name: user.name,
@@ -146,7 +146,7 @@ router.post("/auth/register", credentialLimiter, async (req, res): Promise<void>
       referralCode: user.referralCode,
       createdAt: user.createdAt.toISOString(),
     },
-  });
+  }, token, req.headers[NATIVE_CLIENT_HEADER]));
 });
 
 router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> => {
@@ -192,8 +192,7 @@ router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> =>
     driverId = driver?.id ?? null;
   }
 
-  res.json({
-    token,
+  res.json(withNativeToken({
     user: {
       id: user.id,
       name: user.name,
@@ -203,7 +202,7 @@ router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> =>
       createdAt: user.createdAt.toISOString(),
     },
     ...(driverId != null ? { driverId } : {}),
-  });
+  }, token, req.headers[NATIVE_CLIENT_HEADER]));
 });
 
 /**
@@ -334,8 +333,7 @@ router.post("/auth/verify-otp", otpLimiter, async (req, res): Promise<void> => {
   const token = await createSession(user.id, user.role);
   setSessionCookie(res, token);
 
-  res.json({
-    token,
+  res.json(withNativeToken({
     user: {
       id: user.id,
       name: user.name,
@@ -344,7 +342,7 @@ router.post("/auth/verify-otp", otpLimiter, async (req, res): Promise<void> => {
       role: user.role,
       createdAt: user.createdAt.toISOString(),
     },
-  });
+  }, token, req.headers[NATIVE_CLIENT_HEADER]));
 });
 
 const DriverRegisterBody = z.object({
@@ -508,8 +506,7 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
     vehicleYear: driverFields.vehicleYear,
   }).catch(err => req.log.error({ err }, "Failed to send new driver application admin email"));
 
-  res.status(201).json({
-    token: result.token,
+  res.status(201).json(withNativeToken({
     user: {
       id: result.user.id,
       name: result.user.name,
@@ -519,7 +516,7 @@ router.post("/auth/driver-register", credentialLimiter, async (req, res): Promis
       createdAt: result.user.createdAt.toISOString(),
     },
     driverId: result.driver.id,
-  });
+  }, result.token, req.headers[NATIVE_CLIENT_HEADER]));
 });
 
 // Admin-only: create another admin account

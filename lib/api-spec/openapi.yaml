@@ -1199,7 +1199,7 @@ components:
           type: string
         user:
           $ref: "#/components/schemas/User"
-      required: [token, user]
+      required: [user]
 
     # ── USER SCHEMAS ──────────────────────────────────────────────────────────
     User:

@@ -8,6 +8,8 @@ import { existsSync } from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { globalLimiter } from "./lib/rateLimit";
+import { SESSION_COOKIE } from "./middleware/auth.js";
+import { isTrustedCookieMutationOrigin } from "./lib/csrf.js";
 
 /**
  * Error monitoring.
@@ -103,18 +105,18 @@ const ALLOWED_ORIGINS = new Set(
 const PREVIEW_ORIGIN_PATTERN =
   /^https:\/\/royal-midnight-[a-z0-9-]+\.vercel\.app$/;
 
+function isAllowedPreviewOrigin(origin: string): boolean {
+  return process.env.VERCEL_ENV === "preview" && PREVIEW_ORIGIN_PATTERN.test(origin);
+}
+
 app.use(
   cors({
     origin(requestOrigin, callback) {
       // Allow server-to-server calls (no Origin header) and whitelisted origins only
-      const isAllowedPreview =
-        process.env.VERCEL_ENV === "preview" &&
-        !!requestOrigin &&
-        PREVIEW_ORIGIN_PATTERN.test(requestOrigin);
       if (
         !requestOrigin ||
         ALLOWED_ORIGINS.has(requestOrigin) ||
-        isAllowedPreview
+        isAllowedPreviewOrigin(requestOrigin)
       ) {
         callback(null, true);
       } else {
@@ -134,7 +136,12 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-RM-Client",
+      "X-Booking-Tracking-Token",
+    ],
   }),
 );
 
@@ -147,6 +154,27 @@ app.use(express.urlencoded({ extended: true }));
 // Reads the HttpOnly session cookie the web app authenticates with (CN-014).
 // The package was already a dependency but had never been mounted.
 app.use(cookieParser());
+
+// SameSite=Lax is useful defense in depth, but it is not the whole CSRF
+// contract for an authenticated cookie. A cross-site request must present a
+// trusted Origin/Referer; bearer-only native clients have no session cookie and
+// therefore continue through this check.
+app.use((req, res, next) => {
+  const trusted = isTrustedCookieMutationOrigin({
+    method: req.method,
+    sessionCookie: req.cookies?.[SESSION_COOKIE],
+    origin: req.headers.origin,
+    referer: req.headers.referer,
+    allowedOrigins: ALLOWED_ORIGINS,
+    isAllowedPreviewOrigin,
+  });
+  if (!trusted) {
+    logger.warn({ ip: req.ip, path: req.path }, "csrf_origin_rejected");
+    res.status(403).json({ error: "Untrusted request origin" });
+    return;
+  }
+  next();
+});
 
 // Baseline throttle for the whole API. Rate limiting previously covered only
 // /auth/*, leaving the Mapbox-backed endpoints — which cost real money per
