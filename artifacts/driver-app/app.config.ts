@@ -35,6 +35,12 @@ const config: ExpoConfig = {
       "FOREGROUND_SERVICE_LOCATION",
     ],
   },
+  updates: {
+    url: "https://u.expo.dev/caed6e0b-2b17-47d6-aaeb-1675e9cda7d4",
+  },
+  runtimeVersion: {
+    policy: "appVersion",
+  },
   plugins: [
     "expo-router",
     "expo-secure-store",
