@@ -172,6 +172,9 @@ overrides:
   rollup>@rollup/rollup-win32-ia32-msvc: '-'
   rollup>@rollup/rollup-win32-x64-gnu: '-'
 
+patchedDependencies:
+  metro@0.84.4: 32c65b381c59d9f5e22f6d07e95e5f3be74b16cd74877e562b8948ce62a6e11b
+
 importers:
 
   .:
@@ -386,6 +389,9 @@ importers:
       '@babel/core':
         specifier: ^7.29.7
         version: 7.29.7
+      '@babel/plugin-transform-react-jsx':
+        specifier: ^7.29.7
+        version: 7.29.7(@babel/core@7.29.7)
       '@types/react':
         specifier: 'catalog:'
         version: 19.2.14
@@ -969,10 +975,6 @@ packages:
 
   '@babel/helper-optimise-call-expression@7.29.7':
     resolution: {integrity: sha512-+kmGVjcT9RGYzoDwdwEqEvGgKe3BYq+O1iGzjFubaNgZHwYHP6lsF2Yghf4kEuv9BV7tYDZ913aBW9am6YKong==}
-    engines: {node: '>=6.9.0'}
-
-  '@babel/helper-plugin-utils@7.28.6':
-    resolution: {integrity: sha512-S9gzZ/bz83GRysI7gAD4wPT/AI3uCnY+9xn+Mx/KPs2JwHJIz1W8PZkg2cqyt3RNOBM8ejcXhV6y8Og7ly/Dug==}
     engines: {node: '>=6.9.0'}
 
   '@babel/helper-plugin-utils@7.29.7':
@@ -6434,8 +6436,6 @@ snapshots:
     dependencies:
       '@babel/types': 7.29.8
 
-  '@babel/helper-plugin-utils@7.28.6': {}
-
   '@babel/helper-plugin-utils@7.29.7': {}
 
   '@babel/helper-remap-async-to-generator@7.29.7(@babel/core@7.29.7)':
@@ -6516,7 +6516,7 @@ snapshots:
   '@babel/plugin-syntax-dynamic-import@7.8.3(@babel/core@7.29.7)':
     dependencies:
       '@babel/core': 7.29.7
-      '@babel/helper-plugin-utils': 7.28.6
+      '@babel/helper-plugin-utils': 7.29.7
 
   '@babel/plugin-syntax-export-default-from@7.29.7(@babel/core@7.29.7)':
     dependencies:
@@ -6536,12 +6536,12 @@ snapshots:
   '@babel/plugin-syntax-nullish-coalescing-operator@7.8.3(@babel/core@7.29.7)':
     dependencies:
       '@babel/core': 7.29.7
-      '@babel/helper-plugin-utils': 7.28.6
+      '@babel/helper-plugin-utils': 7.29.7
 
   '@babel/plugin-syntax-optional-chaining@7.8.3(@babel/core@7.29.7)':
     dependencies:
       '@babel/core': 7.29.7
-      '@babel/helper-plugin-utils': 7.28.6
+      '@babel/helper-plugin-utils': 7.29.7
 
   '@babel/plugin-syntax-typescript@7.29.7(@babel/core@7.29.7)':
     dependencies:
@@ -6716,12 +6716,12 @@ snapshots:
   '@babel/plugin-transform-react-jsx-self@7.27.1(@babel/core@7.29.7)':
     dependencies:
       '@babel/core': 7.29.7
-      '@babel/helper-plugin-utils': 7.28.6
+      '@babel/helper-plugin-utils': 7.29.7
 
   '@babel/plugin-transform-react-jsx-source@7.27.1(@babel/core@7.29.7)':
     dependencies:
       '@babel/core': 7.29.7
-      '@babel/helper-plugin-utils': 7.28.6
+      '@babel/helper-plugin-utils': 7.29.7
 
   '@babel/plugin-transform-react-jsx@7.29.7(@babel/core@7.29.7)':
     dependencies:
@@ -7149,7 +7149,7 @@ snapshots:
 
   '@expo/metro@56.0.0':
     dependencies:
-      metro: 0.84.4
+      metro: 0.84.4(patch_hash=32c65b381c59d9f5e22f6d07e95e5f3be74b16cd74877e562b8948ce62a6e11b)
       metro-babel-transformer: 0.84.4
       metro-cache: 0.84.4
       metro-cache-key: 0.84.4
@@ -8242,7 +8242,7 @@ snapshots:
       '@react-native/dev-middleware': 0.85.2
       debug: 4.4.3
       invariant: 2.2.4
-      metro: 0.84.4
+      metro: 0.84.4(patch_hash=32c65b381c59d9f5e22f6d07e95e5f3be74b16cd74877e562b8948ce62a6e11b)
       metro-config: 0.84.4
       metro-core: 0.84.4
       semver: 7.8.5
@@ -10591,7 +10591,7 @@ snapshots:
       connect: 3.7.0
       flow-enums-runtime: 0.0.6
       jest-validate: 29.7.0
-      metro: 0.84.4
+      metro: 0.84.4(patch_hash=32c65b381c59d9f5e22f6d07e95e5f3be74b16cd74877e562b8948ce62a6e11b)
       metro-cache: 0.84.4
       metro-core: 0.84.4
       metro-runtime: 0.84.4
@@ -10678,7 +10678,7 @@ snapshots:
       '@babel/parser': 7.29.8
       '@babel/types': 7.29.8
       flow-enums-runtime: 0.0.6
-      metro: 0.84.4
+      metro: 0.84.4(patch_hash=32c65b381c59d9f5e22f6d07e95e5f3be74b16cd74877e562b8948ce62a6e11b)
       metro-babel-transformer: 0.84.4
       metro-cache: 0.84.4
       metro-cache-key: 0.84.4
@@ -10691,7 +10691,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  metro@0.84.4:
+  metro@0.84.4(patch_hash=32c65b381c59d9f5e22f6d07e95e5f3be74b16cd74877e562b8948ce62a6e11b):
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.7

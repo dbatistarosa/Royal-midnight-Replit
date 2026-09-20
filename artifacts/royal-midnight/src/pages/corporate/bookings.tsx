@@ -66,11 +66,11 @@ function CorporateBookingsInner() {
           <h1 className="font-serif text-2xl sm:text-3xl mb-1">All Bookings</h1>
           <p className="text-muted-foreground text-sm">All trips booked on your corporate account.</p>
         </div>
-        <Link href="/corporate/book">
-          <Button className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-widest text-xs px-6 min-h-[44px]">
+        <Button asChild className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-widest text-xs px-6 min-h-[44px]">
+          <Link href="/corporate/book">
             <Plus className="w-4 h-4 mr-2" /> Book a Trip
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </div>
 
       <div className="flex gap-2 mb-6 overflow-x-auto pb-1">

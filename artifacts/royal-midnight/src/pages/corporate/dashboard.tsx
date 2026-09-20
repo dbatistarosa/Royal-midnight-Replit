@@ -50,11 +50,11 @@ function CorporateDashboardInner() {
           <h1 className="font-serif text-2xl sm:text-3xl mb-1">{companyName || user?.name}</h1>
           {contactName && <p className="text-muted-foreground text-sm">Contact: {contactName}</p>}
         </div>
-        <Link href="/corporate/book">
-          <Button className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-widest text-xs px-6 min-h-[44px]">
+        <Button asChild className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-widest text-xs px-6 min-h-[44px]">
+          <Link href="/corporate/book">
             <Plus className="w-4 h-4 mr-2" /> Book a Trip
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-8 sm:mb-10">
@@ -110,11 +110,11 @@ function CorporateDashboardInner() {
         <div className="bg-card border border-border p-10 text-center">
           <Car className="w-10 h-10 text-muted-foreground mx-auto mb-4 opacity-40" />
           <p className="text-muted-foreground text-sm mb-4">No upcoming trips scheduled.</p>
-          <Link href="/corporate/book">
-            <Button className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-widest text-xs px-6 min-h-[44px]">
+          <Button asChild className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-widest text-xs px-6 min-h-[44px]">
+            <Link href="/corporate/book">
               Schedule a Trip
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       ) : (
         <div className="space-y-3">

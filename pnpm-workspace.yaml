@@ -182,3 +182,6 @@ overrides:
   # rollup-linux-x64-gnu, which is likewise not excluded, so this costs one
   # optional package in the lockfile and nothing at deploy time.
   # rollup>@rollup/rollup-win32-x64-msvc: '-'
+
+patchedDependencies:
+  metro@0.84.4: patches/metro@0.84.4.patch
