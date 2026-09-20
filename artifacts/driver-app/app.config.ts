@@ -4,7 +4,7 @@ const config: ExpoConfig = {
   name: "Royal Midnight Driver",
   slug: "royal-midnight-driver",
   scheme: "royalmidnightdriver",
-  version: "1.1.0",
+  version: "1.1.1",
   orientation: "portrait",
   userInterfaceStyle: "dark",
   icon: "./assets/icon.png",
@@ -17,12 +17,12 @@ const config: ExpoConfig = {
         "Royal Midnight needs your location to show nearby ride offers and share your position with dispatch.",
       NSLocationAlwaysAndWhenInUseUsageDescription:
         "Royal Midnight tracks your location during an active trip so dispatch and the passenger can see your live position, including while your screen is off.",
-      UIBackgroundModes: ["location", "remote-notification"],
+      UIBackgroundModes: ["location"],
     },
   },
   android: {
     package: "com.royalmidnight.driver",
-    versionCode: 2,
+    versionCode: 3,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#0a0a0f",
@@ -44,7 +44,6 @@ const config: ExpoConfig = {
   plugins: [
     "expo-router",
     "expo-secure-store",
-    "expo-notifications",
     [
       "expo-location",
       {
