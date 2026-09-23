@@ -36,6 +36,12 @@ export default defineConfig({
     },
     dedupe: ["react", "react-dom"],
   },
+  // The prerender script runs through Vite's SSR module graph. Keep React,
+  // ReactDOM and Helmet in that same graph so ReactDOM/server cannot load a
+  // second React instance from Node's externalized dependency resolution.
+  ssr: {
+    noExternal: ["react", "react-dom", "react-helmet-async"],
+  },
   root: path.resolve(import.meta.dirname),
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
