@@ -44,6 +44,7 @@ export interface ResolvedSession {
   /** The role as it is right now, not as it was at login. */
   role: string;
   expiresAt: Date | null;
+  stepUpUntil: Date | null;
 }
 
 /** Look up a live, unexpired session and the caller's current role. */
@@ -52,6 +53,7 @@ export async function resolveSession(token: string): Promise<ResolvedSession | n
     .select({
       userId: sessionsTable.userId,
       expiresAt: sessionsTable.expiresAt,
+      stepUpUntil: sessionsTable.stepUpUntil,
       currentRole: usersTable.role,
     })
     .from(sessionsTable)
@@ -60,7 +62,7 @@ export async function resolveSession(token: string): Promise<ResolvedSession | n
 
   if (!row) return null;
   if (row.expiresAt && row.expiresAt < new Date()) return null;
-  return { userId: row.userId, role: row.currentRole, expiresAt: row.expiresAt };
+  return { userId: row.userId, role: row.currentRole, expiresAt: row.expiresAt, stepUpUntil: row.stepUpUntil };
 }
 
 type Inserter = Pick<typeof db, "insert">;

@@ -1,15 +1,3 @@
-auditConfig:
-  # One accepted exception, so `pnpm audit --audit-level high --prod` can gate
-  # CI honestly instead of being permanently red. image-size sits under Metro,
-  # inside the Expo driver-app: it reads image dimensions on the machine running
-  # the build and is not part of the APK, so exploiting it means feeding a
-  # malicious image into our own build. The fix is a 1.x -> 2.x major inside
-  # Metro's dependency tree, which we are not forcing under an unrelated app.
-  # Revisit at the next APK rebuild with `npx expo install --check`.
-  ignoreGhsas:
-    - GHSA-w3rx-r6r6-pgpr
-    - GHSA-5p2g-fcmc-qvqq
-
 packages:
   - artifacts/*
   - lib/*
@@ -62,6 +50,13 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # Metro 0.84 accepts image-size's preserved default export API. Keeping the
+  # patched 2.x line removes the two high advisories from Expo/Metro tooling
+  # without leaving an ignored SCA exception in the production gate.
+  image-size: '>=2.0.4'
+  # GHSA-vcc3-ghjq-m6fr: Expo's query-string dependency accepted the vulnerable
+  # decoder range; 0.5.0 keeps the same API and removes the exponential decode.
+  decode-uri-component: '0.5.0'
   browserslist: ">=4.28.7 <5"
   # vitest pins its own vite, which kept 7.3.2 alive after the catalog moved to
   # 7.3.5. Both advisories (GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3) cover
@@ -121,7 +116,6 @@ overrides:
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-arm64-musl': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-x64-musl': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-arm64-msvc': '-'
-  '@tailwindcss/oxide>@tailwindcss/oxide-win32-x64-msvc': '-'
   esbuild: '>=0.28.1'
   esbuild>@esbuild/aix-ppc64: '-'
   esbuild>@esbuild/android-arm: '-'
@@ -157,7 +151,6 @@ overrides:
   lightningcss>lightningcss-linux-arm64-musl: '-'
   lightningcss>lightningcss-linux-x64-musl: '-'
   lightningcss>lightningcss-win32-arm64-msvc: '-'
-  lightningcss>lightningcss-win32-x64-msvc: '-'
   lodash: '>=4.18.0'
   path-to-regexp: '>=8.4.0'
   picomatch: '>=2.3.2'
@@ -189,3 +182,6 @@ overrides:
   # rollup-linux-x64-gnu, which is likewise not excluded, so this costs one
   # optional package in the lockfile and nothing at deploy time.
   # rollup>@rollup/rollup-win32-x64-msvc: '-'
+
+patchedDependencies:
+  metro@0.84.4: patches/metro@0.84.4.patch

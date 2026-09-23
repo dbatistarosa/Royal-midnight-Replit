@@ -19,6 +19,7 @@ import { VEHICLE_CATALOG_CACHE_KEY } from "../lib/cacheKeys.js";
 import {
   encryptField,
   safeDecryptField,
+  isEncryptedField,
   lastN,
   isFieldEncryptionConfigError,
   getFieldEncryptionStatus,
@@ -736,6 +737,10 @@ router.get(
   "/admin/drivers/:id/bank/reveal",
   requireAdmin,
   async (req, res): Promise<void> => {
+    if (!req.currentUser?.stepUpUntil || req.currentUser.stepUpUntil <= new Date()) {
+      res.status(428).json({ error: "Recent password verification is required before revealing bank details" });
+      return;
+    }
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) {
       res.status(400).json({ error: "Invalid driver ID" });
@@ -759,6 +764,23 @@ router.get(
     try {
       const accountNumber = safeDecryptField(driver.payoutAccountNumber);
       const routingNumber = safeDecryptField(driver.payoutRoutingNumber);
+      const legacyUpdate: Record<string, string> = {};
+      if (driver.payoutAccountNumber && !isEncryptedField(driver.payoutAccountNumber)) {
+        legacyUpdate.payoutAccountNumber = encryptField(accountNumber!);
+      }
+      if (driver.payoutRoutingNumber && !isEncryptedField(driver.payoutRoutingNumber)) {
+        legacyUpdate.payoutRoutingNumber = encryptField(routingNumber!);
+      }
+      if (Object.keys(legacyUpdate).length > 0) {
+        await db.update(driversTable).set(legacyUpdate).where(eq(driversTable.id, id));
+      }
+      await db.execute(sql`
+        INSERT INTO security_action_audit
+          (actor_user_id, action, resource_type, resource_id, metadata)
+        VALUES
+          (${req.currentUser!.userId}, ${"payout_bank_details_revealed"}, ${"driver"}, ${String(id)},
+           ${JSON.stringify({ ip: req.ip, userAgent: req.get("user-agent")?.slice(0, 300) ?? null })}::jsonb)
+      `);
       req.log.info(
         { driverId: id, adminUserId: req.currentUser?.userId },
         "payout_bank_details_revealed",

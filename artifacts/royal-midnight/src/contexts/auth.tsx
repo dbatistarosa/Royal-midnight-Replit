@@ -25,7 +25,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
   driverId: number | null;
-  login: (user: AuthUser, token: string, driverId?: number | null) => void;
+  login: (user: AuthUser, driverId?: number | null) => void;
   logout: () => void;
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -103,16 +103,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession]);
   function login(
     nextUser: AuthUser,
-    nextToken: string,
     nextDriverId?: number | null,
   ) {
     loggedOut.current = false;
     clearSession();
     setUser(nextUser);
-    setToken(nextToken);
+    // Web authentication is cookie-only. Keeping a bearer token in React state
+    // would make accidental token exposure in browser code easy again.
+    setToken(null);
     setDriverId(nextDriverId ?? null);
     setIsLoading(false);
-    setAuthTokenGetter(nextToken ? () => nextToken : null);
+    setAuthTokenGetter(null);
   }
   async function logout() {
     loggedOut.current = true;

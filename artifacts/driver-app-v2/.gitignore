@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-android/
+dist-android-verify/
+dist-android-ci/
+.expo/
+.env
+.env.*
+!.env.example
+google-services.json

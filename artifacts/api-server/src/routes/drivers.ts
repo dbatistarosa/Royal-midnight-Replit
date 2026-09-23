@@ -26,6 +26,7 @@ import { fetchCommissionPct } from "../lib/commission.js";
 import { loadDriverEarningRows } from "../lib/fareBreakdown.js";
 import { hashPassword } from "../lib/hash.js";
 import { sendDriverAccountSetupEmail } from "../lib/mailer.js";
+import { hashOneTimeToken } from "../lib/tokenHash.js";
 import {
   ListDriversQueryParams,
   ListDriversResponse,
@@ -178,7 +179,7 @@ router.post("/drivers", requireAdmin, async (req, res): Promise<void> => {
     .insert(passwordResetTokensTable)
     .values({
       userId: driver.userId!,
-      token: setupToken,
+      token: hashOneTimeToken(setupToken),
       expiresAt: setupExpiresAt,
     });
 

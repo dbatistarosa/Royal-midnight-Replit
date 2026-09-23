@@ -20,7 +20,6 @@ const loginSchema = z.object({
 type LoginFormValues = z.infer<typeof loginSchema>;
 
 type LoginResponse = {
-  token: string;
   driverId?: number;
   user: { id: number; name: string; email: string; phone: string | null; role: string };
   error?: string;
@@ -76,7 +75,7 @@ export default function Login() {
         email: result.user.email,
         phone: result.user.phone ?? null,
         role: result.user.role as "passenger" | "driver" | "admin" | "corporate",
-      }, result.token, result.driverId ?? null);
+      }, result.driverId ?? null);
       toast({ title: "Welcome back", description: `Signed in as ${result.user.name}` });
 
       if (result.user.role === "admin") setLocation("/admin");

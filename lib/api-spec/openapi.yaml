@@ -1199,7 +1199,7 @@ components:
           type: string
         user:
           $ref: "#/components/schemas/User"
-      required: [token, user]
+      required: [user]
 
     # ── USER SCHEMAS ──────────────────────────────────────────────────────────
     User:
@@ -1648,8 +1648,11 @@ components:
           type: ["integer", "null"]
         rating:
           type: integer
+          minimum: 1
+          maximum: 5
         comment:
           type: ["string", "null"]
+          maxLength: 2000
         createdAt:
           type: string
           format: date-time
@@ -1680,12 +1683,20 @@ components:
           type: ["integer", "null"]
         name:
           type: string
+          minLength: 1
+          maxLength: 120
         email:
           type: string
+          format: email
+          maxLength: 320
         subject:
           type: string
+          minLength: 1
+          maxLength: 200
         message:
           type: string
+          minLength: 1
+          maxLength: 10000
         status:
           type: string
           enum: [open, in_progress, resolved, closed]
@@ -1709,12 +1720,20 @@ components:
           type: ["integer", "null"]
         name:
           type: string
+          minLength: 1
+          maxLength: 120
         email:
           type: string
+          format: email
+          maxLength: 320
         subject:
           type: string
+          minLength: 1
+          maxLength: 200
         message:
           type: string
+          minLength: 1
+          maxLength: 10000
         priority:
           type: string
           enum: [low, medium, high, urgent]

@@ -4,7 +4,7 @@ const config: ExpoConfig = {
   name: "Royal Midnight Driver",
   slug: "royal-midnight-driver",
   scheme: "royalmidnightdriver",
-  version: "1.1.0",
+  version: "1.1.1",
   orientation: "portrait",
   userInterfaceStyle: "dark",
   icon: "./assets/icon.png",
@@ -22,7 +22,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: "com.royalmidnight.driver",
-    versionCode: 2,
+    versionCode: 3,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#0a0a0f",
@@ -35,8 +35,22 @@ const config: ExpoConfig = {
       "FOREGROUND_SERVICE_LOCATION",
     ],
   },
+  updates: {
+    url: "https://u.expo.dev/caed6e0b-2b17-47d6-aaeb-1675e9cda7d4",
+  },
+  runtimeVersion: {
+    policy: "appVersion",
+  },
   plugins: [
     "expo-router",
+    [
+      "expo-build-properties",
+      {
+        android: {
+          buildArchs: ["arm64-v8a"],
+        },
+      },
+    ],
     "expo-secure-store",
     [
       "expo-location",

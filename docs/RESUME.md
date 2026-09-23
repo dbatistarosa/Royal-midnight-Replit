@@ -1,3 +1,26 @@
+## CHECKPOINT 2026-09-20 — deploy final de la remediación continua
+
+La corrección quedó publicada y subida a GitHub en la rama
+`fix/royal-midnight-reliability`, con commits `449194b` y `bf3a99b`. Se corrigió
+el React #418 de hidratación del home eliminando todos los `<a><button>` y se
+aseguró la cadena Metro/Expo con `image-size@2.0.4`,
+`patches/metro@0.84.4.patch` y pnpm `11.7.0` fijado en el proyecto.
+
+Vercel instaló el lockfile congelado en un entorno limpio, aplicó migraciones y
+dejó READY el deployment `dpl_3VWo64nSUmM4r69KfUmEhYkczdS3`. El dominio
+`https://www.royalmidnight.com` sirve la revisión
+`bf3a99b4852b80716f44546d817405e11ab5a936`. Smoke final: home y `/book` 200,
+healthz 200, endpoints protegidos 401 sin sesión, CSP/HSTS/X-Frame-Options
+presentes; navegador sin overlay, sin React #418, sin errores/warnings y con
+`a button = 0`.
+
+El driver app también quedó protegido con error boundary y push nativo
+desactivado hasta configurar APNs/FCM; no se presenta como funcionalidad nativa
+certificada. El export EAS local quedó pendiente por un error de SHA-1 de Metro
+en OneDrive sobre `whatwg-fetch`. Siguen pendientes únicamente las pruebas que
+requieren infraestructura o hardware: EAS/APNs/FCM con dispositivo, E2E
+autenticada Stripe TEST/GPS/Realtime y restauración/RLS/pg_net de Supabase.
+
 ## VERIFICADO 2026-09-18 — QA autenticada completada y entorno estable
 
 Se reparó el layout de dependencias regenerando únicamente `node_modules` desde
@@ -663,3 +686,61 @@ Commit de trabajo `c3d19cf76ca340427d2e057576894a293217bd31`; PR #14 pasó CI co
 Production Vercel quedó Ready en `https://royal-midnight-49ygv0ko7-dbatistarosas-projects.vercel.app`; dominio `www.royalmidnight.com` sirve revisión `cdf497076dd145a966f60d9377b9fa145cd47495`. Smoke final: healthz 200, payments/config `pk_test_`, cron sin autenticación 401, tracking público responde correctamente para token inválido y consola limpia. Logo transparente visible. No se pudo declarar E2E autenticada de mapa ni permisos nativos móviles porque requieren fixture/dispositivo real.
 
 Siguiente pendiente exacto: fixture QA nueva con Stripe TEST para ejecutar E2E autenticada de conductor → GPS → booking `on_way` → mapa pasajero, prueba física iOS/Android, Realtime con fallback, concierge/preferencias persistentes y scanners SAST dedicados si se instalan en CI. Uso observado por encima del umbral de pausa; no se consumieron créditos de reset.
+
+## CHECKPOINT 2026-09-20 — auditoría de seguridad y remediación continua
+
+Se corrigieron las fallas encontradas en la auditoría de seguimiento: propinas
+idempotentes con CAS/metadata, reseñas con propietario y rating canónico,
+vehículos protegidos, transacciones de `bookingAction` realmente compartidas,
+reset/setup tokens hasheados, step-up para datos bancarios con auditoría durable,
+re-cifrado lazy de payout legacy, TLS inseguro bloqueado fuera de desarrollo,
+validación de soporte y push notifications nativas.
+
+También se añadió la migración
+`supabase/migrations/20260920153000_sensitive_action_hardening.sql` y Vercel la
+aplicó durante el build de producción. El deployment
+`dpl_71ipxfqQioLChXTLsGLsxpUCdfS8` quedó READY y el dominio
+`https://www.royalmidnight.com` fue actualizado. La documentación detallada está en
+`docs/ROYAL-MIDNIGHT-AUDIT-2026-09-20-REMEDIATION.md`.
+
+Verificado localmente: tests API 31/221, web 1/3, typecheck, build completo,
+SCA high gate con 2 excepciones documentadas y `git diff --check`. Pendiente:
+QA E2E Stripe TEST, build EAS con APNs/FCM, dispositivo físico y controles
+Supabase operativos.
+
+## CHECKPOINT 2026-09-19 — remediación CN-003 a CN-006 y SCA
+
+Se continuó desde `AUDIT-COMPLETA-2026-09-18.md` y se corrigieron los siguientes
+hallazgos sin desplegar a producción: las respuestas de autenticación web ya no
+exponen bearer tokens; el driver app opta explícitamente con `X-RM-Client:
+driver-app`; las mutaciones con cookie exigen Origin/Referer confiable; el
+escape hatch de cron solo funciona en desarrollo local; y
+`payments/find-booking` exige sesión propietaria/admin o el tracking token,
+además de rate limit y respuesta sin caché. Se actualizó el contrato OpenAPI y
+los tipos generados, y la recuperación 3DS admin envía la cookie HttpOnly.
+
+La auditoría SCA con registro quedó en 0 críticas, 0 moderadas y 2 altas ya
+cubiertas por las excepciones documentadas del proyecto. Se fijó
+`decode-uri-component@0.5.0` y se restauraron los binarios Windows opcionales de
+Lightning CSS/Tailwind Oxide para que el build local sea reproducible.
+
+Verificación: `pnpm test` PASS (31 suites/221 pruebas API y 1 suite/3 pruebas
+web), `pnpm typecheck` PASS, `pnpm build` PASS completo, y `git diff --check`
+PASS. Stripe continúa en TEST; no se usaron créditos de reset, no se tocaron
+datos externos y no se hizo deploy. El siguiente paso sigue siendo QA E2E con
+fixture TEST autenticada y dispositivo físico, antes de considerar producción.
+## CHECKPOINT 2026-09-20 — residuo SCA cerrado
+
+La revisión de seguimiento eliminó la última excepción de dependencias: Metro
+resuelve `image-size@2.0.4` mediante el override raíz y se retiró `auditConfig`
+con los dos GHSA ignorados. Se verificó que la versión 2.0.4 conserva la API
+default que Metro consume y que calcula correctamente una imagen PNG de 1×1.
+
+Verificación posterior: `pnpm install --frozen-lockfile`, `pnpm typecheck`,
+`pnpm test` (31 suites API/221 pruebas y 1 suite web/3 pruebas), `pnpm build` y
+`pnpm audit --prod --audit-level high` PASS; este último devuelve
+`No known vulnerabilities found`. El cambio está listo para commit, push y un
+nuevo deploy de producción. Siguen pendientes únicamente las pruebas que
+requieren infraestructura externa o hardware: EAS/APNs/FCM con dispositivo,
+E2E autenticada Stripe TEST/GPS/Realtime y ensayo operativo de restauración,
+RLS/pg_net de Supabase.

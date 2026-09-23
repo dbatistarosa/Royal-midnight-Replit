@@ -80,7 +80,10 @@ export default function BookingConfirmation() {
     // is itself unguessable and only the payer has it.
     void (async () => {
       try {
-        const lookup = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`);
+        const lookup = await fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`, {
+          credentials: "include",
+          headers: routeTokenIsValid ? { "X-Booking-Tracking-Token": routeToken } : undefined,
+        });
         if (!lookup.ok) return;
         const { bookingId, trackingToken } = await lookup.json() as { bookingId?: number; trackingToken?: string | null };
         if (trackingToken) setRecoveredToken(trackingToken);
@@ -148,12 +151,12 @@ export default function BookingConfirmation() {
         <h1 className="text-3xl font-serif text-white mb-4">Booking Not Found</h1>
         <p className="text-gray-400 mb-8">We couldn't locate this reservation. It may still be processing.</p>
         <div className="flex flex-col sm:flex-row gap-4">
-          <Link href={viewBookingsHref}>
-            <Button className="bg-primary text-black rounded-none uppercase tracking-widest text-xs">View My Bookings</Button>
-          </Link>
-          <Link href="/">
-            <Button variant="outline" className="border-white/20 text-white hover:bg-white hover:text-black rounded-none uppercase tracking-widest text-xs">Return Home</Button>
-          </Link>
+          <Button asChild className="bg-primary text-black rounded-none uppercase tracking-widest text-xs">
+            <Link href={viewBookingsHref}>View My Bookings</Link>
+          </Button>
+          <Button asChild variant="outline" className="border-white/20 text-white hover:bg-white hover:text-black rounded-none uppercase tracking-widest text-xs">
+            <Link href="/">Return Home</Link>
+          </Button>
         </div>
       </div>
     );
@@ -176,16 +179,16 @@ export default function BookingConfirmation() {
               <h1 className="text-2xl sm:text-4xl font-serif text-white mb-2">Booking Cancelled</h1>
               <p className="text-gray-400 text-base mb-8">This reservation has been cancelled. Please contact us if you have any questions.</p>
               <div className="flex flex-col sm:flex-row justify-center gap-4 mb-8">
-                <Link href="/book">
-                  <Button className="w-full sm:w-auto bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                <Button asChild className="w-full sm:w-auto bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                  <Link href="/book">
                     Book Again
-                  </Button>
-                </Link>
-                <Link href="/">
-                  <Button variant="outline" className="w-full sm:w-auto border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                  </Link>
+                </Button>
+                <Button asChild variant="outline" className="w-full sm:w-auto border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                  <Link href="/">
                     Return Home
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </div>
             </>
           ) : (
@@ -343,16 +346,16 @@ export default function BookingConfirmation() {
               )}
 
               <div className="flex flex-col sm:flex-row justify-center gap-4">
-                <Link href="/passenger/rides">
-                  <Button className="w-full sm:w-auto bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                <Button asChild className="w-full sm:w-auto bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                  <Link href="/passenger/rides">
                     View My Bookings
-                  </Button>
-                </Link>
-                <Link href="/">
-                  <Button variant="outline" className="w-full sm:w-auto border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                  </Link>
+                </Button>
+                <Button asChild variant="outline" className="w-full sm:w-auto border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+                  <Link href="/">
                     Return Home
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </div>
             </>
           )}

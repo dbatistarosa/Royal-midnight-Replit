@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { rows } from "./durability.js";
+import { rows, type Transaction } from "./durability.js";
 import { sendExtraTimeChargedEmail } from "./mailer.js";
 import { withMailScope, withMailTransaction } from "./mailOutbox.js";
 import type { AddonOperation, AddonSnapshot } from "./addonOperation.js";
@@ -28,11 +28,11 @@ export async function overtimeOperation(bookingId: number, charge: AddonSnapshot
 }
 
 /** Caller holds payment:<bookingId>. The confirmed payment, totals and receipt commit together. */
-export async function settleOvertime(op: AddonOperation, paymentIntentId: string) {
+export async function settleOvertime(op: AddonOperation, paymentIntentId: string, existingTx?: Transaction) {
   const charge = op.snapshot.charge;
   const minutes = op.snapshot.overtimeMinutes;
   if (!Number.isFinite(minutes) || minutes! < 0) throw new Error('Overtime duration needs review');
-  return db.transaction(async tx => {
+  const settle = async (tx: Transaction) => {
     const [booking] = rows<{passenger_name:string;passenger_email:string;total_price:string}>(await tx.execute(sql`
       UPDATE bookings SET extra_charge=${charge.total}, total_price=price_quoted+${charge.total},
         overage_fare=${charge.fare}, overage_tax=${charge.taxAmount},
@@ -50,5 +50,6 @@ export async function settleOvertime(op: AddonOperation, paymentIntentId: string
     await tx.execute(sql`UPDATE booking_adjustments SET response=${JSON.stringify(response)}::jsonb,
       applied_at=now() WHERE id=${op.id} AND payment_intent_id=${paymentIntentId}`);
     return response;
-  });
+  };
+  return existingTx ? settle(existingTx) : db.transaction(settle);
 }

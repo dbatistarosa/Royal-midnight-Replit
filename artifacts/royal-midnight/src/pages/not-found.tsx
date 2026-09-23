@@ -12,16 +12,16 @@ export default function NotFound() {
           Let us guide you back.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <Link href="/">
-            <Button className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-10 py-6 rounded-none w-full sm:w-auto">
+          <Button asChild className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-10 py-6 rounded-none w-full sm:w-auto">
+            <Link href="/">
               Return Home
-            </Button>
-          </Link>
-          <Link href="/book">
-            <Button variant="outline" className="border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-10 py-6 rounded-none w-full sm:w-auto">
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-xs px-10 py-6 rounded-none w-full sm:w-auto">
+            <Link href="/book">
               Reserve a Ride
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </div>
     </div>

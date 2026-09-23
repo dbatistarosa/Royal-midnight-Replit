@@ -26,8 +26,8 @@ type Completion = {
 };
 
 /** The CAS, counter, money breakdown and retryable notification commit together. */
-export async function commitTripCompletion(input: Completion) {
-  return db.transaction(async tx => {
+export async function commitTripCompletion(input: Completion, existingTx?: Transaction) {
+  const commit = async (tx: Transaction) => {
     const [updated] = await tx.update(bookingsTable).set({
       status: "completed", tripEndedAt: input.endedAt,
       extraCharge: String(input.extraCharge), totalPrice: String(input.totalPrice),
@@ -42,7 +42,8 @@ export async function commitTripCompletion(input: Completion) {
     }
     await recordTripCompletion(tx, updated);
     return updated;
-  });
+  };
+  return existingTx ? commit(existingTx) : db.transaction(commit);
 }
 
 /** Invoked under the worker's payment lock and stable mail deduplication scope. */

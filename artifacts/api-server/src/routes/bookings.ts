@@ -5,7 +5,7 @@ import { withMailScope, withMailTransaction } from "../lib/mailOutbox.js";
 import { commitTripCompletion, recordTripCompletion } from "../lib/tripCompletion.js";
 import { enqueueBookingNotification } from "../lib/bookingJobs.js";
 import { ValidatedBookingBody } from "../lib/bookingInput.js";
-import { bookingAction, withLock, setActor, rows } from "../lib/durability.js";
+import { bookingAction, withLock, lockInTransaction, setActor, rows, type Transaction } from "../lib/durability.js";
 import { tripConflicts, tripDurationMinutes, vehicleClassCovers, vehicleFits, type TripWindowInput } from "../lib/scheduling.js";
 import { Router, type IRouter } from "express";
 import crypto from "node:crypto";
@@ -161,10 +161,10 @@ function isUndefinedColumn(err: unknown): boolean {
 
 const parseBooking = serializeBooking;
 
-async function loadItineraries(bookingIds: number[]) {
+async function loadItineraries(bookingIds: number[], executor: Pick<typeof db, 'select'> = db) {
   const grouped = new Map<number, Array<typeof bookingItineraryStopsTable.$inferSelect>>();
   if (bookingIds.length === 0) return grouped;
-  const rows = await db.select().from(bookingItineraryStopsTable)
+  const rows = await executor.select().from(bookingItineraryStopsTable)
     .where(inArray(bookingItineraryStopsTable.bookingId, bookingIds))
     .orderBy(bookingItineraryStopsTable.bookingId, bookingItineraryStopsTable.sequence);
   for (const row of rows) grouped.set(row.bookingId, [...(grouped.get(row.bookingId) ?? []), row]);
@@ -1721,7 +1721,7 @@ router.get(
   },
 );
 
-router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Promise<void> => {
+router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
   const params = UpdateBookingParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -1734,7 +1734,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
     return;
   }
 
-  const [before] = await db
+  const [before] = await tx
     .select()
     .from(bookingsTable)
     .where(eq(bookingsTable.id, params.data.id));
@@ -1750,7 +1750,8 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
 
   if(!before){res.status(404).json({error:'Booking not found'});return;}
   if(parsed.data.status==='cancelled'){res.status(409).json({error:'Use the cancellation action so refunds are recorded.'});return;}
-  const booking=await withLock('driver-schedule:'+(updateData.driverId??before.driverId??'unassigned'),async tx=>{
+  await lockInTransaction(tx, 'driver-schedule:'+(updateData.driverId??before.driverId??'unassigned'));
+  const booking = await (async () => {
     await setActor(tx,req.currentUser!.userId);
     const assigning=parsed.data.driverId!==undefined||parsed.data.vehicleId!==undefined;
     const nextDriverId=parsed.data.driverId!==undefined?parsed.data.driverId:before.driverId;
@@ -1778,7 +1779,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
       await recordTripCompletion(tx, updated);
     }
     return updated;
-  });
+  })();
 
   if (!booking) {
     res.status(404).json({ error: "Booking not found" });
@@ -1869,7 +1870,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
 router.post(
   "/bookings/:id/accept",
   requireAuth,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) {
       res.status(400).json({ error: "Invalid booking id" });
@@ -1891,7 +1892,7 @@ router.post(
       return;
     }
 
-    const byUserId = await db
+    const byUserId = await tx
       .select({
         id: driversTable.id,
         approvalStatus: driversTable.approvalStatus,
@@ -1943,7 +1944,7 @@ router.post(
     // Hiding the trip from their pool is presentation; this is the control. A
     // driver who lost this booking for not confirming can still POST the id.
     const [blocked] = (await hasDriverBlockTable())
-      ? await db
+      ? await tx
           .select({ id: bookingDriverBlocksTable.id })
           .from(bookingDriverBlocksTable)
           .where(
@@ -1970,7 +1971,7 @@ router.post(
       return;
     }
 
-    const [booking] = await db
+    const [booking] = await tx
       .select()
       .from(bookingsTable)
       .where(eq(bookingsTable.id, id));
@@ -2025,7 +2026,7 @@ router.post(
     // Re-check busy windows even though the open-pool query already filtered them.
     // This guards against race conditions where a driver accepts another trip between
     // loading the list and tapping Accept.
-    const busyWindows = await getDriverBusyWindows(driverRow.id);
+    const busyWindows = await getDriverBusyWindows(driverRow.id, tx);
     if (hasConflict(booking, busyWindows)) {
       res.status(409).json({
         error:
@@ -2036,7 +2037,8 @@ router.post(
     }
 
     // Serialize by driver: a row-level CAS alone protects the booking, not the agenda.
-    const result = await withLock('driver-schedule:'+driverRow.id, async tx => {
+    await lockInTransaction(tx, 'driver-schedule:'+driverRow.id);
+    const result = await (async () => {
       await setActor(tx, caller.userId);
       const windows = await getDriverBusyWindows(driverRow.id,tx);
       if (hasConflict(booking,windows)) return {error:'This trip conflicts with your schedule',booking:null};
@@ -2050,7 +2052,7 @@ router.post(
         .where(and(eq(bookingsTable.id,id),isNull(bookingsTable.driverId),inArray(bookingsTable.status,['pending','authorized','confirmed'])))
         .returning();
       return {error:updated?null:'Booking was taken or cancelled. Refresh your trips.',booking:updated??null};
-    });
+    })();
     if(!result.booking){res.status(409).json({error:result.error});return;}
     const updated=result.booking;
 
@@ -2081,7 +2083,7 @@ router.post(
         const actual=await getStripe().paymentIntents.retrieve(booking.stripePaymentIntentId!).catch(()=>null);
         if(actual?.status!=='succeeded'){
           const retryable=!actual||['requires_capture','processing'].includes(actual.status);
-          await db.update(bookingsTable).set({driverId:null,vehicleId:null,status:retryable?'authorized':'awaiting_payment',
+          await tx.update(bookingsTable).set({driverId:null,vehicleId:null,status:retryable?'authorized':'awaiting_payment',
             authorizedAt:retryable?booking.authorizedAt:null,updatedAt:new Date()}).where(and(eq(bookingsTable.id,id),eq(bookingsTable.status,'confirmed')));
           res.status(retryable?503:402).json({error:retryable?'Payment confirmation is pending. Please retry acceptance shortly.':'Payment could not be captured. Please contact the admin.',captureError:true});
           return;
@@ -2195,6 +2197,7 @@ async function resolveAssignedDriver(
   req: import("express").Request,
   res: import("express").Response,
   bookingId: number,
+  executor: Pick<typeof db, 'select'> = db,
 ): Promise<{
   booking: typeof bookingsTable.$inferSelect;
   driverRow: { id: number };
@@ -2207,7 +2210,7 @@ async function resolveAssignedDriver(
 
   // ORDER BY total_rides DESC so we always get the canonical (most-active) record
   // when a driver has multiple records linked to the same userId.
-  const driverRows = await db
+  const driverRows = await executor
     .select({ id: driversTable.id })
     .from(driversTable)
     .where(eq(driversTable.userId, caller.userId))
@@ -2219,7 +2222,7 @@ async function resolveAssignedDriver(
     return null;
   }
 
-  const [booking] = await db
+  const [booking] = await executor
     .select()
     .from(bookingsTable)
     .where(eq(bookingsTable.id, bookingId));
@@ -2560,14 +2563,14 @@ router.post(
 router.post(
   "/bookings/:id/trip/complete",
   requireAuth,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) {
       res.status(400).json({ error: "Invalid booking id" });
       return;
     }
 
-    const resolved = await resolveAssignedDriver(req, res, id);
+    const resolved = await resolveAssignedDriver(req, res, id, tx);
     if (!resolved) return;
     const { booking, driverRow } = resolved;
 
@@ -2583,7 +2586,7 @@ router.post(
     }
 
     if (booking.charterMode === "hourly") {
-      const itinerary = (await loadItineraries([id])).get(id) ?? [];
+      const itinerary = (await loadItineraries([id], tx)).get(id) ?? [];
       const finalDestination = itinerary.find(stop => stop.kind === "final");
       if (!finalDestination?.arrivedAt) {
         res.status(409).json({ error: "Arrive at the final destination before completing this hourly trip" });
@@ -2639,7 +2642,7 @@ router.post(
       bookingId: id, driverId: driverRow.id, endedAt, extraCharge, totalPrice,
       breakdown: !useManual && (overage.reason === "overage" || overage.overtimeMinutes > 0)
         ? { ...charge, minutes: overage.overtimeMinutes } : undefined,
-    });
+    }, tx);
 
     if (!updated) {
       res
@@ -2667,7 +2670,7 @@ router.post(
         req.log,
       );
       if (payment) {
-        await settleOvertime(payment.operation, payment.paymentIntentId);
+        await settleOvertime(payment.operation, payment.paymentIntentId, tx);
         overagePaymentIntentId = payment.paymentIntentId;
       }
     }
@@ -2701,7 +2704,7 @@ router.post(
 router.post(
   "/bookings/:id/collect-extra-time",
   requireAdmin,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     // String(...) because Express 5 types params as string | string[]. Most of
     // this file predates that and carries the resulting type error; no reason to
     // add another.
@@ -2711,7 +2714,7 @@ router.post(
       return;
     }
 
-    const [booking] = await db
+    const [booking] = await tx
       .select()
       .from(bookingsTable)
       .where(eq(bookingsTable.id, id));
@@ -2883,7 +2886,7 @@ router.post(
 router.post(
   "/admin/bookings/:id/extras",
   requireAdmin,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
@@ -2898,7 +2901,7 @@ router.post(
     const hash=addonRequestHash(parsed.data.method,parsed.data.extras);
     let operation=await loadAddonOperation(operationId,id,hash);
     if(operation?.response){res.json({...operation.response,extras:await loadExtrasFor(id)});return;}
-    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
+    const [booking] = await tx.select().from(bookingsTable).where(eq(bookingsTable.id, id));
     if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
     if (booking.status === "cancelled") {
       res.status(400).json({ error: "This booking is cancelled." });
@@ -2929,7 +2932,7 @@ router.post(
     if(parsed.data.method==='card')paymentIntentId=await payAddonCard(stripe,operation,await findCardOnFile(booking.userId));
     else ({invoiceUrl,invoicePdfUrl}=await invoiceAddon(stripe,operation,{email:booking.passengerEmail,name:booking.passengerName}));
 
-    const result=await db.transaction(async tx=>{
+    const result=await (async()=>{
       await tx.insert(bookingExtrasTable).values(priced.map(e=>({bookingId:id,extraServiceId:e.id,quantity:e.quantity,priceAtBooking:String(e.price)})));
       const [updated]=await tx.update(bookingsTable).set({
         priceQuoted:sql`${bookingsTable.priceQuoted} + ${charge.total}`,
@@ -2948,7 +2951,7 @@ router.post(
       const response={ok:true,booking:parseBooking(updated),method:parsed.data.method,paymentIntentId,invoiceUrl,charge};
       await tx.execute(sql`UPDATE booking_adjustments SET response=${JSON.stringify(response)}::jsonb,applied_at=now() WHERE id=${operationId}`);
       return response;
-    });
+    })();
     res.json({...result,extras:await loadExtrasFor(id)});
   }),
 );
@@ -2959,7 +2962,7 @@ router.post(
 router.post(
   "/bookings/:id/extend-charter",
   requireAuth,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
     const caller = req.currentUser!;
@@ -2973,7 +2976,7 @@ router.post(
     let operation=await loadAddonOperation(operationId,id,hash);
     if(operation?.response){res.json(operation.response);return;}
 
-    const [booking]=await db.select().from(bookingsTable).where(eq(bookingsTable.id,id));
+    const [booking]=await tx.select().from(bookingsTable).where(eq(bookingsTable.id,id));
     if(!booking){res.status(404).json({error:'Booking not found'});return;}
     if(booking.userId!==caller.userId){res.status(403).json({error:'Access denied'});return;}
     if(booking.status!=='in_progress'||booking.charterMode!=='hourly'||!booking.tripStartedAt){res.status(409).json({error:'Extra time can only be added while an hourly charter is in progress.'});return;}
@@ -2993,7 +2996,7 @@ router.post(
     if(!Number.isInteger(frozenHours)||!Number.isInteger(frozenPrevious)){res.status(409).json({error:'The saved extension needs review before collection.'});return;}
     const paymentIntentId=await payAddonCard(getStripe(),operation,card,'extra_time');
     const totalHours=frozenPrevious!+frozenHours!;
-    const result=await db.transaction(async tx=>{
+    const result=await (async()=>{
       const [updated]=await tx.update(bookingsTable).set({
         charterHours:totalHours,
         fareSubtotal:sql`coalesce(${bookingsTable.fareSubtotal}, ${bookingsTable.priceQuoted}) + ${operation!.snapshot.charge.fare}`,
@@ -3011,7 +3014,7 @@ router.post(
       const response={ok:true,booking:parseBooking(updated),paymentIntentId,charge:operation!.snapshot.charge};
       await tx.execute(sql`UPDATE booking_adjustments SET response=${JSON.stringify(response)}::jsonb,applied_at=now() WHERE id=${operationId}`);
       return response;
-    });
+    })();
     res.json(result);
   }),
 );

@@ -1,3 +1,9 @@
+import { eq } from "drizzle-orm";
+import { db, driversTable } from "@workspace/db";
+import { parseExpoPushResponse } from "./pushTicketParsing.js";
+
+export { parseExpoPushResponse } from "./pushTicketParsing.js";
+
 /**
  * Expo push notification library — sends directly to Expo's push API, no SDK
  * or API key required for basic sends. Graceful no-op on individual failures
@@ -22,9 +28,38 @@ async function sendExpoPush(messages: ExpoPushMessage[]): Promise<void> {
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(valid),
     });
+    const text = await res.text().catch(() => "");
+    let payload: unknown;
+    try {
+      payload = text ? JSON.parse(text) : undefined;
+    } catch {
+      payload = undefined;
+    }
+
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
       console.error(`[push] Expo push send failed (${res.status}):`, text.slice(0, 300));
+      return;
+    }
+
+    const summary = parseExpoPushResponse(valid, payload);
+    for (const message of summary.errors) {
+      console.error("[push] Expo push ticket error:", message);
+    }
+
+    if (summary.invalidTokens.length > 0) {
+      const cleanup = await Promise.allSettled(
+        summary.invalidTokens.map((pushToken) =>
+          db
+            .update(driversTable)
+            .set({ pushToken: null, pushPlatform: null })
+            .where(eq(driversTable.pushToken, pushToken)),
+        ),
+      );
+      cleanup.forEach((result) => {
+        if (result.status === "rejected") {
+          console.error("[push] failed to clear invalid Expo token:", result.reason);
+        }
+      });
     }
   } catch (err: any) {
     console.error("[push] Expo push send error:", err.message);
