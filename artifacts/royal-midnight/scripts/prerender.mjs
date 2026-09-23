@@ -75,6 +75,7 @@ async function main() {
 
   const vite = await createServer({
     root,
+    mode: "production",
     server: { middlewareMode: "ssr" },
     appType: "custom",
   });
