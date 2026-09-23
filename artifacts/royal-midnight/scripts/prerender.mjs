@@ -73,6 +73,11 @@ function splice(template, path, html) {
 async function main() {
   const template = await readFile(join(outDir, "index.html"), "utf-8");
 
+  // Vite's React plugin selects jsx-dev-runtime from NODE_ENV, and its CJS
+  // implementation expects Node's `module` global. This process is the
+  // production prerender phase, so make that mode explicit before creating
+  // the SSR module runner.
+  process.env.NODE_ENV = "production";
   const vite = await createServer({
     root,
     mode: "production",
