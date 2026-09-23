@@ -34,7 +34,7 @@ jobs:
 
       - name: Install locked workspace dependencies
         working-directory: .
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --config.node-linker=hoisted
 
       - name: Typecheck driver client
         run: pnpm run typecheck
@@ -73,7 +73,7 @@ jobs:
       # the floating ^/~ ranges against the live registry, which meant a new
       # (or compromised) version could reach production without pnpm-lock.yaml
       # changing or anyone reviewing it.
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --config.node-linker=hoisted
 
       - run: pnpm run typecheck
 
