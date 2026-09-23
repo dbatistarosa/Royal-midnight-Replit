@@ -14,7 +14,7 @@
     "start": "expo start",
     "android": "expo start --android",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types --test src/location/locationLifecycle.test.mjs",
+    "test": "node --experimental-strip-types --test src/location/locationLifecycle.test.mjs src/auth/loginValidation.test.mjs",
     "export": "expo export",
     "build:android:preview": "node scripts/build-android-preview.mjs",
     "build:android:qa": "node scripts/build-android-qa.mjs"
