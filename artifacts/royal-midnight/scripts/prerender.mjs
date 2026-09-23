@@ -1,10 +1,11 @@
-import { createServer } from "vite";
+import { build } from "vite";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "dist/public");
+const serverOutDir = join(root, "dist/server");
 
 // Public marketing routes only — mirrors public/sitemap.xml. Portal/auth routes
 // (/admin, /driver, /passenger, /corporate, /auth, /book/:id, /track/:id) are
@@ -73,32 +74,39 @@ function splice(template, path, html) {
 async function main() {
   const template = await readFile(join(outDir, "index.html"), "utf-8");
 
-  // Vite's React plugin selects jsx-dev-runtime from NODE_ENV, and its CJS
-  // implementation expects Node's `module` global. This process is the
-  // production prerender phase, so make that mode explicit before creating
-  // the SSR module runner.
+  // Vite's React plugin selects its production JSX runtime from NODE_ENV.
+  // This process is the production prerender phase, so make that mode
+  // explicit before building the SSR entry.
   process.env.NODE_ENV = "production";
-  const vite = await createServer({
+  // Build the SSR entry as a real production bundle. Loading the source entry
+  // through Vite's development ModuleRunner can create a second React copy in
+  // a pnpm workspace; a production SSR bundle uses one Node module graph.
+  await build({
+    configFile: join(root, "vite.config.ts"),
     root,
     mode: "production",
-    server: { middlewareMode: "ssr" },
-    appType: "custom",
+    build: {
+      ssr: "src/entry-server.tsx",
+      outDir: serverOutDir,
+      emptyOutDir: true,
+      rollupOptions: {
+        output: { entryFileNames: "entry-server.js" },
+      },
+    },
   });
 
-  try {
-    const { render } = await vite.ssrLoadModule("/src/entry-server.tsx");
+  const { render } = await import(
+    `${pathToFileURL(join(serverOutDir, "entry-server.js")).href}?v=${Date.now()}`,
+  );
 
-    for (const route of ROUTES) {
-      const { html } = await render(route);
-      const page = splice(template, route, html);
+  for (const route of ROUTES) {
+    const { html } = await render(route);
+    const page = splice(template, route, html);
 
-      const outPath = route === "/" ? join(outDir, "index.html") : join(outDir, route.slice(1), "index.html");
-      await mkdir(dirname(outPath), { recursive: true });
-      await writeFile(outPath, page, "utf-8");
-      console.log(`prerendered ${route} -> ${outPath.replace(root, "")}`);
-    }
-  } finally {
-    await vite.close();
+    const outPath = route === "/" ? join(outDir, "index.html") : join(outDir, route.slice(1), "index.html");
+    await mkdir(dirname(outPath), { recursive: true });
+    await writeFile(outPath, page, "utf-8");
+    console.log(`prerendered ${route} -> ${outPath.replace(root, "")}`);
   }
 }
 
