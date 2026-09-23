@@ -12,6 +12,44 @@ permissions:
   contents: read
 
 jobs:
+  driver-app-v2:
+    name: Driver Android client quality gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: artifacts/driver-app-v2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked workspace dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck driver client
+        run: pnpm run typecheck
+
+      - name: Run driver client unit tests
+        run: pnpm test
+
+      - name: Verify Android export and resolved native configuration
+        env:
+          EXPO_PUBLIC_API_BASE_URL: https://www.royalmidnight.com/api
+        run: |
+          pnpm exec expo export --platform android --no-bytecode --no-minify --output-dir dist-android-ci
+          pnpm exec expo config --json > dist-android-ci/expo-config.json
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('dist-android-ci/expo-config.json','utf8'));const a=c.android?.buildArchs ?? c._internal?.pluginHistory?.find?.(()=>false);if(c.android?.package !== 'com.royalmidnight.driver') throw new Error('Unexpected Android package');if(c.extra?.apiBaseUrl !== 'https://www.royalmidnight.com/api') throw new Error('Unexpected API base URL');if(!JSON.stringify(c).includes('x86_64')) throw new Error('x86_64 ABI is not present in resolved config');console.log({package:c.android.package,api:c.extra.apiBaseUrl,buildArchs:c.android.buildArchs ?? 'declared by plugin'});"
+
   typecheck-and-test:
     runs-on: ubuntu-latest
     steps:

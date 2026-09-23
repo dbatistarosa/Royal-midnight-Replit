@@ -1,16 +1,21 @@
 import type { ExpoConfig } from "expo/config";
 
+const publicApi = "https://www.royalmidnight.com/api";
+// The file is intentionally opt-in. EAS does not upload ignored local files;
+// production/preview builds must provide it through an EAS file variable.
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
+
 const config: ExpoConfig = {
   name: "Royal Midnight Driver",
   slug: "royal-midnight-driver",
   scheme: "royalmidnightdriver",
-  version: "1.1.1",
+  version: "2.0.0",
   orientation: "portrait",
   userInterfaceStyle: "dark",
   icon: "./assets/icon.png",
   ios: {
     bundleIdentifier: "com.royalmidnight.driver",
-    buildNumber: "1",
+    buildNumber: "2",
     supportsTablet: false,
     infoPlist: {
       NSLocationWhenInUseUsageDescription:
@@ -22,7 +27,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: "com.royalmidnight.driver",
-    versionCode: 3,
+    ...(googleServicesFile ? { googleServicesFile } : {}),
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#0a0a0f",
@@ -33,25 +38,21 @@ const config: ExpoConfig = {
       "ACCESS_BACKGROUND_LOCATION",
       "FOREGROUND_SERVICE",
       "FOREGROUND_SERVICE_LOCATION",
+      "POST_NOTIFICATIONS",
     ],
   },
   updates: {
     url: "https://u.expo.dev/caed6e0b-2b17-47d6-aaeb-1675e9cda7d4",
   },
-  runtimeVersion: {
-    policy: "appVersion",
-  },
+  runtimeVersion: { policy: "appVersion" },
   plugins: [
     "expo-router",
     [
       "expo-build-properties",
-      {
-        android: {
-          buildArchs: ["arm64-v8a"],
-        },
-      },
+      { android: { buildArchs: ["arm64-v8a", "x86_64"] } },
     ],
     "expo-secure-store",
+    "expo-notifications",
     [
       "expo-location",
       {
@@ -61,14 +62,11 @@ const config: ExpoConfig = {
     ],
     [
       "expo-splash-screen",
-      {
-        image: "./assets/splash.png",
-        backgroundColor: "#0a0a0f",
-      },
+      { image: "./assets/splash.png", backgroundColor: "#0a0a0f" },
     ],
   ],
   extra: {
-    apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://royalmidnight.com/api",
+    apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? publicApi,
     eas: {
       projectId: process.env.EAS_PROJECT_ID ?? "caed6e0b-2b17-47d6-aaeb-1675e9cda7d4",
     },

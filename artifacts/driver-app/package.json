@@ -22,6 +22,7 @@
     "date-fns": "^3.6.0",
     "expo": "~56.0.12",
     "expo-constants": "~56.0.18",
+    "expo-build-properties": "~56.0.19",
     "expo-font": "~56.0.7",
     "expo-image": "~56.0.11",
     "expo-image-picker": "~56.0.18",
