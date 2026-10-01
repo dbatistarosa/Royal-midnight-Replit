@@ -5,11 +5,11 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        background: "#0a0a0f",
-        surface: "#1a1a2e",
-        border: "#27272a",
-        gold: "#c9a84c",
-        muted: "#9ca3af",
+        background: "#060d1b",
+        surface: "#0d1829",
+        border: "#263b57",
+        gold: "#d4af52",
+        muted: "#9caabe",
         // Kept in sync with src/theme/colors.ts. These three were missing
         // entirely, so every className using text-danger/bg-success/
         // border-warning etc. silently dropped the class (not a registered

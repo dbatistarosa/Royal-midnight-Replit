@@ -129,12 +129,12 @@ export async function runComplianceEnforcement(): Promise<void> {
     const now = new Date();
     if (now.getHours() !== 0 || now.getMinutes() > 5) return;
 
-    const { driversTable, bookingsTable, complianceDocumentsTable } = await import("@workspace/db");
+    const { driversTable, bookingsTable, complianceDocumentsTable, notificationsTable } = await import("@workspace/db");
     const { sendComplianceLockoutAdmin } = await import("./mailer.js");
     const todayStr = now.toISOString().slice(0, 10);
 
     const drivers = await db.select({
-      id: driversTable.id, name: driversTable.name, email: driversTable.email,
+      id: driversTable.id, userId: driversTable.userId, name: driversTable.name, email: driversTable.email,
       complianceHold: driversTable.complianceHold,
       licenseExpiry: driversTable.licenseExpiry,
       regExpiry: driversTable.regExpiry,
@@ -142,6 +142,15 @@ export async function runComplianceEnforcement(): Promise<void> {
     }).from(driversTable);
 
     for (const driver of drivers) {
+      const todaysReminders = driver.userId == null
+        ? []
+        : await db.select({ message: notificationsTable.message })
+          .from(notificationsTable)
+          .where(and(
+            eq(notificationsTable.userId, driver.userId),
+            eq(notificationsTable.type, "compliance_reminder"),
+            sql`created_at::date = CURRENT_DATE`,
+          ));
       const docChecks = [
         { label: "Driver License", expiry: driver.licenseExpiry },
         { label: "Vehicle Registration", expiry: driver.regExpiry },
@@ -149,7 +158,22 @@ export async function runComplianceEnforcement(): Promise<void> {
       ];
 
       for (const { label, expiry } of docChecks) {
-        if (!expiry || expiry > todayStr) continue;
+        if (!expiry) continue;
+        const daysRemaining = Math.floor((new Date(`${expiry}T00:00:00Z`).getTime() - new Date(`${todayStr}T00:00:00Z`).getTime()) / 86_400_000);
+        if (daysRemaining > 30) continue;
+
+        if (driver.userId != null && !todaysReminders.some((notice) => notice.message.includes(label))) {
+          await db.insert(notificationsTable).values({
+            userId: driver.userId,
+            title: daysRemaining < 0 ? "Compliance document expired" : "Compliance document expiring soon",
+            message: daysRemaining < 0
+              ? `${label} has expired. Upload a new document immediately to avoid or clear a compliance hold.`
+              : `${label} expires in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"}. Upload the new document from Documents.`,
+            type: "compliance_reminder",
+          });
+        }
+
+        if (expiry > todayStr) continue;
 
         const [approved] = await db.select({ id: complianceDocumentsTable.id })
           .from(complianceDocumentsTable)

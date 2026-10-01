@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle, Navigation, LocateFixed, Star, BarChart2 } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, Download, Calendar as CalendarIcon, CreditCard, ChevronLeft, Loader2, AlertTriangle, XCircle, CheckCircle, Navigation, LocateFixed, Star, BarChart2, X } from "lucide-react";
 import { generateInvoicePdf } from "@/lib/generateInvoicePdf";
 import { Link, useParams, useLocation } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
@@ -49,6 +49,7 @@ type BookingDetail = {
   extraCharge?: number | null;
   overageMinutes?: number | null;
   receipt?: StoredReceipt | null;
+  itinerary?: Array<{ id?: number; sequence: number; kind: "stop" | "final" | string; address: string; arrivedAt?: string | null; departedAt?: string | null }>;
 };
 
 const TONE_CLASS: Record<string, string> = {
@@ -327,6 +328,7 @@ function PassengerRideDetailInner() {
         vehicleClass: booking.vehicleClass,
         passengers: booking.passengers,
         flightNumber: booking.flightNumber,
+        itinerary: booking.itinerary,
         status: booking.status,
         receipt: buildReceipt({ ...booking, priceQuoted: booking.priceQuoted ?? 0 }),
       });
@@ -360,10 +362,13 @@ function PassengerRideDetailInner() {
     hoursUntilPickup?: number;
     driverName?: string;
     driverPhone?: string;
+    profilePicture?: string | null;
     vehicleDescription?: string;
     regPlate?: string | null;
   };
   const [driverInfo, setDriverInfo] = useState<DriverInfo | null>(null);
+  const [driverPhotoOpen, setDriverPhotoOpen] = useState(false);
+  const [driverPhotoFailed, setDriverPhotoFailed] = useState(false);
 
   // Fetch driver info whenever booking changes and has a driverId
   useEffect(() => {
@@ -375,6 +380,11 @@ function PassengerRideDetailInner() {
       .then(data => setDriverInfo(data))
       .catch(() => {});
   }, [id, token, booking?.driverId, booking?.status]);
+
+  useEffect(() => {
+    setDriverPhotoFailed(false);
+    setDriverPhotoOpen(false);
+  }, [driverInfo?.profilePicture]);
 
   // Rating state — initialized from API once booking loads
   const [ratingValue, setRatingValue] = useState(0);
@@ -682,9 +692,15 @@ function PassengerRideDetailInner() {
                 ) : driverInfo.available ? (
                   <div className="space-y-3">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-                        <span className="text-primary font-serif text-lg">{driverInfo.driverName?.[0] ?? "D"}</span>
-                      </div>
+                      {driverInfo.profilePicture && !driverPhotoFailed ? (
+                        <button type="button" className="w-12 h-12 rounded-full overflow-hidden border border-primary/30 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-primary" onClick={() => setDriverPhotoOpen(true)} aria-label={`Enlarge photo of ${driverInfo.driverName ?? "your chauffeur"}`}>
+                          <img src={`${API_BASE}${driverInfo.profilePicture}`} alt={driverInfo.driverName ?? "Your chauffeur"} className="w-full h-full object-cover" onError={() => setDriverPhotoFailed(true)} />
+                        </button>
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                          <span className="text-primary font-serif text-lg">{driverInfo.driverName?.[0] ?? "D"}</span>
+                        </div>
+                      )}
                       <div>
                         <p className="font-medium">{driverInfo.driverName}</p>
                         <a href={`tel:${driverInfo.driverPhone}`} className="text-sm text-primary hover:underline">{driverInfo.driverPhone}</a>
@@ -715,6 +731,12 @@ function PassengerRideDetailInner() {
                 ) : (
                   <p className="text-sm text-muted-foreground">A driver has been assigned — details coming soon.</p>
                 )}
+                {driverInfo && driverPhotoOpen && driverInfo.profilePicture && !driverPhotoFailed ? (
+                  <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6" role="dialog" aria-modal="true" aria-label="Enlarged chauffeur photo" onClick={() => setDriverPhotoOpen(false)}>
+                    <button type="button" className="absolute top-5 right-5 text-white p-2" onClick={() => setDriverPhotoOpen(false)} aria-label="Close photo"><X className="w-6 h-6" /></button>
+                    <img src={`${API_BASE}${driverInfo.profilePicture}`} alt={driverInfo.driverName ?? "Your chauffeur"} className="max-w-full max-h-[80vh] object-contain border border-primary/40" onClick={event => event.stopPropagation()} />
+                  </div>
+                ) : null}
               </div>
             )}
 
@@ -735,10 +757,22 @@ function PassengerRideDetailInner() {
                     <div className="font-medium">{booking.pickupAddress}</div>
                   </div>
                 </div>
+                {[...(booking.itinerary ?? [])]
+                  .filter((point) => point.kind === "stop")
+                  .sort((left, right) => left.sequence - right.sequence)
+                  .map((point, index) => (
+                    <div key={`${point.sequence}-${point.address}`} className="relative flex items-start gap-4">
+                      <div className="bg-muted-foreground w-4 h-4 rounded-full relative z-10 mt-1 flex-shrink-0" />
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Stop {index + 1}</div>
+                        <div className="font-medium">{point.address}</div>
+                      </div>
+                    </div>
+                  ))}
                 <div className="relative flex items-start gap-4">
                   <div className="bg-muted-foreground w-4 h-4 rounded-full relative z-10 mt-1 flex-shrink-0" />
                   <div>
-                    <div className="text-xs text-muted-foreground mb-1">Drop-off</div>
+                    <div className="text-xs text-muted-foreground mb-1">Final destination</div>
                     <div className="font-medium">{booking.dropoffAddress}</div>
                   </div>
                 </div>
@@ -808,6 +842,19 @@ function PassengerRideDetailInner() {
                   <CreditCard className="w-4 h-4 text-muted-foreground" />
                 </h2>
                 <div className="space-y-3 text-sm mb-5">
+                  {(booking.itinerary ?? []).some((point) => point.kind === "stop") && (
+                    <div className="border-b border-border pb-3 space-y-1">
+                      <p className="text-xs text-muted-foreground uppercase tracking-widest">Itinerary</p>
+                      {[(booking.itinerary ?? []).find((point) => point.kind === "stop") ? { label: "Pickup", address: booking.pickupAddress } : null]
+                        .filter(Boolean)
+                        .map((point) => <p key={point!.label}><span className="text-muted-foreground">{point!.label}:</span> {point!.address}</p>)}
+                      {[...(booking.itinerary ?? [])]
+                        .filter((point) => point.kind === "stop")
+                        .sort((left, right) => left.sequence - right.sequence)
+                        .map((point, index) => <p key={`${point.sequence}-${point.address}`}><span className="text-muted-foreground">Stop {index + 1}:</span> {point.address}</p>)}
+                      <p><span className="text-muted-foreground">Final destination:</span> {booking.dropoffAddress}</p>
+                    </div>
+                  )}
                   {receipt.lines.map(line => (
                     <div key={line.label} className={`flex justify-between ${line.tone ? TONE_CLASS[line.tone] : ""}`}>
                       <span className={line.tone ? "" : "text-muted-foreground"}>

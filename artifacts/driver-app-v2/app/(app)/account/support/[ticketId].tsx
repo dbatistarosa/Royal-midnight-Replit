@@ -7,12 +7,13 @@ import { useTicketMessages, usePostTicketMessage } from "@/api/hooks";
 import { ScreenContainer } from "@/components/ScreenContainer";
 import { Card } from "@/components/Card";
 import { GoldButton } from "@/components/GoldButton";
+import { EmptyState } from "@/components/DriverUI";
 
 export default function TicketThreadScreen() {
   const { ticketId } = useLocalSearchParams<{ ticketId: string }>();
   const id = Number(ticketId);
   const userId = useAuthStore((s) => s.user?.id);
-  const { data: messages } = useTicketMessages(id);
+  const { data: messages, isLoading, isError, refetch } = useTicketMessages(id);
   const postMessage = usePostTicketMessage(id);
   const [reply, setReply] = useState("");
 
@@ -24,6 +25,13 @@ export default function TicketThreadScreen() {
     } catch {
       Alert.alert("Couldn't send", "Please check your connection and try again.");
     }
+  }
+
+  if (isLoading) {
+    return <ScreenContainer><EmptyState loading title="Loading conversation" message="Retrieving messages from support." /></ScreenContainer>;
+  }
+  if (isError) {
+    return <ScreenContainer><EmptyState title="Couldn't load conversation" message="Check your connection and try again." onRetry={() => void refetch()} /></ScreenContainer>;
   }
 
   return (

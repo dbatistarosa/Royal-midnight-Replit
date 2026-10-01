@@ -199,6 +199,48 @@ export function computeFareBreakdown(params: {
   };
 }
 
+/** Apply a customer promotion to the eligible subtotal before any government
+ * tax or card-processing charge is calculated. The caller retains the
+ * original fare breakdown separately; chauffeur commission is never derived
+ * from this discounted customer charge. */
+export function computeDiscountedCharge(params: {
+  taxableSubtotal: number;
+  maxDiscountableSubtotal?: number;
+  discountAmount: number;
+  taxRate: number;
+  cardProcessingFeeRate: number;
+}): {
+  discountAmount: number;
+  discountedSubtotal: number;
+  taxAmount: number;
+  cardProcessingFee: number;
+  total: number;
+} {
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const taxableSubtotal = round2(Math.max(0, params.taxableSubtotal));
+  const maxDiscountableSubtotal = round2(
+    Math.min(
+      taxableSubtotal,
+      Math.max(0, params.maxDiscountableSubtotal ?? taxableSubtotal),
+    ),
+  );
+  const discountAmount = round2(
+    Math.min(maxDiscountableSubtotal, Math.max(0, params.discountAmount)),
+  );
+  const discountedSubtotal = round2(taxableSubtotal - discountAmount);
+  const taxAmount = round2(discountedSubtotal * params.taxRate);
+  const cardProcessingFee = round2(
+    (discountedSubtotal + taxAmount) * params.cardProcessingFeeRate,
+  );
+  return {
+    discountAmount,
+    discountedSubtotal,
+    taxAmount,
+    cardProcessingFee,
+    total: round2(discountedSubtotal + taxAmount + cardProcessingFee),
+  };
+}
+
 /**
  * Tax and card fee on a charge raised after the trip — today, the extra-time
  * charge on an hourly charter that ran long.

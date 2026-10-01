@@ -53,6 +53,28 @@ export interface PassengerPreferences {
   vipNotes?: string | null;
 }
 
+export interface DriverBookingExtra {
+  id: number;
+  name: string;
+  description?: string | null;
+  price: number;
+  quantity: number;
+  paidToDriver?: boolean;
+  driverAmount?: number | null;
+}
+
+export interface DriverItineraryStop {
+  id: number;
+  bookingId: number;
+  sequence: number;
+  kind: "stop" | "final" | string;
+  address: string;
+  lat?: number | string | null;
+  lng?: number | string | null;
+  arrivedAt: string | null;
+  departedAt: string | null;
+}
+
 export type BookingStatus =
   | "pending"
   | "awaiting_payment"
@@ -67,7 +89,7 @@ export type BookingStatus =
 export interface DriverBooking {
   id: number;
   passengerName: string;
-  passengerPhone: string;
+  passengerPhone: string | null;
   pickupAddress: string;
   dropoffAddress: string;
   pickupAt: string;
@@ -84,10 +106,39 @@ export interface DriverBooking {
   checklistCompletedAt: string | null;
   tripStartedAt: string | null;
   tripEndedAt: string | null;
-  extraCharge: number | null;
-  totalPrice: number | null;
   driverId: number | null;
-  passengerPreferences?: PassengerPreferences;
+  passengerPreferences?: PassengerPreferences | null;
+  passengerEmail?: string | null;
+  extras?: DriverBookingExtra[];
+  itinerary?: DriverItineraryStop[];
+  estimatedDistanceMiles?: number | null;
+  estimatedDurationMinutes?: number | null;
+  driverFareEarnings?: number | null;
+  driverExtrasEarnings?: number | null;
+  driverOvertimeEarnings?: number | null;
+  driverReview?: {
+    rating: number;
+    comment: string | null;
+    createdAt: string;
+  } | null;
+  maxMilesPerHour?: number | null;
+  includedMilesPerHour?: number | null;
+  authorizedAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface DriverWorkflowConfig {
+  confirmWindowMinutes: number;
+  releaseMinutes: number;
+  graceMinutes: number;
+}
+
+export interface DriverRouteMap {
+  available: boolean;
+  dataUri?: string;
+  width?: number;
+  height?: number;
+  reason?: "mapbox_not_configured" | "invalid_route" | "geocode_failed" | "directions_failed" | "static_image_failed" | "invalid_image" | "provider_error" | string;
 }
 
 export interface DriverEarnings {
@@ -115,6 +166,7 @@ export interface DocumentSubmission {
   docType: "Driver License" | "Vehicle Registration" | "Insurance";
   status: "pending_review" | "approved" | "rejected";
   fileUrl: string;
+  contentType: string;
   newExpiry: string | null;
   adminNotes: string | null;
   submittedAt: string;
@@ -141,9 +193,7 @@ export interface DriverPayout {
 
 export interface DriverReview {
   id: number;
-  bookingId: number;
   driverId: number;
-  userId: number | null;
   rating: number;
   comment: string | null;
   createdAt: string;

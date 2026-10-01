@@ -1,66 +1,64 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { Modal, Pressable, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { ApiError } from "@/api/client";
 import { useAuthStore } from "@/auth/store";
-import { useBooking, useAcceptBooking, useDriverVehicles } from "@/api/hooks";
+import { useOpenPoolBooking, useAcceptBooking, useDriverVehicles, useBookingRouteMap } from "@/api/hooks";
 import { ScreenContainer } from "@/components/ScreenContainer";
 import { Card } from "@/components/Card";
 import { GoldButton } from "@/components/GoldButton";
 import { colors } from "@/theme/colors";
-
-const OFFER_WINDOW_SECONDS = 25;
+import { ScreenTitle } from "@/components/DriverUI";
+import { Ionicons } from "@expo/vector-icons";
+import { DriverBookingManifest } from "@/components/booking/DriverBookingManifest";
+import { filterCompatibleVehicles } from "@/domain/driverBooking";
+import { formatTripActionError } from "@/trip/tripActionPresentation";
+import { returnRouteForTrip } from "@/navigation/returnTarget";
 
 export default function OfferScreen() {
-  const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
+  const { bookingId, returnTo } = useLocalSearchParams<{ bookingId: string; returnTo?: string }>();
   const id = Number(bookingId);
-  const { data: booking, isLoading, isError, refetch, isRefetching } = useBooking(id);
+  const { data: booking, isLoading, isError, isSuccess, refetch, isRefetching } = useOpenPoolBooking(id);
   const acceptBooking = useAcceptBooking();
   const driverId = useAuthStore((s) => s.driverId);
-  const { data: vehicles } = useDriverVehicles(driverId);
-  const [secondsLeft, setSecondsLeft] = useState(OFFER_WINDOW_SECONDS);
+  const { data: vehicles, isLoading: vehiclesLoading, isError: vehiclesError, refetch: refetchVehicles } = useDriverVehicles(driverId);
+  const { data: routeMap, refetch: refetchRouteMap, isLoading: routeMapLoading } = useBookingRouteMap(Number.isFinite(id) ? id : null);
   const [error, setError] = useState<string | null>(null);
   const [showVehiclePicker, setShowVehiclePicker] = useState(false);
-
-  // Paused while an accept is in flight: without this, the countdown could
-  // hit 0 and call router.back() right as acceptWithVehicle's still-pending
-  // mutation was about to router.replace() to the trip screen on top of
-  // whatever the pop-back revealed underneath -- a flicker/double-navigation.
-  useEffect(() => {
-    if (acceptBooking.isPending) return;
-    const interval = setInterval(() => {
-      setSecondsLeft((s) => {
-        if (s <= 1) {
-          router.back();
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [acceptBooking.isPending]);
+  const compatibleVehicles = useMemo(
+    () => booking && vehicles ? filterCompatibleVehicles(vehicles, booking) : [],
+    [booking, vehicles],
+  );
 
   async function acceptWithVehicle(vehicleId?: number) {
     setError(null);
     setShowVehiclePicker(false);
     try {
       await acceptBooking.mutateAsync({ bookingId: id, vehicleId });
-      router.replace(`/trip/${id}`);
+      router.replace(`/trip/${id}?returnTo=${encodeURIComponent(returnTo === "alerts" ? "alerts" : "home")}` as never);
     } catch (err) {
       setError(err instanceof ApiError && err.status === 409
         ? "This ride was already taken by another driver."
-        : "Could not accept this ride. Please try again.");
+        : formatTripActionError(err));
     }
   }
 
   function handleAccept() {
+    if (vehiclesLoading || vehiclesError) {
+      setError(vehiclesError ? "Your registered vehicles could not be loaded. Retry before accepting this ride." : "Loading your registered vehicles…");
+      return;
+    }
+    if (!compatibleVehicles.length) {
+      setError("No registered vehicle matches this ride's class and capacity requirements.");
+      return;
+    }
     // Mirror the web dashboard: 2+ vehicles → pick which one; 0–1 → accept
     // immediately (sending the single vehicle's id when there is one).
-    if (vehicles && vehicles.length > 1) {
+    if (compatibleVehicles.length > 1) {
       setShowVehiclePicker(true);
       return;
     }
-    void acceptWithVehicle(vehicles?.[0]?.id);
+    void acceptWithVehicle(compatibleVehicles[0]?.id);
   }
 
   if (isError) {
@@ -69,6 +67,17 @@ export default function OfferScreen() {
         <View className="flex-1 items-center justify-center px-4">
           <Text className="text-danger text-sm mb-4 text-center">Could not load this offer. Check your connection.</Text>
           <GoldButton label="Retry" variant="outline" onPress={() => void refetch()} loading={isRefetching} />
+        </View>
+      </ScreenContainer>
+    );
+  }
+
+  if (isSuccess && !booking) {
+    return (
+      <ScreenContainer scroll={false}>
+        <View className="flex-1 items-center justify-center px-4">
+          <Text className="text-muted text-sm mb-4 text-center">This ride is no longer available. Another chauffeur may have accepted it.</Text>
+      <GoldButton label="Back to available rides" variant="outline" onPress={() => router.replace(returnRouteForTrip(returnTo) as never)} />
         </View>
       </ScreenContainer>
     );
@@ -85,35 +94,20 @@ export default function OfferScreen() {
   }
 
   return (
-    <ScreenContainer scroll={false}>
-      <View className="flex-1 justify-center">
-        <View className="items-center mb-8">
-          <View className="h-20 w-20 rounded-full border-4 border-gold items-center justify-center mb-4">
-            <Text className="text-gold font-serif text-2xl">{secondsLeft}s</Text>
-          </View>
-          <Text className="text-muted text-xs uppercase tracking-wider">New Ride Offer</Text>
-        </View>
+    <ScreenContainer>
+      <ScreenTitle title="New Ride Offer" back backHref={returnRouteForTrip(returnTo)} />
+      <View className="flex-1">
+        <DriverBookingManifest booking={booking} showEarnings mapUri={routeMap?.available ? routeMap.dataUri : null} mapReason={routeMap?.reason} mapLoading={routeMapLoading} onRetryMap={() => void refetchRouteMap()} />
 
-        <Card className="mb-6">
-          <View className="mb-3">
-            <Text className="text-[11px] uppercase text-muted">Pickup</Text>
-            <Text className="text-white">{booking.pickupAddress}</Text>
-          </View>
-          <View className="mb-3">
-            <Text className="text-[11px] uppercase text-muted">Drop-off</Text>
-            <Text className="text-white">{booking.dropoffAddress}</Text>
-          </View>
-          <View className="flex-row justify-between items-center mt-2 pt-3 border-t border-border">
-            <Text className="text-muted text-xs">Estimated earnings</Text>
-            <Text className="font-serif text-xl text-gold">${booking.driverEarnings.toFixed(2)}</Text>
-          </View>
-        </Card>
+        <Text className="text-white font-sans-medium text-sm mb-3">Compatible Vehicle</Text>
+        <Card className="mb-5 flex-row gap-3 items-center"><Ionicons name="car-sport" size={25} color={colors.gold} /><Text className="text-white text-sm flex-1">{vehiclesLoading ? "Loading registered vehicles…" : vehiclesError ? "Vehicle information unavailable" : compatibleVehicles.length === 1 ? `${compatibleVehicles[0].year} ${compatibleVehicles[0].make} ${compatibleVehicles[0].model}` : compatibleVehicles.length > 1 ? "Choose a compatible vehicle when accepting" : "No compatible registered vehicle"}</Text></Card>
+        {vehiclesError ? <View className="mb-3 items-center"><Text className="text-danger text-sm text-center mb-2">Your vehicle list could not be loaded.</Text><Pressable onPress={() => void refetchVehicles()}><Text className="text-gold text-sm">Retry vehicle list</Text></Pressable></View> : !vehiclesLoading && !compatibleVehicles.length ? <Text className="text-danger text-sm mb-3 text-center">Add or update a vehicle with the required class, passenger capacity and luggage capacity before accepting.</Text> : null}
 
         {error ? <Text className="text-danger text-sm mb-3 text-center">{error}</Text> : null}
 
         <View className="gap-3">
-          <GoldButton label="Accept Ride" onPress={handleAccept} loading={acceptBooking.isPending} />
-          <GoldButton label="Decline" variant="outline" onPress={() => router.back()} />
+          <GoldButton label="Accept Ride" onPress={handleAccept} loading={acceptBooking.isPending || vehiclesLoading} disabled={!compatibleVehicles.length || vehiclesLoading || vehiclesError} />
+          <GoldButton label="Decline" variant="outline" onPress={() => router.replace(returnRouteForTrip(returnTo) as never)} />
         </View>
       </View>
 
@@ -122,7 +116,7 @@ export default function OfferScreen() {
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", padding: 24 }}>
           <Card>
             <Text className="text-white font-sans-medium text-base mb-3">Which vehicle will you use?</Text>
-            {(vehicles ?? []).map((v) => (
+            {compatibleVehicles.map((v) => (
               <Pressable
                 key={v.id}
                 onPress={() => void acceptWithVehicle(v.id)}

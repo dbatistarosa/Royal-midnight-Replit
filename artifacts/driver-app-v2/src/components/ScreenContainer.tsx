@@ -1,6 +1,7 @@
 import { type ReactElement, type ReactNode } from "react";
 import { ScrollView, View, type RefreshControlProps } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { colors } from "@/theme/colors";
 
 interface ScreenContainerProps {
   children: ReactNode;
@@ -11,7 +12,7 @@ interface ScreenContainerProps {
 
 export function ScreenContainer({ children, scroll = true, className, refreshControl }: ScreenContainerProps) {
   return (
-    <SafeAreaView className="flex-1 bg-background" edges={["top", "left", "right"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top", "left", "right"]}>
       {scroll ? (
         <ScrollView
           className={`flex-1 px-5 ${className ?? ""}`}

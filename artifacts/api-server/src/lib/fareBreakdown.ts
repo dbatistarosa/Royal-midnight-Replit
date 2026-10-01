@@ -168,9 +168,12 @@ export async function saveOverageBreakdown(
  * started carrying tax and the card fee that is no longer the commission base —
  * paying 70% of it would hand the chauffeur a share of Florida's sales tax.
  *
- * Bookings older than migration 0012, and any row where the column is still
- * absent, are simply missing from the map; callers fall back to extra_charge,
- * which for those rows genuinely was the untaxed figure.
+ * The fare is exposed only after the extra-time payment intent is recorded.
+ * A completion can persist the overage before Stripe confirms it; exposing
+ * that pending amount as Driver earnings would be misleading. Bookings older
+ * than migration 0012, and any row where the column is still absent, are
+ * simply missing from the map; callers may apply an explicit legacy fallback
+ * only for completed rows.
  */
 export async function loadOverageFares(bookingIds: number[]): Promise<Map<number, number>> {
   const out = new Map<number, number>();
@@ -180,7 +183,9 @@ export async function loadOverageFares(bookingIds: number[]): Promise<Map<number
     const ids = sql.join(bookingIds.map(id => sql`${id}`), sql`, `);
     const result = await db.execute(sql`
       SELECT id, overage_fare FROM bookings
-       WHERE id IN (${ids}) AND overage_fare IS NOT NULL
+       WHERE id IN (${ids})
+         AND overage_fare IS NOT NULL
+         AND extra_charge_payment_intent_id IS NOT NULL
     `);
     const rows = (result as unknown as { rows?: Record<string, unknown>[] }).rows
       ?? (result as unknown as Record<string, unknown>[])

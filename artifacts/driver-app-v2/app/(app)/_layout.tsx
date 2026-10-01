@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Text, View } from "react-native";
 import { Redirect, Tabs, useSegments } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { ApiError } from "@/api/client";
@@ -12,6 +12,7 @@ import { useNotificationHandlers } from "@/notifications/useNotificationHandlers
 
 export default function AppLayout() {
   const user = useAuthStore((s) => s.user);
+  const token = useAuthStore((s) => s.token);
   const logout = useAuthStore((s) => s.logout);
   const segments = useSegments();
   const { data: driver, isLoading, isError, error, refetch } = useDriverByUserId(user?.id ?? null);
@@ -19,9 +20,16 @@ export default function AppLayout() {
 
   useEffect(() => {
     if (!driver?.id) return;
-    void registerForPushNotifications(driver.id).catch((registrationError) => {
-      console.warn("[notifications] push registration unavailable:", registrationError?.message ?? registrationError);
+    const register = () => {
+      void registerForPushNotifications(driver.id).catch((registrationError) => {
+        console.warn("[notifications] push registration unavailable:", registrationError?.message ?? registrationError);
+      });
+    };
+    register();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") register();
     });
+    return () => subscription.remove();
   }, [driver?.id]);
 
   // A failed fetch (most commonly a 401 on an expired/revoked session) used
@@ -40,6 +48,7 @@ export default function AppLayout() {
   // escape hatch that lets a driver actually clear the hold.
   const isDocumentsRoute = segments.includes("documents");
 
+  if (!token || !user) return <Redirect href="/(auth)/login" />;
   if (isAuthError) return <Redirect href="/(auth)/login" />;
 
   // A non-auth failure (dropped connection, 500, timeout) is not a reason to
@@ -70,13 +79,14 @@ export default function AppLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
+        tabBarStyle: { backgroundColor: colors.background, borderTopColor: colors.border, paddingTop: 6 },
+        tabBarLabelStyle: { fontFamily: "Inter_600SemiBold", fontSize: 10 },
         tabBarActiveTintColor: colors.gold,
         tabBarInactiveTintColor: colors.muted,
       }}
     >
       <Tabs.Screen name="index" options={{ title: "Home", tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} /> }} />
-      <Tabs.Screen name="trips" options={{ title: "Trips", tabBarIcon: ({ color, size }) => <Ionicons name="time" size={size} color={color} /> }} />
+      <Tabs.Screen name="trips" options={{ title: "Rides", tabBarIcon: ({ color, size }) => <Ionicons name="car-sport" size={size} color={color} /> }} />
       <Tabs.Screen name="earnings" options={{ title: "Earnings", tabBarIcon: ({ color, size }) => <Ionicons name="cash" size={size} color={color} /> }} />
       <Tabs.Screen name="notifications/index" options={{ title: "Alerts", tabBarIcon: ({ color, size }) => <Ionicons name="notifications" size={size} color={color} /> }} />
       <Tabs.Screen name="account" options={{ title: "Profile", tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} /> }} />

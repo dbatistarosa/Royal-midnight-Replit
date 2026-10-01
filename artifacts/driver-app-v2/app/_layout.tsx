@@ -11,6 +11,7 @@ import { Inter_400Regular, Inter_600SemiBold } from "@expo-google-fonts/inter";
 import { StatusBar } from "expo-status-bar";
 import { useAuthStore } from "@/auth/store";
 import { configureApiClient } from "@/api/client";
+import { LaunchExperience } from "@/components/LaunchExperience";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -35,6 +36,7 @@ export default function RootLayout() {
   const isHydrated = useAuthStore((s) => s.isHydrated);
   const [fontsLoaded] = useFonts({ PlayfairDisplay_700Bold, Inter_400Regular, Inter_600SemiBold });
   const [clientConfigured, setClientConfigured] = useState(false);
+  const [showLaunchExperience, setShowLaunchExperience] = useState(true);
 
   useEffect(() => {
     configureApiClient();
@@ -45,11 +47,17 @@ export default function RootLayout() {
   useEffect(() => {
     if (isHydrated && fontsLoaded && clientConfigured) {
       SplashScreen.hideAsync().catch(() => {});
+      const launchTimer = setTimeout(() => setShowLaunchExperience(false), 1800);
+      return () => clearTimeout(launchTimer);
     }
   }, [isHydrated, fontsLoaded, clientConfigured]);
 
   if (!isHydrated || !fontsLoaded || !clientConfigured) {
     return null;
+  }
+
+  if (showLaunchExperience) {
+    return <LaunchExperience />;
   }
 
   return (

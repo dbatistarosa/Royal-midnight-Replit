@@ -9,6 +9,7 @@ import Stripe from "stripe";
 import { db } from "@workspace/db";
 import {
   bookingsTable as bookings,
+  bookingItineraryStopsTable,
   driversTable,
   settingsTable,
   usersTable,
@@ -189,6 +190,7 @@ export async function firePostPaymentEmails(bookingId: number): Promise<void> {
     .from(driversTable)
     .where(
       and(
+        eq(driversTable.approvalStatus, "approved"),
         eq(driversTable.status, "available"),
         eq(driversTable.complianceHold, false),
       ),
@@ -846,8 +848,11 @@ router.post('/payments/create-invoice/:bookingId',requireAdmin,async(req,res):Pr
    }
    const url=invoice.hosted_invoice_url;
    if(!url)throw new Error('Invoice payment URL is unavailable');
+   const itinerary=await db.select().from(bookingItineraryStopsTable)
+     .where(eq(bookingItineraryStopsTable.bookingId,bId))
+     .orderBy(bookingItineraryStopsTable.sequence);
    await withMailScope('invoice:'+invoice.id,()=>sendInvoiceToPassenger({id:bId,passengerName:booking.passengerName,passengerEmail:booking.passengerEmail,
-     pickupAddress:booking.pickupAddress,dropoffAddress:booking.dropoffAddress,pickupAt:booking.pickupAt.toISOString(),vehicleClass:booking.vehicleClass,passengers:booking.passengers,priceQuoted:Number(booking.priceQuoted)},url,invoice!.invoice_pdf??null));
+     pickupAddress:booking.pickupAddress,dropoffAddress:booking.dropoffAddress,pickupAt:booking.pickupAt.toISOString(),vehicleClass:booking.vehicleClass,passengers:booking.passengers,priceQuoted:Number(booking.priceQuoted),itinerary},url,invoice!.invoice_pdf??null));
    return {status:200,body:{success:true,invoiceId:invoice.id,invoiceUrl:url}};
   });res.status(result.status).json(result.body);
  }catch(err){sendStripeError(req,res,err);}

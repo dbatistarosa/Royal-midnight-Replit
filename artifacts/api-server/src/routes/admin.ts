@@ -12,6 +12,7 @@ import {
   vehicleCatalogTable,
   complianceDocumentsTable,
   corporateAccountsTable,
+  notificationsTable,
 } from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 import { invalidateCache } from "../lib/cache.js";
@@ -35,6 +36,7 @@ import {
 } from "../lib/weeklyPayouts.js";
 import { loadBookingExtras, driverExtrasTotal } from "../lib/bookingExtras.js";
 import { Resend } from "resend";
+import { isStrictDateOnly } from "../lib/documentValidation.js";
 import {
   GetAdminStatsResponse,
   GetRecentBookingsQueryParams,
@@ -1006,6 +1008,7 @@ router.get(
     const drivers = await db
       .select({
         id: driversTable.id,
+        userId: driversTable.userId,
         name: driversTable.name,
         email: driversTable.email,
         phone: driversTable.phone,
@@ -1116,6 +1119,7 @@ router.post(
     const [driver] = await db
       .select({
         id: driversTable.id,
+        userId: driversTable.userId,
         name: driversTable.name,
         email: driversTable.email,
         licenseExpiry: driversTable.licenseExpiry,
@@ -1153,6 +1157,15 @@ router.post(
       daysRemaining,
     });
 
+    if (driver.userId != null) {
+      await db.insert(notificationsTable).values({
+        userId: driver.userId,
+        title: "Compliance document reminder",
+        message: `${docType} expires in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"}. Upload the new document from Documents.`,
+        type: "compliance_reminder",
+      });
+    }
+
     res.json({ success: true, sentTo: driver.email });
   },
 );
@@ -1176,8 +1189,8 @@ router.post(
       res.status(400).json({ error: "Invalid document id" });
       return;
     }
-    if (!newExpiry) {
-      res.status(400).json({ error: "newExpiry (YYYY-MM-DD) is required" });
+    if (!newExpiry || !isStrictDateOnly(newExpiry)) {
+      res.status(400).json({ error: "newExpiry must be a real date in YYYY-MM-DD format" });
       return;
     }
 
@@ -1219,6 +1232,7 @@ router.post(
     // Re-check all docs — if none are expired anymore, lift compliance_hold
     const [updatedDriver] = await db
       .select({
+        userId: driversTable.userId,
         licenseExpiry: driversTable.licenseExpiry,
         regExpiry: driversTable.regExpiry,
         insuranceExpiry: driversTable.insuranceExpiry,
@@ -1241,6 +1255,15 @@ router.post(
           .update(driversTable)
           .set({ complianceHold: false })
           .where(eq(driversTable.id, doc.driverId));
+      }
+
+      if (updatedDriver.userId != null) {
+        await db.insert(notificationsTable).values({
+          userId: updatedDriver.userId,
+          title: "Compliance document approved",
+          message: `${doc.docType} was approved. Your account documents are up to date.`,
+          type: "compliance_approved",
+        });
       }
     }
 
@@ -1289,7 +1312,7 @@ router.post(
 
     // Email driver to re-upload
     const [driver] = await db
-      .select({ name: driversTable.name, email: driversTable.email })
+      .select({ name: driversTable.name, email: driversTable.email, userId: driversTable.userId })
       .from(driversTable)
       .where(eq(driversTable.id, doc.driverId));
     if (driver) {
@@ -1305,6 +1328,14 @@ router.post(
         <p>Please log in to the Royal Midnight Driver app and upload a new copy.</p>`,
         })
         .catch(() => {});
+      if (driver.userId != null) {
+        await db.insert(notificationsTable).values({
+          userId: driver.userId,
+          title: "Compliance document rejected",
+          message: `${doc.docType} needs to be uploaded again: ${reason.trim()}`,
+          type: "compliance_rejected",
+        });
+      }
     }
 
     res.json({ success: true, docId, driverId: doc.driverId });

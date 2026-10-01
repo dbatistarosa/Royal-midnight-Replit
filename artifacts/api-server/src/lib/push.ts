@@ -1,8 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db, driversTable } from "@workspace/db";
 import { parseExpoPushResponse } from "./pushTicketParsing.js";
+import { isExpoPushToken } from "./pushToken.js";
 
 export { parseExpoPushResponse } from "./pushTicketParsing.js";
+export { isExpoPushToken } from "./pushToken.js";
 
 /**
  * Expo push notification library — sends directly to Expo's push API, no SDK
@@ -18,7 +20,7 @@ interface ExpoPushMessage {
 }
 
 async function sendExpoPush(messages: ExpoPushMessage[]): Promise<void> {
-  const valid = messages.filter((m) => m.to?.startsWith("ExponentPushToken"));
+  const valid = messages.filter((m) => isExpoPushToken(m.to));
   if (valid.length === 0) return;
 
   try {

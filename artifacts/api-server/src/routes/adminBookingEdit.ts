@@ -7,6 +7,7 @@ import { z } from "zod/v4";
 import {
   db,
   bookingsTable,
+  bookingItineraryStopsTable,
   bookingExtrasTable,
   vehiclesTable,
   driverVehiclesTable,
@@ -14,6 +15,7 @@ import {
 import { requireAdmin } from "../middleware/auth.js";
 import { computeQuote } from "./quote.js";
 import { sendBookingUpdatedPassenger } from "../lib/mailer.js";
+import { buildItineraryRows } from "../lib/bookingItinerary.js";
 
 /**
  * Full administrative edit of a reservation.
@@ -447,6 +449,18 @@ router.patch(
           await tx.execute(
             sql`UPDATE bookings SET tax_amount=${breakdown.taxAmount},card_fee=${breakdown.cardProcessingFee},airport_fee=${breakdown.airportFee},extras_total=${breakdown.extrasTotal} WHERE id=${id}`,
           );
+        if (saved && (before.charterMode === "hourly" || body.charterMode !== undefined || body.waypoints !== undefined || body.dropoffAddress !== undefined)) {
+          await tx.delete(bookingItineraryStopsTable).where(eq(bookingItineraryStopsTable.bookingId, id));
+          const nextMode = body.charterMode ?? before.charterMode;
+          if (nextMode === "hourly") {
+            const itineraryRows = buildItineraryRows(
+              id,
+              body.waypoints ?? currentWaypoints,
+              body.dropoffAddress ?? before.dropoffAddress,
+            );
+            if (itineraryRows.length > 0) await tx.insert(bookingItineraryStopsTable).values(itineraryRows);
+          }
+        }
         return saved;
     })();
 

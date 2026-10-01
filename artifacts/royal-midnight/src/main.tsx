@@ -13,10 +13,17 @@ initSentry();
 
 const rootEl = document.getElementById("root")!;
 
-// Prerendered marketing pages ship real markup inside #root; hydrate it instead
-// of wiping and re-rendering. Portal/auth routes still get the empty SPA shell.
-if (rootEl.hasChildNodes()) {
+// Vercel serves the prerendered homepage as the SPA fallback for portal/auth
+// routes. Hydrate only when the marker belongs to the URL being visited;
+// otherwise the homepage markup and the portal tree cannot possibly match.
+const normalizePath = (path: string) => path === "/" ? path : path.replace(/\/+$/, "");
+const prerenderedPath = rootEl.dataset.prerenderedPath;
+const shouldHydrate = prerenderedPath !== undefined
+  && normalizePath(prerenderedPath) === normalizePath(window.location.pathname);
+
+if (shouldHydrate) {
   hydrateRoot(rootEl, <App />);
 } else {
+  rootEl.replaceChildren();
   createRoot(rootEl).render(<App />);
 }

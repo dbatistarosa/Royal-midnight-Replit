@@ -3,6 +3,7 @@ import { queryClient } from "@/api/queryClient";
 import { create } from "zustand";
 import * as SecureStore from "expo-secure-store";
 import type { AuthUser } from "@/api/types";
+import { shouldDiscardStoredSession } from "@/auth/sessionHydration";
 
 const STORAGE_KEY = "rm_driver_auth";
 let authRevision = 0;
@@ -40,35 +41,56 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   hydrate: async () => {
     const revision = authRevision;
+    let stored: StoredAuth | null = null;
     try {
       const raw = await SecureStore.getItemAsync(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as StoredAuth;
-        if (!parsed?.token || !parsed.user?.id)
-          throw new Error("Invalid stored session");
+      if (raw) stored = JSON.parse(raw) as StoredAuth;
+      if (stored && (!stored.token || !stored.user?.id)) stored = null;
+    } catch {
+      stored = null;
+    }
+
+    if (!stored) {
+      if (revision === authRevision)
+        set({ user: null, token: null, driverId: null, isHydrated: true });
+      await writeStorage(() => SecureStore.deleteItemAsync(STORAGE_KEY)).catch(() => {});
+      return;
+    }
+
+    try {
         const base =
           Constants.expoConfig?.extra?.apiBaseUrl ??
           "https://www.royalmidnight.com/api";
         const response = await fetch(base + "/auth/me", {
-          headers: { Authorization: "Bearer " + parsed.token },
+          headers: { Authorization: "Bearer " + stored.token },
           signal: AbortSignal.timeout(10000),
         });
-        if (!response.ok) throw new Error("Session could not be verified");
+        if (!response.ok) {
+          if (shouldDiscardStoredSession(response.status)) {
+            if (revision === authRevision)
+              set({ user: null, token: null, driverId: null, isHydrated: true });
+            await writeStorage(() => SecureStore.deleteItemAsync(STORAGE_KEY)).catch(() => {});
+            return;
+          }
+          throw new Error("Session verification temporarily unavailable");
+        }
         const current = await response.json();
         if (revision !== authRevision) return;
         set({
           user: current.user,
-          token: parsed.token,
+          token: stored.token,
           driverId: current.driverId ?? null,
           isHydrated: true,
         });
         return;
-      }
     } catch {
-      // corrupt stored value — fall through to a clean logged-out state
+      // A timeout, offline launch or server error must not erase a valid saved
+      // login. Hydrate the last known identity; authenticated API calls will
+      // still reject and clear it if the token is actually expired/revoked.
     }
-    if (revision === authRevision)
-      set({ user: null, token: null, driverId: null, isHydrated: true });
+    if (revision === authRevision) {
+      set({ ...stored, isHydrated: true });
+    }
   },
 
   login: async (user, token, driverId) => {

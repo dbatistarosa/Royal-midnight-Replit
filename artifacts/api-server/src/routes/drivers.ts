@@ -11,6 +11,8 @@ import {
   driverLocationsTable,
   passwordResetTokensTable,
   driverVehiclesTable,
+  driverChangeRequestsTable,
+  notificationsTable,
 } from "@workspace/db";
 import { requireAdmin, requireAuth, optionalAuth } from "../middleware/auth.js";
 import { signedObjectDownloadPath } from "../lib/signedUrl.js";
@@ -23,10 +25,13 @@ import {
   isFieldEncryptionConfigError,
 } from "../lib/encrypt.js";
 import { fetchCommissionPct } from "../lib/commission.js";
+import { getDriverWindows } from "../lib/driverWindows.js";
 import { loadDriverEarningRows } from "../lib/fareBreakdown.js";
 import { hashPassword } from "../lib/hash.js";
 import { sendDriverAccountSetupEmail } from "../lib/mailer.js";
 import { hashOneTimeToken } from "../lib/tokenHash.js";
+import { isStrictDateOnly, SUPPORTED_DOCUMENT_CONTENT_TYPES } from "../lib/documentValidation.js";
+import { canDriverEditVehicle, vehicleEditDenialMessage } from "../lib/driverChangePolicy.js";
 import {
   ListDriversQueryParams,
   ListDriversResponse,
@@ -44,6 +49,42 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
+
+async function submitDriverChangeRequest(
+  driverId: number,
+  userId: number | null,
+  kind: string,
+  payload: Record<string, unknown>,
+) {
+  const [pending] = await db
+    .select({ id: driverChangeRequestsTable.id })
+    .from(driverChangeRequestsTable)
+    .where(and(
+      eq(driverChangeRequestsTable.driverId, driverId),
+      eq(driverChangeRequestsTable.kind, kind),
+      eq(driverChangeRequestsTable.status, "pending"),
+    ));
+  if (pending) {
+    const error = new Error("A request of this type is already pending administrator review.");
+    Object.assign(error, { status: 409 });
+    throw error;
+  }
+  const [request] = await db
+    .insert(driverChangeRequestsTable)
+    .values({ driverId, kind, payload: JSON.stringify(payload), status: "pending" })
+    .returning({ id: driverChangeRequestsTable.id });
+  if (userId != null) {
+    await db.insert(notificationsTable).values({
+      userId,
+      title: "Change submitted for approval",
+      message: kind === "profile_photo"
+        ? "Your profile photo is waiting for administrator approval."
+        : "Your vehicle change is waiting for administrator approval.",
+      type: kind === "profile_photo" ? "profile_photo_review" : "vehicle_review",
+    });
+  }
+  return request.id;
+}
 
 /** Minimal shape of the pino child logger express attaches to each request. */
 type RequestLogger = { error: (obj: object, msg: string) => void };
@@ -190,6 +231,19 @@ router.post("/drivers", requireAdmin, async (req, res): Promise<void> => {
   );
 
   res.status(201).json(GetDriverResponse.parse(parseDriver(driver)));
+});
+
+// Driver workflow configuration is server-owned. The mobile app uses this
+// read-only response to explain when an action becomes available; it must not
+// copy admin settings or embed a fixed number of minutes in the APK.
+router.get("/drivers/workflow-config", requireAuth, async (req, res): Promise<void> => {
+  if (req.currentUser?.role !== "driver" && req.currentUser?.role !== "admin") {
+    res.status(403).json({ error: "Driver access required" });
+    return;
+  }
+  const { confirmWindowMinutes, releaseMinutes, graceMinutes } = await getDriverWindows();
+  res.set("Cache-Control", "private, max-age=60");
+  res.json({ confirmWindowMinutes, releaseMinutes, graceMinutes });
 });
 
 router.get("/drivers/:id", requireAuth, async (req, res): Promise<void> => {
@@ -571,6 +625,11 @@ router.patch(
     const phone = req.body?.phone as string | undefined;
     const profilePicture = req.body?.profilePicture as string | undefined;
 
+    if (phone !== undefined && caller.role !== "admin") {
+      res.status(403).json({ error: "Drivers cannot change their phone number. Contact an administrator." });
+      return;
+    }
+
     const updates: Partial<typeof driversTable.$inferInsert> = {};
 
     if (phone !== undefined) {
@@ -587,6 +646,29 @@ router.patch(
         !profilePicture.startsWith("/")
       ) {
         res.status(400).json({ error: "Invalid profile picture path" });
+        return;
+      }
+      if (caller.role !== "admin") {
+        try {
+          const requestId = await submitDriverChangeRequest(
+            id,
+            driver.userId,
+            "profile_photo",
+            { profilePicture },
+          );
+          res.status(202).json({
+            pendingApproval: true,
+            requestId,
+            driver: parseDriver(driver),
+          });
+        } catch (error) {
+          const status = (error as { status?: number }).status ?? 500;
+          if (status !== 500) {
+            res.status(status).json({ error: (error as Error).message });
+            return;
+          }
+          throw error;
+        }
         return;
       }
       updates.profilePicture = profilePicture;
@@ -1416,9 +1498,10 @@ router.post(
       }
     }
 
-    const { docType, fileUrl, newExpiry } = req.body as {
+    const { docType, fileUrl, contentType, newExpiry } = req.body as {
       docType?: string;
       fileUrl?: string;
+      contentType?: string;
       newExpiry?: string;
     };
     const validTypes = ["Driver License", "Vehicle Registration", "Insurance"];
@@ -1443,6 +1526,17 @@ router.post(
         .json({ error: "fileUrl must be an uploaded object path" });
       return;
     }
+    if (newExpiry != null && !isStrictDateOnly(newExpiry)) {
+      res.status(400).json({ error: "newExpiry must be a real date in YYYY-MM-DD format" });
+      return;
+    }
+    const normalizedContentType = typeof contentType === "string"
+      ? contentType.split(";")[0]!.trim().toLowerCase()
+      : "application/octet-stream";
+    if (contentType != null && !SUPPORTED_DOCUMENT_CONTENT_TYPES.has(normalizedContentType)) {
+      res.status(400).json({ error: "contentType must be a supported image or PDF type" });
+      return;
+    }
 
     const [newDoc] = await db
       .insert(complianceDocumentsTable)
@@ -1450,6 +1544,7 @@ router.post(
         driverId: id,
         docType,
         fileUrl,
+        contentType: normalizedContentType,
         newExpiry: newExpiry ?? null,
         status: "pending_review",
       })
@@ -1485,7 +1580,7 @@ router.get(
       return;
     }
     const [driver] = await db
-      .select({ userId: driversTable.userId })
+      .select({ userId: driversTable.userId, regExpiry: driversTable.regExpiry })
       .from(driversTable)
       .where(eq(driversTable.id, driverId));
     if (!driver) {
@@ -1527,7 +1622,7 @@ router.post(
       return;
     }
     const [driver] = await db
-      .select({ userId: driversTable.userId })
+      .select({ userId: driversTable.userId, regExpiry: driversTable.regExpiry })
       .from(driversTable)
       .where(eq(driversTable.id, driverId));
     if (!driver) {
@@ -1565,6 +1660,44 @@ router.post(
       return;
     }
 
+    const caller = req.currentUser!;
+    if (caller.role !== "admin") {
+      const existing = await db
+        .select({ id: driverVehiclesTable.id })
+        .from(driverVehiclesTable)
+        .where(eq(driverVehiclesTable.driverId, driverId));
+      // The first vehicle is still a request, but it is needed to complete
+      // onboarding. Existing vehicle details are restricted to the 30-day
+      // registration renewal window, matching the web compliance policy.
+      if (existing.length > 0 && !canDriverEditVehicle(driver.regExpiry)) {
+        res.status(403).json({ error: vehicleEditDenialMessage(driver.regExpiry) });
+        return;
+      }
+      try {
+        const requestId = await submitDriverChangeRequest(driverId, driver.userId, "vehicle_create", {
+          year: (year as string) ?? null,
+          make: make as string,
+          model: model as string,
+          color: (color as string) ?? null,
+          vehicleClass: (vehicleClass as string) ?? null,
+          passengerCapacity: (passengerCapacity as number) ?? null,
+          luggageCapacity: (luggageCapacity as number) ?? null,
+          hasCarSeat: (hasCarSeat as boolean) ?? false,
+          regPlate: (regPlate as string) ?? null,
+          isDefault: (isDefault as boolean) ?? existing.length === 0,
+        });
+        res.status(202).json({ pendingApproval: true, requestId });
+      } catch (error) {
+        const status = (error as { status?: number }).status ?? 500;
+        if (status !== 500) {
+          res.status(status).json({ error: (error as Error).message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
     const v = await createDriverVehicle(db, driverId, {
       year: (year as string) ?? null,
       make: make as string,
@@ -1593,7 +1726,7 @@ router.patch(
       return;
     }
     const [driver] = await db
-      .select({ userId: driversTable.userId })
+      .select({ userId: driversTable.userId, regExpiry: driversTable.regExpiry })
       .from(driversTable)
       .where(eq(driversTable.id, driverId));
     if (!driver) {
@@ -1628,12 +1761,48 @@ router.patch(
     if (body.hasCarSeat !== undefined) updateData.hasCarSeat = body.hasCarSeat;
     if (body.regPlate !== undefined)
       updateData.regPlate = body.regPlate ?? null;
+    if (body.isDefault === true) updateData.isDefault = true;
+    if (Object.keys(updateData).length === 0) {
+      res.status(400).json({ error: "No vehicle fields to update" });
+      return;
+    }
+
+    const caller = req.currentUser!;
+    if (caller.role !== "admin") {
+      const [vehicle] = await db
+        .select({ id: driverVehiclesTable.id })
+        .from(driverVehiclesTable)
+        .where(and(eq(driverVehiclesTable.id, vehicleId), eq(driverVehiclesTable.driverId, driverId)));
+      if (!vehicle) {
+        res.status(404).json({ error: "Vehicle not found" });
+        return;
+      }
+      if (!canDriverEditVehicle(driver.regExpiry)) {
+        res.status(403).json({ error: vehicleEditDenialMessage(driver.regExpiry) });
+        return;
+      }
+      try {
+        const requestId = await submitDriverChangeRequest(driverId, driver.userId, "vehicle_update", {
+          vehicleId,
+          changes: updateData,
+        });
+        res.status(202).json({ pendingApproval: true, requestId });
+      } catch (error) {
+        const status = (error as { status?: number }).status ?? 500;
+        if (status !== 500) {
+          res.status(status).json({ error: (error as Error).message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
     if (body.isDefault === true) {
       await db
         .update(driverVehiclesTable)
         .set({ isDefault: false })
         .where(eq(driverVehiclesTable.driverId, driverId));
-      updateData.isDefault = true;
     }
     const [v] = await db
       .update(driverVehiclesTable)
@@ -1683,7 +1852,7 @@ router.delete(
       return;
     }
     const [driver] = await db
-      .select({ userId: driversTable.userId })
+      .select({ userId: driversTable.userId, regExpiry: driversTable.regExpiry })
       .from(driversTable)
       .where(eq(driversTable.id, driverId));
     if (!driver) {
@@ -1701,6 +1870,32 @@ router.delete(
         "authorization_failed",
       );
       res.status(403).json({ error: "Access denied" });
+      return;
+    }
+    if (req.currentUser!.role !== "admin") {
+      const [vehicle] = await db
+        .select({ id: driverVehiclesTable.id })
+        .from(driverVehiclesTable)
+        .where(and(eq(driverVehiclesTable.id, vehicleId), eq(driverVehiclesTable.driverId, driverId)));
+      if (!vehicle) {
+        res.status(404).json({ error: "Vehicle not found" });
+        return;
+      }
+      if (!canDriverEditVehicle(driver.regExpiry)) {
+        res.status(403).json({ error: vehicleEditDenialMessage(driver.regExpiry) });
+        return;
+      }
+      try {
+        const requestId = await submitDriverChangeRequest(driverId, driver.userId, "vehicle_delete", { vehicleId });
+        res.status(202).json({ pendingApproval: true, requestId });
+      } catch (error) {
+        const status = (error as { status?: number }).status ?? 500;
+        if (status !== 500) {
+          res.status(status).json({ error: (error as Error).message });
+          return;
+        }
+        throw error;
+      }
       return;
     }
     try {

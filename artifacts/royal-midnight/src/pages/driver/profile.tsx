@@ -1,7 +1,6 @@
 ﻿import { useState, useEffect, useRef } from "react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { LayoutDashboard, History, DollarSign, User, Loader2, Star, Building2, ShieldCheck, Eye, EyeOff, Calendar, Lock, BarChart2, Camera, FileText, Car } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useDriverStatus } from "@/contexts/driverStatus";
@@ -9,19 +8,8 @@ import { useAuth } from "@/contexts/auth";
 import { useSignedDocUrl } from "@/hooks/use-signed-doc-url";
 import { API_BASE } from "@/lib/constants";
 import { jsonAuthHeaders } from "@/lib/authHeaders";
-import { format } from "date-fns";
 import { useUpload } from "@workspace/object-storage-web";
 import { driverNavItems } from "@/config/portalNav";
-
-type Review = {
-  id: number;
-  rating: number;
-  comment: string | null;
-  createdAt: string;
-  bookingId: number;
-};
-
-
 
 const labelClass = "text-gray-400 uppercase tracking-widest text-xs block mb-1.5";
 const inputClass = "bg-white/5 border-white/10 text-white rounded-none h-11";
@@ -100,26 +88,7 @@ export default function DriverProfile() {
   const { driverRecord, isLoading: driverLoading, refetch } = useDriverStatus();
   const { user, token } = useAuth();
   const { toast } = useToast();
-  const [isSaving, setIsSaving] = useState(false);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [reviewsLoading, setReviewsLoading] = useState(false);
-
-  const [phone, setPhone] = useState("");
   const [pendingPhotoPath, setPendingPhotoPath] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (driverRecord?.phone) setPhone(driverRecord.phone);
-  }, [driverRecord?.phone]);
-
-  useEffect(() => {
-    if (!driverRecord?.id) return;
-    setReviewsLoading(true);
-    fetch(`${API_BASE}/reviews?driverId=${driverRecord.id}`)
-      .then(r => r.ok ? r.json() as Promise<Review[]> : Promise.resolve([]))
-      .then(data => setReviews(Array.isArray(data) ? data : []))
-      .catch(() => setReviews([]))
-      .finally(() => setReviewsLoading(false));
-  }, [driverRecord?.id]);
 
   const handlePhotoUploaded = async (objectPath: string) => {
     if (!driverRecord?.id) {
@@ -137,38 +106,11 @@ export default function DriverProfile() {
         toast({ title: "Photo save failed", description: err.error ?? "Could not save photo.", variant: "destructive" });
         return;
       }
-      toast({ title: "Photo updated", description: "Your profile photo has been saved." });
-      setPendingPhotoPath(null);
+      toast({ title: "Photo submitted", description: "Your profile photo is waiting for administrator approval." });
+      setPendingPhotoPath(objectPath);
       refetch();
     } catch {
       toast({ title: "Error", description: "Could not save photo.", variant: "destructive" });
-    }
-  };
-
-  const handleSave = async () => {
-    if (!driverRecord?.id) return;
-    setIsSaving(true);
-    try {
-      const body: Record<string, string> = { phone };
-      if (pendingPhotoPath) body.profilePicture = pendingPhotoPath;
-
-      const res = await fetch(`${API_BASE}/drivers/${driverRecord.id}/contact`, {
-        method: "PATCH",
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        toast({ title: "Save failed", description: err.error ?? "Could not save profile.", variant: "destructive" });
-        return;
-      }
-      toast({ title: "Profile updated", description: "Your changes have been saved." });
-      setPendingPhotoPath(null);
-      refetch();
-    } catch {
-      toast({ title: "Error", description: "Could not save profile.", variant: "destructive" });
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -193,9 +135,12 @@ export default function DriverProfile() {
 
             {/* Profile Photo */}
             <ProfilePhotoUpload
-              currentUrl={pendingPhotoPath ?? driverRecord?.profilePicture}
+              currentUrl={driverRecord?.profilePicture}
               onUploaded={(path) => void handlePhotoUploaded(path)}
             />
+            {pendingPhotoPath && (
+              <p className="text-xs text-primary mt-2">A new photo is pending administrator approval. Your current approved photo remains active until then.</p>
+            )}
 
             <div className="border-t border-border pt-5">
               <label className={labelClass}>Email Address</label>
@@ -211,22 +156,8 @@ export default function DriverProfile() {
 
             <div>
               <label className={labelClass}>Phone Number</label>
-              <Input
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-                className={inputClass}
-                placeholder="+1 (305) 555-0000"
-              />
-            </div>
-
-            <div className="pt-4">
-              <Button
-                onClick={handleSave}
-                disabled={isSaving || !driverRecord}
-                className="bg-primary text-black hover:bg-primary/90 rounded-none uppercase tracking-[0.2em] text-xs px-8 h-11"
-              >
-                {isSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Saving...</> : "Save Changes"}
-              </Button>
+              <Input value={driverRecord?.phone ?? ""} disabled className={inputClass + " opacity-50"} />
+              <p className="text-xs text-muted-foreground mt-1">Phone number changes require an administrator.</p>
             </div>
           </div>
         </div>
@@ -288,41 +219,6 @@ export default function DriverProfile() {
               <div className="text-xs text-muted-foreground uppercase tracking-widest">Status</div>
             </div>
           </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-none p-8">
-          <h2 className="font-serif text-lg mb-6 text-muted-foreground uppercase tracking-widest text-sm">Customer Reviews</h2>
-          {reviewsLoading ? (
-            <div className="space-y-3">
-              {[1, 2].map(i => <div key={i} className="h-16 bg-muted/20 animate-pulse rounded-none" />)}
-            </div>
-          ) : reviews.length > 0 ? (
-            <div className="space-y-4">
-              {reviews.slice(0, 10).map(review => (
-                <div key={review.id} className="border border-border/50 p-4 rounded-none">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map(star => (
-                        <Star
-                          key={star}
-                          className={`w-3.5 h-3.5 ${star <= review.rating ? "text-primary fill-primary" : "text-muted-foreground/30"}`}
-                        />
-                      ))}
-                      <span className="text-xs text-muted-foreground ml-1">{review.rating}/5</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      {format(new Date(review.createdAt), "MMM d, yyyy")}
-                    </span>
-                  </div>
-                  {review.comment && (
-                    <p className="text-sm text-foreground/80 italic">"{review.comment}"</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">No reviews yet. Complete your first ride to receive feedback.</p>
-          )}
         </div>
 
       </div>

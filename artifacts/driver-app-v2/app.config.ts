@@ -1,4 +1,4 @@
-import type { ExpoConfig } from "expo/config";
+import type { ExpoConfig } from "@expo/config-types";
 
 const publicApi = "https://www.royalmidnight.com/api";
 // The file is intentionally opt-in. EAS does not upload ignored local files;
@@ -62,7 +62,12 @@ const config: ExpoConfig = {
     ],
     [
       "expo-splash-screen",
-      { image: "./assets/splash.png", backgroundColor: "#0a0a0f" },
+      {
+        image: "./assets/royal-midnight-logo-transparent.png",
+        imageWidth: 280,
+        resizeMode: "contain",
+        backgroundColor: "#06101f",
+      },
     ],
   ],
   extra: {

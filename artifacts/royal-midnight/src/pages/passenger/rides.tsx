@@ -3,7 +3,7 @@ import { useGetUserBookings } from "@workspace/api-client-react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AuthGuard } from "@/components/layout/AuthGuard";
 import { useAuth } from "@/contexts/auth";
-import { LayoutDashboard, Car, MapPin, User, MessageSquare, ChevronDown, ChevronUp, Users, Briefcase, Plane, Phone, DollarSign, Clock, Star, BarChart2 } from "lucide-react";
+import { LayoutDashboard, Car, MapPin, User, MessageSquare, ChevronDown, ChevronUp, Users, Briefcase, Plane, Phone, DollarSign, Clock, Star, BarChart2, X } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { API_BASE } from "@/lib/constants";
@@ -49,6 +49,8 @@ type PublicDriver = {
 
 function DriverInfoCard({ driverId }: { driverId: number }) {
   const [driver, setDriver] = useState<PublicDriver | null>(null);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [photoFailed, setPhotoFailed] = useState(false);
 
   useEffect(() => {
     // credentials: "include" — the endpoint now requires proof that this trip
@@ -59,6 +61,8 @@ function DriverInfoCard({ driverId }: { driverId: number }) {
       .then(d => setDriver(d))
       .catch(() => null);
   }, [driverId]);
+
+  useEffect(() => setPhotoFailed(false), [driver?.profilePicture]);
 
   if (!driver) return null;
 
@@ -75,8 +79,10 @@ function DriverInfoCard({ driverId }: { driverId: number }) {
     <div className="mt-4 pt-4 border-t border-white/8">
       <p className="text-[10px] uppercase tracking-widest text-primary mb-3">Your Chauffeur</p>
       <div className="flex items-center gap-4">
-        {picUrl ? (
-          <img src={picUrl} alt={driver.name} className="w-12 h-12 object-cover border border-primary/30 flex-shrink-0" />
+        {picUrl && !photoFailed ? (
+          <button type="button" className="w-12 h-12 overflow-hidden border border-primary/30 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-primary" onClick={() => setPhotoOpen(true)} aria-label={`Enlarge photo of ${driver.name}`}>
+            <img src={picUrl} alt={driver.name} className="w-full h-full object-cover" onError={() => setPhotoFailed(true)} />
+          </button>
         ) : (
           <div className="w-12 h-12 bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-serif text-sm flex-shrink-0">
             {initials}
@@ -99,6 +105,12 @@ function DriverInfoCard({ driverId }: { driverId: number }) {
           </div>
         </div>
       </div>
+      {photoOpen && picUrl && !photoFailed ? (
+        <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6" role="dialog" aria-modal="true" aria-label="Enlarged chauffeur photo" onClick={() => setPhotoOpen(false)}>
+          <button type="button" className="absolute top-5 right-5 text-white p-2" onClick={() => setPhotoOpen(false)} aria-label="Close photo"><X className="w-6 h-6" /></button>
+          <img src={picUrl} alt={driver.name} className="max-w-full max-h-[80vh] object-contain border border-primary/40" onClick={event => event.stopPropagation()} />
+        </div>
+      ) : null}
     </div>
   );
 }

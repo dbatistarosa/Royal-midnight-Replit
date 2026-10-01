@@ -1,4 +1,4 @@
-import { customFetch, type UploadUrlRequest, type UploadUrlResponse } from "@/api/client";
+import { apiUrl, customFetch, type UploadUrlRequest, type UploadUrlResponse } from "@/api/client";
 import type {
   AppNotification,
   Driver,
@@ -6,8 +6,10 @@ import type {
   DriverDocuments,
   DriverEarnings,
   DriverPayout,
+  DriverRouteMap,
   DriverReview,
   DriverVehicle,
+  DriverWorkflowConfig,
   FlightStatus,
   LoginResponse,
   PricingRule,
@@ -38,9 +40,28 @@ export function getDriver(driverId: number): Promise<Driver> {
   return customFetch<Driver>(`/drivers/${driverId}`);
 }
 
+export function getDriverWorkflowConfig(): Promise<DriverWorkflowConfig> {
+  return customFetch<DriverWorkflowConfig>("/drivers/workflow-config");
+}
+
+export function getBookingRouteMap(bookingId: number): Promise<DriverRouteMap> {
+  return customFetch<DriverRouteMap>(`/bookings/${bookingId}/route-map`);
+}
+
+export function signPrivateObject(objectPath: string): Promise<{ path: string; expiresAt: number }> {
+  return customFetch<{ path: string; expiresAt: number }>("/storage/sign", {
+    method: "POST",
+    body: JSON.stringify({ objectPath }),
+  });
+}
+
+export function privateObjectUrl(path: string): string {
+  return apiUrl(path);
+}
+
 export function patchDriverContact(
   driverId: number,
-  body: { phone?: string; profilePicture?: string },
+  body: { profilePicture?: string },
 ): Promise<Driver> {
   return customFetch<Driver>(`/drivers/${driverId}/contact`, {
     method: "PATCH",
@@ -92,6 +113,7 @@ export function patchDriverPayout(
     payoutLegalName?: string;
     payoutEmail?: string;
     payoutBankName?: string;
+    payoutSsn?: string;
     payoutRoutingNumber?: string;
     payoutAccountNumber?: string;
   },
@@ -110,7 +132,7 @@ export function getDriverDocuments(driverId: number): Promise<DriverDocuments> {
 
 export function postDriverDocument(
   driverId: number,
-  body: { docType: string; fileUrl: string; newExpiry?: string },
+  body: { docType: string; fileUrl: string; contentType: string; newExpiry?: string },
 ): Promise<DriverDocuments["submissions"][number]> {
   return customFetch(`/drivers/${driverId}/documents`, {
     method: "POST",
@@ -135,6 +157,14 @@ export function listBookings(params: { status?: string; driverId?: number }): Pr
   if (params.status) qs.set("status", params.status);
   if (params.driverId != null) qs.set("driverId", String(params.driverId));
   return customFetch<DriverBooking[]>(`/bookings?${qs.toString()}`);
+}
+
+// The API deliberately widens a driver's `pending` pool request to include
+// pending, authorized and unassigned confirmed corporate rides. One request is
+// therefore the complete pool; issuing a second `authorized` request returns
+// the same rows and duplicates every card in the app.
+export function listOpenPoolBookings(): Promise<DriverBooking[]> {
+  return listBookings({ status: "pending" });
 }
 
 export function getBooking(bookingId: number): Promise<DriverBooking> {
@@ -177,6 +207,14 @@ export function postTripStart(bookingId: number): Promise<BookingActionResult> {
 
 export function postTripComplete(bookingId: number): Promise<BookingActionResult> {
   return customFetch(`/bookings/${bookingId}/trip/complete`, { method: "POST" });
+}
+
+export function postTripItineraryAction(
+  bookingId: number,
+  sequence: number,
+  action: "arrive" | "depart",
+): Promise<{ ok: true; itinerary: DriverBooking["itinerary"] }> {
+  return customFetch(`/bookings/${bookingId}/trip/itinerary/${sequence}/${action}`, { method: "POST" });
 }
 
 export function getFlightStatus(bookingId: number): Promise<FlightStatus> {

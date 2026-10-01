@@ -13,9 +13,9 @@ const YEAR_OPTIONS = Array.from({ length: currentYear - 2014 }, (_, i) => curren
 
 export default function VehicleScreen() {
   const driverId = useAuthStore((s) => s.driverId);
-  const { data: vehicles, isLoading, refetch } = useDriverVehicles(driverId);
+  const { data: vehicles, isLoading, isError, refetch } = useDriverVehicles(driverId);
   const { data: catalog } = useVehicleCatalog();
-  const { vehicleClasses: VEHICLE_CLASSES } = useVehicleClasses();
+  const { vehicleClasses: VEHICLE_CLASSES, isError: classesError, refetch: refetchClasses } = useVehicleClasses();
   const postVehicle = usePostDriverVehicle(driverId ?? 0);
   const patchVehicle = usePatchDriverVehicle(driverId ?? 0);
   const deleteVehicle = useDeleteDriverVehicle(driverId ?? 0);
@@ -123,7 +123,7 @@ export default function VehicleScreen() {
   const primaryVehicle = vehicles?.find(v => v.isDefault) ?? vehicles?.[0];
 
   return (
-    <ScreenContainer>
+    <ScreenContainer scroll={false}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View className="pt-4">
 
@@ -131,6 +131,11 @@ export default function VehicleScreen() {
           {isLoading ? (
             <Card className="mb-4">
               <Text className="text-muted text-sm">Loading vehicle info...</Text>
+            </Card>
+          ) : isError ? (
+            <Card className="mb-4 border-danger">
+              <Text className="text-danger text-sm mb-3">We couldn't load your vehicles. No vehicle changes were made.</Text>
+              <TouchableOpacity onPress={() => void refetch()}><Text className="text-gold text-sm">Try again</Text></TouchableOpacity>
             </Card>
           ) : primaryVehicle ? (
             <Card className="mb-4">
@@ -197,7 +202,7 @@ export default function VehicleScreen() {
           ) : null}
 
           {/* Add / update vehicle */}
-          {!showForm ? (
+          {!showForm && !isError ? (
             <View className="gap-3">
               <GoldButton
                 label={primaryVehicle ? "Update Vehicle Info" : "Register Vehicle"}
@@ -234,9 +239,10 @@ export default function VehicleScreen() {
                 </TouchableOpacity>
               ) : null}
             </View>
-          ) : (
+          ) : !isError ? (
             <Card className="gap-4">
               <Text className="text-white font-sans-medium text-base mb-1">Vehicle Details</Text>
+              {classesError ? <View className="rounded-md border border-warning/40 bg-warning/10 p-3"><Text className="text-warning text-xs mb-2">Vehicle classes could not be loaded, so this form cannot be submitted yet.</Text><TouchableOpacity onPress={() => void refetchClasses()}><Text className="text-gold text-xs">Retry classes</Text></TouchableOpacity></View> : null}
 
               {/* Make */}
               <View>
@@ -399,6 +405,7 @@ export default function VehicleScreen() {
                     label="Save Vehicle"
                     onPress={() => void handleSubmit()}
                     loading={postVehicle.isPending || patchVehicle.isPending}
+                    disabled={classesError || VEHICLE_CLASSES.length === 0}
                   />
                 </View>
                 <TouchableOpacity
@@ -409,7 +416,7 @@ export default function VehicleScreen() {
                 </TouchableOpacity>
               </View>
             </Card>
-          )}
+          ) : null}
         </View>
       </ScrollView>
     </ScreenContainer>

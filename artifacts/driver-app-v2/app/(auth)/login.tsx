@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Linking,
@@ -25,6 +26,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loginPressed, setLoginPressed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [focusedField, setFocusedField] = useState<"email" | "password" | null>(null);
@@ -57,12 +59,21 @@ export default function LoginScreen() {
     }
   }
 
-  function openDriverApplication() {
-    void Linking.openURL("https://www.royalmidnight.com/driver/onboarding");
+  async function openExternal(url: string, title: string, message: string) {
+    try {
+      if (!(await Linking.canOpenURL(url))) throw new Error("URL unavailable");
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(title, message);
+    }
   }
 
   function openSupport() {
-    void Linking.openURL("https://www.royalmidnight.com/contact");
+    void openExternal(
+      "https://www.royalmidnight.com/contact",
+      "Support unavailable",
+      "Your phone could not open the support page.",
+    );
   }
 
   return (
@@ -81,7 +92,7 @@ export default function LoginScreen() {
           <View style={styles.brandBlock}>
             <View style={styles.logoFrame}>
               <Image
-                source={require("../../assets/icon.png")}
+                source={require("../../assets/royal-midnight-logo-transparent.png")}
                 style={styles.logo}
                 resizeMode="contain"
                 accessibilityRole="image"
@@ -166,8 +177,11 @@ export default function LoginScreen() {
             <Pressable
               testID="login-submit"
               onPress={handleLogin}
+              onPressIn={() => setLoginPressed(true)}
+              onPressOut={() => setLoginPressed(false)}
               disabled={loading}
-              style={({ pressed }) => [styles.loginButton, pressed && styles.loginButtonPressed, loading && styles.loginButtonDisabled]}
+              // NativeWind interop must receive resolved styles, not a Pressable callback.
+              style={[styles.loginButton, loginPressed && styles.loginButtonPressed, loading && styles.loginButtonDisabled]}
               accessibilityRole="button"
               accessibilityLabel="Iniciar sesión"
               accessibilityState={{ disabled: loading, busy: loading }}
@@ -184,7 +198,11 @@ export default function LoginScreen() {
 
             <Pressable
               testID="driver-application"
-              onPress={openDriverApplication}
+              onPress={() => void openExternal(
+                "https://www.royalmidnight.com/driver/onboarding",
+                "Application unavailable",
+                "Your phone could not open the driver application page.",
+              )}
               style={styles.secondaryAction}
               accessibilityRole="link"
               accessibilityLabel="Solicitar acceso como conductor"
@@ -243,25 +261,18 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   logoFrame: {
-    width: 106,
-    height: 106,
+    width: 190,
+    height: 190,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 53,
-    borderWidth: 1,
-    borderColor: "rgba(201, 168, 76, 0.55)",
-    backgroundColor: "#0d1829",
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
     marginBottom: 13,
-    shadowColor: colors.gold,
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 5,
   },
   logo: {
-    width: 94,
-    height: 94,
-    borderRadius: 47,
+    width: "100%",
+    height: "100%",
   },
   brandName: {
     color: colors.goldBright,

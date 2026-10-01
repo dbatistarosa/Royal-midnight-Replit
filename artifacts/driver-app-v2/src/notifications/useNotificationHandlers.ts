@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { router } from "expo-router";
 import * as Notifications from "expo-notifications";
+import { notificationRoute } from "@/notifications/notificationRoute";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -14,11 +15,31 @@ Notifications.setNotificationHandler({
 
 export function useNotificationHandlers(): void {
   useEffect(() => {
+    const openResponse = (response: Notifications.NotificationResponse) => {
+      const data = response.notification.request.content.data as
+        | { type?: unknown; bookingId?: unknown }
+        | undefined;
+      router.push(notificationRoute(data) as never);
+    };
+
     const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as { bookingId?: number | string } | undefined;
-      if (data?.bookingId != null) router.push(`/trip/${data.bookingId}`);
-      else router.push("/(app)/notifications");
+      openResponse(response);
     });
-    return () => responseSubscription.remove();
+
+    // The listener only covers taps received after this layout mounts. If the
+    // app was closed, Expo retains the tap that launched it and it must be
+    // consumed explicitly or the notification appears to do nothing.
+    let cancelled = false;
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (!cancelled && response) {
+        openResponse(response);
+        void Notifications.clearLastNotificationResponseAsync();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      responseSubscription.remove();
+    };
   }, []);
 }

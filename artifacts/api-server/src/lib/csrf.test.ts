@@ -47,4 +47,16 @@ describe("cookie mutation origin protection", () => {
       }),
     ).toBe(true);
   });
+
+  it("allows the identified native driver client even when Android retained a session cookie", () => {
+    expect(
+      isTrustedCookieMutationOrigin({
+        method: "POST",
+        sessionCookie: "stale-mobile-cookie",
+        origin: "http://localhost",
+        allowedOrigins,
+        nativeClient: true,
+      }),
+    ).toBe(true);
+  });
 });

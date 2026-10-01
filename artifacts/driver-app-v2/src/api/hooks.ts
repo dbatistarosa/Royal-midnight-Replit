@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "@/api/driverApi";
+import { findOpenPoolBooking, uniqueBookingsById } from "@/api/openPool";
 
 export function useDriverByUserId(userId: number | null) {
   return useQuery({
@@ -29,7 +30,7 @@ export function usePatchDriverStatus(driverId: number) {
 export function usePatchDriverContact(driverId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { phone?: string; profilePicture?: string }) => api.patchDriverContact(driverId, body),
+    mutationFn: (body: { profilePicture?: string }) => api.patchDriverContact(driverId, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["driver"] }),
   });
 }
@@ -77,13 +78,38 @@ export function useDriverEarnings(driverId: number | null, range?: { startDate: 
 export function useOpenPoolBookings() {
   return useQuery({
     queryKey: ["bookings", "open-pool"],
-    queryFn: async () => {
-      const [pending, authorized] = await Promise.all([
-        api.listBookings({ status: "pending" }),
-        api.listBookings({ status: "authorized" }),
-      ]);
-      return [...pending, ...authorized];
-    },
+    queryFn: async () => uniqueBookingsById(await api.listOpenPoolBookings()),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useDriverWorkflowConfig() {
+  return useQuery({
+    queryKey: ["driver", "workflow-config"],
+    queryFn: api.getDriverWorkflowConfig,
+    staleTime: 60_000,
+  });
+}
+
+export function useBookingRouteMap(bookingId: number | null) {
+  return useQuery({
+    queryKey: ["booking", bookingId, "route-map"],
+    queryFn: () => api.getBookingRouteMap(bookingId!),
+    enabled: bookingId != null,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useSignPrivateObject() {
+  return useMutation({ mutationFn: api.signPrivateObject });
+}
+
+export function useOpenPoolBooking(bookingId: number | null) {
+  return useQuery({
+    queryKey: ["bookings", "open-pool"],
+    queryFn: async () => uniqueBookingsById(await api.listOpenPoolBookings()),
+    select: (bookings) => findOpenPoolBooking(bookings, bookingId ?? Number.NaN),
+    enabled: bookingId != null && Number.isFinite(bookingId),
     refetchInterval: 15_000,
   });
 }
@@ -143,6 +169,14 @@ export function useTripStart(bookingId: number) {
 
 export function useTripComplete(bookingId: number) {
   return useMutation({ mutationFn: () => api.postTripComplete(bookingId), ...useTripMutation(bookingId) });
+}
+
+export function useTripItineraryAction(bookingId: number) {
+  return useMutation({
+    mutationFn: ({ sequence, action }: { sequence: number; action: "arrive" | "depart" }) =>
+      api.postTripItineraryAction(bookingId, sequence, action),
+    ...useTripMutation(bookingId),
+  });
 }
 
 export function useDriverReviews(driverId: number | null) {
@@ -253,7 +287,7 @@ export function useVehicleCatalog() {
  *  mirrors the web app's useVehicleClasses() so both surfaces agree on what
  *  classes exist without either one hardcoding its own copy. */
 export function useVehicleClasses() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["pricing-rules"],
     queryFn: api.getPricingRules,
     staleTime: 5 * 60 * 1000,
@@ -269,5 +303,5 @@ export function useVehicleClasses() {
       !!r.isActive && !!r.vehicleClass && !!r.name && r.passengers != null)
     .map((r) => ({ value: r.vehicleClass, label: r.name }));
 
-  return { vehicleClasses, isLoading };
+  return { vehicleClasses, isLoading, isError, refetch };
 }

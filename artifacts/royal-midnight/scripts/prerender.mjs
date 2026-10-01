@@ -31,10 +31,12 @@ const ROUTES = [
   "/driver-agreement",
 ];
 
-// React 19 renders react-helmet-async's <title>/<meta>/<link>/<script> tags
+// React 19 renders react-helmet-async's <title>/<meta>/<link> tags
 // inline (no head-context capture in SSR — see entry-server.tsx). Pull them
 // back out of the rendered body string and hoist them into <head> ourselves.
-const HEAD_TAG_PATTERN = /<title>[\s\S]*?<\/title>|<meta\b[^>]*\/>|<link\b[^>]*\/>|<script type="application\/ld\+json">[\s\S]*?<\/script>/g;
+// Structured-data scripts intentionally stay in the body so the server and
+// client trees remain identical during hydration.
+const HEAD_TAG_PATTERN = /<title>[\s\S]*?<\/title>|<meta\b[^>]*\/>|<link\b[^>]*\/>/g;
 
 function extractHeadTags(html) {
   const headTags = html.match(HEAD_TAG_PATTERN) ?? [];
@@ -68,7 +70,10 @@ function splice(template, path, html) {
     .replace(STATIC_DESCRIPTION_PATTERN, "");
   const tail = template.slice(tailIdx);
   const withHead = prefix + headTags.join("") + "\n    " + tail;
-  return withHead.replace('<div id="root"></div>', `<div id="root">${body}</div>`);
+  return withHead.replace(
+    '<div id="root"></div>',
+    `<div id="root" data-prerendered-path="${path}">${body}</div>`,
+  );
 }
 
 async function main() {

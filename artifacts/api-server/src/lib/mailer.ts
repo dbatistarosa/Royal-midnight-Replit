@@ -1,4 +1,5 @@
 import { enqueueMail } from "./mailOutbox.js";
+import { formatBookingRoute, type ItineraryRowLike } from "./bookingItinerary.js";
 
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = parseInt(process.env.SMTP_PORT ?? "587");
@@ -74,6 +75,7 @@ export type BookingEmailData = {
   flightNumber?: string | null;
   specialRequests?: string | null;
   status?: string;
+  itinerary?: readonly ItineraryRowLike[];
 };
 
 export async function sendBookingConfirmationPassenger(b: BookingEmailData) {
@@ -296,14 +298,17 @@ export async function sendDriverUnassignedAdmin(bookingId: number, driverName: s
 export async function sendInvoiceToPassenger(b: BookingEmailData, invoiceUrl: string, invoicePdfUrl: string | null) {
   const bookingRef = `RM-${String(b.id).padStart(4, "0")}`;
   const appUrl = process.env.APP_URL ?? "https://royalmidnight.com";
+  const route = formatBookingRoute(b, b.itinerary ?? []);
+  const routeRows = route
+    .map((point) => row(point.label, escapeHtml(point.address)))
+    .join("");
   const html = wrap(`
 <h2 style="color:#c9a84c;font-size:20px;margin:0 0 8px">Your Invoice is Ready</h2>
 <p style="color:#888;font-size:13px;margin:0 0 20px">Please find your invoice for booking ${bookingRef} below. Payment is due within 7 days.</p>
 <table style="width:100%;border-collapse:collapse">
   ${row("Booking #", bookingRef)}
   ${row("Passenger", escapeHtml(b.passengerName))}
-  ${row("Pickup", escapeHtml(b.pickupAddress))}
-  ${row("Dropoff", escapeHtml(b.dropoffAddress))}
+  ${routeRows}
   ${row("Date &amp; Time", new Date(b.pickupAt).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "full", timeStyle: "short" }))}
   ${row("Vehicle", b.vehicleClass === "business" ? "Business Class Sedan" : "Premium SUV")}
   ${row("Total Due", `<span style="color:#c9a84c;font-weight:bold">$${b.priceQuoted.toFixed(2)}</span>`)}

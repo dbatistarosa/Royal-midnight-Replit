@@ -1,5 +1,6 @@
 import Constants from "expo-constants";
 import { useAuthStore } from "@/auth/store";
+import { fetchWithTimeout, RequestTimeoutError } from "@/api/requestTimeout";
 
 let baseUrl = "https://www.royalmidnight.com/api";
 
@@ -22,6 +23,11 @@ function urlFor(path: string): string {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+/** Build a URL for a signed API path (for example a private profile image). */
+export function apiUrl(path: string): string {
+  return urlFor(path);
+}
+
 export async function customFetch<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
@@ -34,7 +40,15 @@ export async function customFetch<T = unknown>(path: string, init: RequestInit =
   const token = useAuthStore.getState().token;
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(urlFor(path), { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(urlFor(path), { ...init, headers });
+  } catch (error) {
+    if (error instanceof RequestTimeoutError) {
+      throw new ApiError(408, "The request timed out. Check your connection and try again.");
+    }
+    throw error;
+  }
   const text = await response.text();
   let data: unknown = undefined;
   if (text) {

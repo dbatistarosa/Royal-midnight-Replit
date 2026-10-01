@@ -16,6 +16,8 @@ export const complianceDocumentsTable = pgTable("compliance_documents", {
   status: text("status").notNull().default("pending_review"),
   /** Object-storage URL for the uploaded file */
   fileUrl: text("file_url").notNull(),
+  /** MIME type recorded at upload time so clients can render PDFs safely. */
+  contentType: text("content_type").notNull().default("application/octet-stream"),
   /** New expiry date submitted by the driver (YYYY-MM-DD) */
   newExpiry: text("new_expiry"),
   /** Admin notes at review time */

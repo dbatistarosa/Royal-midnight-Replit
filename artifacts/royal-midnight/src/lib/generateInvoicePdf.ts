@@ -16,6 +16,7 @@ export type InvoiceData = {
   vehicleClass?: string | null;
   passengers?: number | null;
   flightNumber?: string | null;
+  itinerary?: Array<{ sequence: number; kind: "stop" | "final" | string; address: string }>;
   status: string;
   /**
    * The charge lines, built by lib/receipt.ts — the same object the ride-detail
@@ -150,9 +151,13 @@ export async function generateInvoicePdf(data: InvoiceData): Promise<void> {
   doc.text("TRIP DETAILS", 48, y);
   y += 14;
 
+  const stops = (data.itinerary ?? [])
+    .filter((point) => point.kind === "stop" && point.address.trim())
+    .sort((left, right) => left.sequence - right.sequence);
   const detailRows: [string, string][] = [
     ["Pickup", data.pickupAddress],
-    ["Drop-off", data.dropoffAddress],
+    ...stops.map((stop, index) => [`Stop ${index + 1}`, stop.address] as [string, string]),
+    ["Final destination", data.dropoffAddress],
     ["Vehicle Class", vehicleLabel(data.vehicleClass)],
   ];
   if (data.passengers != null) detailRows.push(["Passengers", String(data.passengers)]);

@@ -1,10 +1,5 @@
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { Link } from "wouter";
+import { ChevronDown } from "lucide-react";
 import { PageSeo } from "@/components/PageSeo";
 import { FAQ_ITEMS, SCHEMA } from "@/config/schema";
 
@@ -26,18 +21,22 @@ export default function FAQ() {
         </div>
 
         <div className="bg-card border border-border p-8 rounded-lg">
-          <Accordion type="single" collapsible className="w-full">
+          <div className="w-full">
             {FAQ_ITEMS.map((faq, index) => (
-              <AccordionItem key={index} value={`item-${index}`}>
-                <AccordionTrigger className="text-left font-serif text-lg">
-                  {faq.question}
-                </AccordionTrigger>
-                <AccordionContent className="text-muted-foreground text-base leading-relaxed">
+              <details key={index} className="group border-b border-border last:border-b-0">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-5 text-left font-serif text-lg transition-colors hover:text-primary [&::-webkit-details-marker]:hidden">
+                  <span>{faq.question}</span>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180"
+                  />
+                </summary>
+                <div className="pb-5 pr-8 text-base leading-relaxed text-muted-foreground">
                   {faq.answer}
-                </AccordionContent>
-              </AccordionItem>
+                </div>
+              </details>
             ))}
-          </Accordion>
+          </div>
         </div>
 
         <div className="mt-12 text-center">

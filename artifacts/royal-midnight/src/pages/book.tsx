@@ -910,13 +910,17 @@ export default function Book() {
   // number the server derives agree to the cent.
   const q = selectedQuote;
   const taxableSubtotal = round2((q?.subtotal ?? 0) + extrasTotal);
-  const taxAmount = round2(taxableSubtotal * (q?.taxRate ?? 0));
-  const cardProcessingFee = round2((taxableSubtotal + taxAmount) * (q?.cardProcessingFeeRate ?? 0));
-  const baseTotal = q ? round2(taxableSubtotal + taxAmount + cardProcessingFee) : 0;
-
-  const effectiveTotal = round2(promoResult?.valid && promoResult.discountAmount != null
-    ? Math.max(0, baseTotal - promoResult.discountAmount)
-    : baseTotal);
+  const promoEligibleSubtotal = round2(Math.max(0, taxableSubtotal - (q?.airportFee ?? 0)));
+  const undiscountedTax = round2(taxableSubtotal * (q?.taxRate ?? 0));
+  const undiscountedCardFee = round2((taxableSubtotal + undiscountedTax) * (q?.cardProcessingFeeRate ?? 0));
+  const baseTotal = q ? round2(taxableSubtotal + undiscountedTax + undiscountedCardFee) : 0;
+  const appliedDiscount = promoResult?.valid && promoResult.discountAmount != null
+    ? Math.min(promoEligibleSubtotal, Math.max(0, promoResult.discountAmount))
+    : 0;
+  const discountedSubtotal = round2(taxableSubtotal - appliedDiscount);
+  const taxAmount = round2(discountedSubtotal * (q?.taxRate ?? 0));
+  const cardProcessingFee = round2((discountedSubtotal + taxAmount) * (q?.cardProcessingFeeRate ?? 0));
+  const effectiveTotal = q ? round2(discountedSubtotal + taxAmount + cardProcessingFee) : 0;
 
   const handlePromoValidate = async () => {
     if (!promoCode.trim() || !selectedQuote) return;
@@ -925,9 +929,10 @@ export default function Book() {
       const res = await fetch(`${API_BASE}/promos/validate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // The promo is applied to the whole ticket, add-ons included — which is
-        // also what the server does when it re-derives the discount.
-        body: JSON.stringify({ code: promoCode.trim(), bookingAmount: baseTotal }),
+        // Promotions apply to the eligible pre-tax subtotal. Tax and the card
+        // fee are recalculated after the discount by both this screen and the
+        // authoritative booking endpoint.
+        body: JSON.stringify({ code: promoCode.trim(), bookingAmount: promoEligibleSubtotal }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { error?: string };
@@ -1461,7 +1466,11 @@ export default function Book() {
                   return (
                     <div
                       key={vc}
-                      onClick={() => !isDisabled && setSelectedVehicle(vc)}
+                      onClick={() => {
+                        if (isDisabled) return;
+                        setSelectedVehicle(vc);
+                        setPromoResult(null);
+                      }}
                       className={`cursor-pointer relative overflow-hidden transition-all duration-300 ${
                         isSelected
                           ? "border border-primary/60 shadow-[0_0_40px_rgba(201,168,76,0.12)]"
@@ -1634,7 +1643,7 @@ export default function Book() {
                           )}
                           <span className="text-3xl font-serif text-primary">${effectiveTotal.toFixed(2)}</span>
                           {promoResult?.valid && promoResult.discountAmount != null && (
-                            <div className="text-xs text-green-400">−${promoResult.discountAmount.toFixed(2)} discount</div>
+                            <div className="text-xs text-green-400">−${appliedDiscount.toFixed(2)} subtotal discount</div>
                           )}
                         </div>
                       </div>
@@ -1682,7 +1691,7 @@ export default function Book() {
                           )}
                           <p className="text-4xl font-serif text-primary">${effectiveTotal.toFixed(2)}</p>
                           {promoResult?.valid && promoResult.discountAmount != null
-                            ? <p className="text-xs text-green-400 mt-1">Promo applied — saving ${promoResult.discountAmount.toFixed(2)}</p>
+                            ? <p className="text-xs text-green-400 mt-1">Promo applied — ${appliedDiscount.toFixed(2)} off before tax and fees</p>
                             : <p className="text-xs text-gray-700 mt-1">All inclusive — no hidden fees</p>
                           }
                         </div>
@@ -1696,12 +1705,15 @@ export default function Book() {
                                 <button
                                   key={extra.id}
                                   type="button"
-                                  onClick={() => setSelectedExtras(prev => {
+                                  onClick={() => {
+                                    setPromoResult(null);
+                                    setSelectedExtras(prev => {
                                     const next = new Set(prev);
                                     if (next.has(extra.id)) next.delete(extra.id);
                                     else next.add(extra.id);
                                     return next;
-                                  })}
+                                    });
+                                  }}
                                   className={`w-full flex items-center justify-between px-4 py-3 border text-left transition-all ${
                                     selectedExtras.has(extra.id)
                                       ? "border-primary/50 bg-primary/5 text-white"

@@ -29,7 +29,7 @@ export function hasAnyPreference(p: PassengerPreferences | null | undefined): bo
     !!p.musicPreference ||
     !!p.quietRide ||
     !!p.preferredBeverage ||
-    !!p.opensOwnDoor ||
+    p.opensOwnDoor != null ||
     !!p.addressTitle ||
     !!p.vipNotes
   );
@@ -73,7 +73,7 @@ export function PassengerPreferencesPanel({
         {p.musicPreference && <Item icon={Music} label="Music" value={p.musicPreference} />}
         {p.quietRide && <Item icon={Volume2} label="Quiet Ride" value="Prefers minimal conversation" />}
         {p.preferredBeverage && <Item icon={Coffee} label="Beverage" value={p.preferredBeverage} />}
-        {p.opensOwnDoor && <Item icon={DoorOpen} label="Door Service" value="Opens own door" />}
+        {p.opensOwnDoor != null && <Item icon={DoorOpen} label="Door Service" value={p.opensOwnDoor ? "Passenger opens own door" : "Driver opens door"} />}
       </div>
     </div>
   );

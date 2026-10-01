@@ -5,11 +5,12 @@ import { useSupportTickets } from "@/api/hooks";
 import { ScreenContainer } from "@/components/ScreenContainer";
 import { Card } from "@/components/Card";
 import { GoldButton } from "@/components/GoldButton";
+import { EmptyState } from "@/components/DriverUI";
 
 const STATUS_LABEL: Record<string, string> = { open: "Open", in_progress: "In Progress", closed: "Closed" };
 
 export default function SupportListScreen() {
-  const { data: tickets } = useSupportTickets();
+  const { data: tickets, isLoading, isError, refetch } = useSupportTickets();
 
   return (
     <ScreenContainer>
@@ -17,7 +18,7 @@ export default function SupportListScreen() {
         <GoldButton label="New Ticket" onPress={() => router.push("/(app)/account/support/new")} />
       </View>
 
-      {!tickets || tickets.length === 0 ? (
+      {isLoading ? <EmptyState loading title="Loading support tickets" message="Retrieving your support history." /> : isError ? <EmptyState title="Couldn't load support tickets" message="Check your connection and try again." onRetry={() => void refetch()} /> : !tickets || tickets.length === 0 ? (
         <Text className="text-muted text-sm">No support tickets yet.</Text>
       ) : (
         <View className="gap-3">

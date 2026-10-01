@@ -228,3 +228,7 @@ No guardes ni muestres contraseñas, tokens, claves FCM o secretos. No uses la U
 ```
 
 Este archivo es la memoria persistente de trabajo para la siguiente sesión; no depende de que el historial temporal del chat siga disponible.
+
+## Entrada de continuación actualizada — 27sept2026
+
+Las prioridades de build21 de este documento ya fueron superadas. Para continuar, leer COMPLETO primero `royal-midnight-driver-session-handoff-2026-09-27.md` en esta misma carpeta. Contiene builds21/22/23, evidencia, cambios locales, causa de estilos, pruebas y próximo paso en el teléfono Android del usuario. No reiniciar investigaciones desde este archivo antiguo.

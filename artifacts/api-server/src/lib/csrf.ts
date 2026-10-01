@@ -32,8 +32,13 @@ export function isTrustedCookieMutationOrigin(input: {
   referer?: HeaderValue;
   allowedOrigins: ReadonlySet<string>;
   isAllowedPreviewOrigin?: (origin: string) => boolean;
+  nativeClient?: boolean;
 }): boolean {
-  if (!UNSAFE_METHODS.has(input.method.toUpperCase()) || !input.sessionCookie) {
+  if (
+    !UNSAFE_METHODS.has(input.method.toUpperCase()) ||
+    !input.sessionCookie ||
+    input.nativeClient === true
+  ) {
     return true;
   }
 

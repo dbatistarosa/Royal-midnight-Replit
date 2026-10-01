@@ -7,9 +7,56 @@ import {
   pointInPolygon,
   normalizePercentRate,
   computeFareBreakdown,
+  computeDiscountedCharge,
   computePostTripCharge,
   AIRPORT_ADDRESSES,
 } from "./pricing";
+
+describe("computeDiscountedCharge", () => {
+  it("applies the promo before tax and card processing", () => {
+    const result = computeDiscountedCharge({
+      taxableSubtotal: 100,
+      discountAmount: 20,
+      taxRate: 0.07,
+      cardProcessingFeeRate: 0.04,
+    });
+    expect(result.discountedSubtotal).toBe(80);
+    expect(result.taxAmount).toBe(5.6);
+    expect(result.cardProcessingFee).toBeCloseTo(3.42, 2);
+    expect(result.total).toBeCloseTo(89.02, 2);
+  });
+
+  it("caps a fixed discount at the eligible pre-tax subtotal", () => {
+    const result = computeDiscountedCharge({
+      taxableSubtotal: 15,
+      discountAmount: 50,
+      taxRate: 0.07,
+      cardProcessingFeeRate: 0.04,
+    });
+    expect(result).toEqual({
+      discountAmount: 15,
+      discountedSubtotal: 0,
+      taxAmount: 0,
+      cardProcessingFee: 0,
+      total: 0,
+    });
+  });
+
+  it("keeps non-discountable airport charges in the customer total", () => {
+    const result = computeDiscountedCharge({
+      taxableSubtotal: 110,
+      maxDiscountableSubtotal: 100,
+      discountAmount: 20,
+      taxRate: 0.07,
+      cardProcessingFeeRate: 0.04,
+    });
+    expect(result.discountAmount).toBe(20);
+    expect(result.discountedSubtotal).toBe(90);
+    expect(result.taxAmount).toBe(6.3);
+    expect(result.cardProcessingFee).toBe(3.85);
+    expect(result.total).toBe(100.15);
+  });
+});
 
 describe("isAirportTrip", () => {
   it("matches a bare airport code", () => {

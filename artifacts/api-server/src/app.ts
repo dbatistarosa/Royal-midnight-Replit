@@ -10,6 +10,7 @@ import { logger } from "./lib/logger";
 import { globalLimiter } from "./lib/rateLimit";
 import { SESSION_COOKIE } from "./middleware/auth.js";
 import { isTrustedCookieMutationOrigin } from "./lib/csrf.js";
+import { isNativeClient, NATIVE_CLIENT_HEADER } from "./lib/authResponse.js";
 
 /**
  * Error monitoring.
@@ -167,6 +168,10 @@ app.use((req, res, next) => {
     referer: req.headers.referer,
     allowedOrigins: ALLOWED_ORIGINS,
     isAllowedPreviewOrigin,
+    // React Native can retain the HttpOnly cookie issued alongside its bearer
+    // token. Its explicit custom header is CORS-preflighted in browsers, so an
+    // unrelated website cannot use this exemption for a cookie-backed CSRF.
+    nativeClient: isNativeClient(req.headers[NATIVE_CLIENT_HEADER]),
   });
   if (!trusted) {
     logger.warn({ ip: req.ip, path: req.path }, "csrf_origin_rejected");

@@ -35,6 +35,7 @@ function VehiclesInner() {
   const [form, setForm] = useState({ year: "", make: "", model: "", color: "", vehicleClass: "business", passengerCapacity: "", luggageCapacity: "", hasCarSeat: false, regPlate: "" });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [pendingNotice, setPendingNotice] = useState<string | null>(null);
 
   const loadDriver = useCallback(async () => {
     if (!user) { setLoading(false); return; }
@@ -71,8 +72,15 @@ function VehiclesInner() {
           isDefault: vehicles.length === 0,
         }),
       });
-      if (!res.ok) throw new Error((await res.json() as { error?: string }).error ?? "Failed");
-      toast({ title: "Vehicle added" });
+      const response = await res.json().catch(() => ({})) as { error?: string; pendingApproval?: boolean };
+      if (!res.ok) throw new Error(response.error ?? "Failed");
+      if (res.status === 202 || response.pendingApproval) {
+        const notice = "Your vehicle change was sent for administrator approval. The active vehicle stays unchanged until it is approved.";
+        setPendingNotice(notice);
+        toast({ title: "Approval requested", description: notice });
+      } else {
+        toast({ title: "Vehicle added" });
+      }
       setShowAdd(false);
       setForm({ year: "", make: "", model: "", color: "", vehicleClass: "business", passengerCapacity: "", luggageCapacity: "", hasCarSeat: false, regPlate: "" });
       void loadVehicles();
@@ -84,11 +92,15 @@ function VehiclesInner() {
     if (!driverId) return;
     setDeleting(id);
     try {
-      await assertOk(
-        await fetch(`${API_BASE}/drivers/${driverId}/vehicles/${id}`, { method: "DELETE", headers: authHdr }),
-        "Could not remove the vehicle",
-      );
-      toast({ title: "Vehicle removed" });
+      const response = await fetch(`${API_BASE}/drivers/${driverId}/vehicles/${id}`, { method: "DELETE", headers: authHdr });
+      await assertOk(response, "Could not remove the vehicle");
+      if (response.status === 202) {
+        const notice = "The vehicle removal was sent for administrator approval. The active vehicle stays unchanged until it is approved.";
+        setPendingNotice(notice);
+        toast({ title: "Approval requested", description: notice });
+      } else {
+        toast({ title: "Vehicle removed" });
+      }
       void loadVehicles();
     } catch (e: unknown) {
       toast({ title: "Error", description: e instanceof Error ? e.message : "Failed", variant: "destructive" });
@@ -100,12 +112,15 @@ function VehiclesInner() {
   const handleSetDefault = async (id: number) => {
     if (!driverId) return;
     try {
-      await assertOk(
-        await fetch(`${API_BASE}/drivers/${driverId}/vehicles/${id}`, {
+      const response = await fetch(`${API_BASE}/drivers/${driverId}/vehicles/${id}`, {
           method: "PATCH", headers: authHdr, body: JSON.stringify({ isDefault: true }),
-        }),
-        "Could not set the default vehicle",
-      );
+        });
+      await assertOk(response, "Could not set the default vehicle");
+      if (response.status === 202) {
+        const notice = "The default vehicle change was sent for administrator approval. The active vehicle stays unchanged until it is approved.";
+        setPendingNotice(notice);
+        toast({ title: "Approval requested", description: notice });
+      }
       void loadVehicles();
     } catch (e: unknown) {
       toast({ title: "Error", description: e instanceof Error ? e.message : "Failed", variant: "destructive" });
@@ -123,6 +138,12 @@ function VehiclesInner() {
           <Plus className="w-4 h-4 mr-2" />Add Vehicle
         </Button>
       </div>
+
+      {pendingNotice && (
+        <div className="mb-5 border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary">
+          {pendingNotice}
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-12 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" />Loading vehicles…</div>
