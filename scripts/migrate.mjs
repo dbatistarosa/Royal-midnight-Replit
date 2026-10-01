@@ -1,14 +1,13 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
+import {
+  checksumSql,
+  loadMigrationManifest,
+} from "./migration-manifest.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(path.join(root, "lib/db/package.json"));
 const { Client } = require("pg");
-const normalize = (sql) => sql.replaceAll("\r", "").trim();
-const checksum = (sql) =>
-  createHash("sha256").update(normalize(sql)).digest("hex");
 const apply = process.argv.includes("--apply");
 const explicitlyAllowedDrift = new Set(
   (process.env.ALLOW_MIGRATION_DRIFT ?? "")
@@ -27,14 +26,8 @@ const client = new Client({
 await client.connect();
 try {
   const directory = path.join(root, "supabase/migrations");
-  const files = (await fs.readdir(directory))
-    .filter((f) => /^\d{14}_[a-z0-9_]+\.sql$/.test(f))
-    .sort();
-  for (const file of files) {
-    const [, version, name] = file.match(/^(\d{14})_(.+)\.sql$/);
-    const source = normalize(
-      await fs.readFile(path.join(directory, file), "utf8"),
-    );
+  const migrations = await loadMigrationManifest(directory);
+  for (const { file, version, name, source, checksum } of migrations) {
     await client.query("BEGIN");
     try {
       await client.query("SET LOCAL lock_timeout='10s'");
@@ -64,7 +57,7 @@ try {
       if (history.length > 1)
         throw new Error("Duplicate migration name: " + name);
       if (history.length) {
-        if (checksum(history[0].statements.join("\n")) !== checksum(source)) {
+        if (checksumSql(history[0].statements.join("\n")) !== checksum) {
           if (!explicitlyAllowedDrift.has(file))
             throw new Error("Migration drift: " + file);
           console.warn("Accepted explicitly allowlisted migration drift: " + file);
