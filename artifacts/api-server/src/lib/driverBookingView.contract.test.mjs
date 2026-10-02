@@ -1,16 +1,17 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import { expect, it } from "vitest";
 import { hasPassengerPreferences, normalizePassengerEmail } from "./driverBookingView.ts";
 
-test("passenger email lookup is normalized exactly", () => {
-  assert.equal(normalizePassengerEmail("  Eliot@Example.COM "), "eliot@example.com");
-  assert.equal(normalizePassengerEmail(" "), null);
+it("passenger email lookup is normalized exactly", () => {
+  expect(normalizePassengerEmail("  Eliot@Example.COM ")).toBe("eliot@example.com");
+  expect(normalizePassengerEmail(" ")).toBeNull();
 });
 
-test("driver preferences keep explicit door-service choices", () => {
-  assert.equal(hasPassengerPreferences({ opensOwnDoor: false }), true);
+it("driver preferences keep explicit door-service choices", () => {
+  expect(hasPassengerPreferences({ opensOwnDoor: false })).toBe(true);
 });
 
-test("driver preferences stay empty when every field is unset", () => {
-  assert.equal(hasPassengerPreferences({ opensOwnDoor: null, quietRide: false }), false);
+it("driver preferences stay empty when every field is unset", () => {
+  expect(
+    hasPassengerPreferences({ opensOwnDoor: null, quietRide: false }),
+  ).toBe(false);
 });
