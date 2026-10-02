@@ -30,7 +30,7 @@
 | Driver Expo config | PASS | Package `com.royalmidnight.driver`; API `https://www.royalmidnight.com/api`; resolved config contains `x86_64`. |
 | Production dependency audit | BLOCKED — external registry | Two `pnpm audit --audit-level high --prod` attempts produced no registry response and were stopped after bounded waits; no dependency was modified. |
 | Supabase migration manifest | PASS | `node --test scripts/migration-manifest.test.mjs`: 6/6; ten ordered, nonempty, uniquely versioned migration files with checksums. Commit `5565fc5`. |
-| Production migration state | BLOCKED — local credential shape | The ignored production export contains one `DATABASE_URL` entry, but its value is not a PostgreSQL URI. `pnpm db:check` therefore never reached Supabase. No SQL was applied and the process-scoped value was cleared. |
+| Production migration state | PASS with one documented exception | Read-only Supabase query: all ten authoritative migration names are present; nine normalized SHA-256 values match exactly. `backfill_default_vehicle_capacity` has the known content drift already explicitly allowlisted in `vercel.json`. No SQL was applied. |
 | Forbidden tracked paths | PASS | Zero tracked `.env*` files other than `.env.example`, mobile service files, private-key containers, Vercel environment exports, `.playwright-cli`, or `.superpowers` ledgers. |
 | Changed-text secret scan | PASS | Zero unresolved private-key, provider-token, credentialed-database-URL, or hardcoded provider-secret findings in `recovery/phase0-2026-10-01...HEAD`. Output was restricted to rule, path, and line. |
 | Git whitespace and lineage | PASS | `git diff --check` exited 0; both `origin/main` and recovery commit `ba90d41` are ancestors of `HEAD`. |
@@ -44,9 +44,10 @@
 - The web failure was reproduced independently with esbuild transforming input larger than 1 MB. A temporary-directory change, native-binary inclusion, disabled esbuild worker threads, and a Windows stdio patch did not produce an acceptable production build. All unsuccessful dependency/configuration experiments were fully reverted; no esbuild patch or lockfile drift remains.
 - The diagnostic web build proves that Rollup can transform and render the recovered source on this host, but the final production esbuild-transpile step remains blocked by Windows file locking. This is recorded as a platform limitation, not reported as a passing production build.
 - The production audit reached no response from the npm audit service in two attempts, including one with bounded fetch settings. This is recorded as missing external verification, not as a clean audit.
-- The user selected Production for the read-only migration-state check. The existing ignored production environment export was inspected only in memory: the expected key exists once, but the value is not a PostgreSQL connection URI. The resulting hostname-resolution error happened before any database connection or query.
-- A proposed refresh of all Production variables from Vercel was rejected because it would unnecessarily download every production secret. It was not retried. The safe remediation is to correct `DATABASE_URL` in Vercel/Supabase without sharing the value, then generate a narrowly controlled local environment or execute the read-only checker in an already configured trusted environment.
-- No secret value, database URL, database host, username, password, provider token, private key, or SQL statement was printed or written to this report.
+- The user selected Production for the read-only migration-state check. The existing ignored local export contains the expected key once, but its substituted value is not a PostgreSQL connection URI; the local CLI attempt therefore stopped before any connection or query and cleared the process variable.
+- A proposed refresh of all Production variables from Vercel was rejected because it would unnecessarily download every production secret, and it was not retried. The already connected Supabase integration provided the narrower safe path: project discovery reported `royal-midnight` as active and healthy, followed by read-only metadata/hash queries only.
+- Production contains all ten authoritative migration names. Nine normalized SQL SHA-256 values match the local manifest exactly. The sole mismatch is `20260916093000_backfill_default_vehicle_capacity.sql`; its production history uses an earlier version/content variant and the filename is already explicitly listed in `ALLOW_MIGRATION_DRIFT` in `vercel.json`. Applied migration SQL was not displayed.
+- No secret value, database URL, database host, username, password, provider token, private key, or applied migration statement was written to this report.
 
 ## Commands and commit evidence
 
@@ -58,16 +59,16 @@
 | API | package production build plus cold import of `dist/app.mjs` | PASS. |
 | Web | package production build | BLOCKED at esbuild 0.28.2 temporary-file cleanup on Windows; diagnostic unminified build only passed. |
 | Driver v2 | explicit TypeScript check, 39 tests, Android export, resolved Expo config | PASS; no EAS build or publication. |
-| Migrations | manifest validator and `corepack pnpm db:check` without `--apply` | Local manifest PASS; Production state BLOCKED before connection. |
+| Migrations | manifest validator, local `corepack pnpm db:check` attempt without `--apply`, and read-only Supabase metadata/hash query | Local manifest PASS; Production 10/10 present, 9 exact, 1 explicitly allowlisted known drift. |
 | Security | tracked-path scan and changed-line pattern scan | PASS, zero findings. |
 | Git | ancestry checks and `git diff --check recovery/phase0-2026-10-01...HEAD` | PASS. |
 
 ## Phase 0 disposition
 
-The integration branch is locally reconciled and the validated code/test gates pass, but Phase 0 is **not fully green**. Three independent external/platform gates remain open:
+The integration branch is locally reconciled and the validated code/test gates pass, but Phase 0 is **not fully green**. Two external/platform gates and one migration-history debt remain open:
 
 1. run the normal minified web production build on a non-affected runner (recommended: Linux CI);
 2. obtain a successful production dependency audit response from the npm registry;
-3. provide a correctly configured Production PostgreSQL URI inside a trusted environment and rerun `pnpm db:check` without `--apply`.
+3. decide how to canonicalize the already allowlisted `backfill_default_vehicle_capacity` history without editing or replaying an applied production migration.
 
 No remote push, deployment, migration application, EAS build/publication, Stripe operation, Supabase write, or production-data write occurred.
