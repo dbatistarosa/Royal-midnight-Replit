@@ -16,10 +16,58 @@
 
 ## Verification matrix
 
-Pending execution after repository reconciliation.
+| Gate | Result | Evidence |
+|---|---|---|
+| Toolchain | PASS | Node `v24.16.0`; Corepack pnpm `11.7.0`. |
+| Frozen dependency install | PASS | Hoisted install from `pnpm-lock.yaml`; Driver Expo and React Native packages present; package manifests and lockfile unchanged. |
+| Root typecheck | PASS | Libraries plus API, web, Driver legacy, Driver v2, mockup sandbox, and scripts exited 0. |
+| Workspace tests | PASS after test-runner correction | Scripts 6/6; Driver v2 39/39; web 3/3; API 259/259. Total: 307 tests, zero failures. |
+| Web production build | BLOCKED — Windows platform | Vite transformed 4,590 modules, then esbuild 0.28.2 failed to remove a temporary input file held by another process. A diagnostic `esnext`/unminified build completed all 4,590 modules, but it does not satisfy the production-build gate. |
+| API production build | PASS | `dist/app.mjs` built and cold-imported with a dummy database URL as `function`; no real database connection was made. |
+| Driver v2 typecheck | PASS | `tsc -p tsconfig.json --noEmit` exited 0. |
+| Driver v2 unit tests | PASS | 39/39 tests passed with zero failures. |
+| Driver Android export | PASS | Metro bundled 2,228 modules and wrote an 8.2 MB Android JavaScript bundle without publishing. |
+| Driver Expo config | PASS | Package `com.royalmidnight.driver`; API `https://www.royalmidnight.com/api`; resolved config contains `x86_64`. |
+| Production dependency audit | BLOCKED — external registry | Two `pnpm audit --audit-level high --prod` attempts produced no registry response and were stopped after bounded waits; no dependency was modified. |
+| Supabase migration manifest | PASS | `node --test scripts/migration-manifest.test.mjs`: 6/6; ten ordered, nonempty, uniquely versioned migration files with checksums. Commit `5565fc5`. |
+| Production migration state | BLOCKED — local credential shape | The ignored production export contains one `DATABASE_URL` entry, but its value is not a PostgreSQL URI. `pnpm db:check` therefore never reached Supabase. No SQL was applied and the process-scoped value was cleared. |
+| Forbidden tracked paths | PASS | Zero tracked `.env*` files other than `.env.example`, mobile service files, private-key containers, Vercel environment exports, `.playwright-cli`, or `.superpowers` ledgers. |
+| Changed-text secret scan | PASS | Zero unresolved private-key, provider-token, credentialed-database-URL, or hardcoded provider-secret findings in `recovery/phase0-2026-10-01...HEAD`. Output was restricted to rule, path, and line. |
+| Git whitespace and lineage | PASS | `git diff --check` exited 0; both `origin/main` and recovery commit `ba90d41` are ancestors of `HEAD`. |
 
 ## Findings and rulings
 
 - The fresh fetch advanced `origin/main` from `21adb855c665a7c73ac7cb0a0bf437864022fa64` to `2e41f9438082ebff7b93fe57976cbdd14df0475e`.
 - Before reconciliation, `origin/main...phase0/source-of-truth` was 6 commits on main and 23 commits on the integration branch.
 - The merge completed without conflicts. Both `origin/main` and the immutable recovery commit are ancestors of the integration branch, and all four critical application/migration paths remain present.
+- API originally reported 256 passing assertions but failed the suite because `driverBookingView.contract.test.mjs` registered three tests with `node:test` inside a Vitest package. Commit `476bb5f` converts only that contract file to Vitest; the focused 3/3 and complete API 259/259 suites pass.
+- The web failure was reproduced independently with esbuild transforming input larger than 1 MB. A temporary-directory change, native-binary inclusion, disabled esbuild worker threads, and a Windows stdio patch did not produce an acceptable production build. All unsuccessful dependency/configuration experiments were fully reverted; no esbuild patch or lockfile drift remains.
+- The diagnostic web build proves that Rollup can transform and render the recovered source on this host, but the final production esbuild-transpile step remains blocked by Windows file locking. This is recorded as a platform limitation, not reported as a passing production build.
+- The production audit reached no response from the npm audit service in two attempts, including one with bounded fetch settings. This is recorded as missing external verification, not as a clean audit.
+- The user selected Production for the read-only migration-state check. The existing ignored production environment export was inspected only in memory: the expected key exists once, but the value is not a PostgreSQL connection URI. The resulting hostname-resolution error happened before any database connection or query.
+- A proposed refresh of all Production variables from Vercel was rejected because it would unnecessarily download every production secret. It was not retried. The safe remediation is to correct `DATABASE_URL` in Vercel/Supabase without sharing the value, then generate a narrowly controlled local environment or execute the read-only checker in an already configured trusted environment.
+- No secret value, database URL, database host, username, password, provider token, private key, or SQL statement was printed or written to this report.
+
+## Commands and commit evidence
+
+| Area | Command or evidence | Result |
+|---|---|---|
+| Dependencies | `corepack pnpm install --frozen-lockfile` with pnpm `11.7.0` | PASS; manifests and lockfile unchanged. |
+| Types | `corepack pnpm typecheck` | PASS. |
+| Tests | `corepack pnpm test` | PASS, 307/307 after commit `476bb5f`. |
+| API | package production build plus cold import of `dist/app.mjs` | PASS. |
+| Web | package production build | BLOCKED at esbuild 0.28.2 temporary-file cleanup on Windows; diagnostic unminified build only passed. |
+| Driver v2 | explicit TypeScript check, 39 tests, Android export, resolved Expo config | PASS; no EAS build or publication. |
+| Migrations | manifest validator and `corepack pnpm db:check` without `--apply` | Local manifest PASS; Production state BLOCKED before connection. |
+| Security | tracked-path scan and changed-line pattern scan | PASS, zero findings. |
+| Git | ancestry checks and `git diff --check recovery/phase0-2026-10-01...HEAD` | PASS. |
+
+## Phase 0 disposition
+
+The integration branch is locally reconciled and the validated code/test gates pass, but Phase 0 is **not fully green**. Three independent external/platform gates remain open:
+
+1. run the normal minified web production build on a non-affected runner (recommended: Linux CI);
+2. obtain a successful production dependency audit response from the npm registry;
+3. provide a correctly configured Production PostgreSQL URI inside a trusted environment and rerun `pnpm db:check` without `--apply`.
+
+No remote push, deployment, migration application, EAS build/publication, Stripe operation, Supabase write, or production-data write occurred.
