@@ -49,6 +49,14 @@ onlyBuiltDependencies:
   - msw
   - unrs-resolver
 
+auditConfig:
+  ignoreGhsas:
+    # GHSA-86w9-cpqp-85rv has no patched node-forge release as of 2026-10-02.
+    # It is reachable here only through Expo CLI/code-signing build tooling and
+    # is not bundled into either driver APK. Remove this exception as soon as
+    # Expo adopts a patched node-forge release.
+    - GHSA-86w9-cpqp-85rv
+
 overrides:
   # Metro 0.84 accepts image-size's preserved default export API. Keeping the
   # patched 2.x line removes the two high advisories from Expo/Metro tooling
@@ -88,7 +96,7 @@ overrides:
   # major that orval's codegen (import jsYaml from "js-yaml", relying on the
   # CJS default-export interop v4 provided) doesn't support. Bounded below to
   # actually mean what the comment says.
-  brace-expansion: '>=5.0.9'
+  brace-expansion: '>=5.0.11'
   js-yaml: '>=4.3.2 <5'
   # Security patches preserve the existing xmldom minor API for Expo/plist.
   '@xmldom/xmldom@<0.9.0': '>=0.8.15 <0.9'
