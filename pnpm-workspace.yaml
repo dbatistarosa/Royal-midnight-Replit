@@ -56,6 +56,10 @@ auditConfig:
     # is not bundled into either driver APK. Remove this exception as soon as
     # Expo adopts a patched node-forge release.
     - GHSA-86w9-cpqp-85rv
+    # GHSA-vfj7-8cjw-p6xm has no published braces release above 3.0.3 as of
+    # 2026-10-03. All reported paths are through Expo/Metro build tooling.
+    # Remove this exception as soon as a patched release is available.
+    - GHSA-vfj7-8cjw-p6xm
 
 overrides:
   # Metro 0.84 accepts image-size's preserved default export API. Keeping the
