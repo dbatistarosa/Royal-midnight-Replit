@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { sendTripReminders, runWeeklyPayoutIfNeeded, runComplianceEnforcement, sendReviewRequests } from "../lib/cron-jobs.js";
 import { publishDueSocialPosts } from "../lib/social-scheduler.js";
 import { logger } from "../lib/logger";
+import { isLocalInsecureCronAllowed } from "../lib/cronAuth.js";
 
 const router = Router();
 
@@ -22,7 +23,7 @@ function verifyCronRequest(req: import("express").Request, res: import("express"
     // approved driver, including decrypted bank details (CN-006).
     //
     // Local development opts out explicitly instead of being inferred.
-    if (process.env.ALLOW_INSECURE_CRON === "1") {
+    if (isLocalInsecureCronAllowed(process.env)) {
       logger.warn("CRON_SECRET unset and ALLOW_INSECURE_CRON=1 — cron endpoints are UNAUTHENTICATED");
       return true;
     }

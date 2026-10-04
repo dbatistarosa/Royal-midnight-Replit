@@ -5,7 +5,7 @@ import { withMailScope, withMailTransaction } from "../lib/mailOutbox.js";
 import { commitTripCompletion, recordTripCompletion } from "../lib/tripCompletion.js";
 import { enqueueBookingNotification } from "../lib/bookingJobs.js";
 import { ValidatedBookingBody } from "../lib/bookingInput.js";
-import { bookingAction, withLock, setActor, rows } from "../lib/durability.js";
+import { bookingAction, withLock, lockInTransaction, setActor, rows, type Transaction } from "../lib/durability.js";
 import { tripConflicts, tripDurationMinutes, vehicleClassCovers, vehicleFits, type TripWindowInput } from "../lib/scheduling.js";
 import { Router, type IRouter } from "express";
 import crypto from "node:crypto";
@@ -51,7 +51,7 @@ import {
   computeHourlyOverage,
   OVERAGE_GRACE_MINUTES,
 } from "../lib/hourlyOverage.js";
-import { computePostTripCharge } from "../lib/pricing.js";
+import { computeDiscountedCharge, computePostTripCharge } from "../lib/pricing.js";
 import {
   saveFareBreakdown,
   incrementFareBreakdown,
@@ -74,7 +74,9 @@ import {
   driverBlockMessage,
 } from "../lib/driverEligibility.js";
 import { getDriverWindows } from "../lib/driverWindows.js";
-import { getRouteEstimate, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
+import { getRouteEstimate, getRouteMapImageResult, DEFAULT_DURATION_MINUTES } from "../lib/maps.js";
+import { driverOvertimeFareForBooking, enrichDriverBooking, hasPassengerPreferences, maskOpenPoolBooking, normalizePassengerEmail, toDriverView } from "../lib/driverBookingView.js";
+import { buildItineraryRows, itineraryNeedsSync, parseLegacyWaypoints, type BookingItineraryInsert } from "../lib/bookingItinerary.js";
 import { fleetAvailability } from "../lib/fleetAvailability.js";
 import {
   HOURLY_RATES,
@@ -161,13 +163,133 @@ function isUndefinedColumn(err: unknown): boolean {
 
 const parseBooking = serializeBooking;
 
-async function loadItineraries(bookingIds: number[]) {
+type LegacyItineraryBooking = {
+  id: number;
+  waypoints: string | null;
+  dropoffAddress: string;
+};
+
+type ItineraryRow = typeof bookingItineraryStopsTable.$inferSelect;
+
+function materializeItineraryView(
+  bookingId: number,
+  desired: readonly BookingItineraryInsert[],
+  existing: readonly ItineraryRow[] = [],
+): ItineraryRow[] {
+  const epoch = new Date(0);
+  return desired.map((row, index) => {
+    const prior = existing.find((candidate) =>
+      candidate.kind === row.kind
+      && candidate.address.trim().localeCompare(row.address.trim(), undefined, { sensitivity: "accent" }) === 0,
+    );
+    return {
+      ...row,
+      id: prior?.id ?? -(bookingId * 100 + index + 1),
+      lat: prior?.lat ?? null,
+      lng: prior?.lng ?? null,
+      arrivedAt: prior?.arrivedAt ?? null,
+      departedAt: prior?.departedAt ?? null,
+      arrivedByDriverId: prior?.arrivedByDriverId ?? null,
+      departedByDriverId: prior?.departedByDriverId ?? null,
+      createdAt: prior?.createdAt ?? epoch,
+      updatedAt: prior?.updatedAt ?? epoch,
+    };
+  });
+}
+
+async function loadItineraries(
+  bookingIds: number[],
+  executor: Pick<typeof db, 'select'> = db,
+  legacyBookings: readonly LegacyItineraryBooking[] = [],
+) {
   const grouped = new Map<number, Array<typeof bookingItineraryStopsTable.$inferSelect>>();
   if (bookingIds.length === 0) return grouped;
-  const rows = await db.select().from(bookingItineraryStopsTable)
+  const rows = await executor.select().from(bookingItineraryStopsTable)
     .where(inArray(bookingItineraryStopsTable.bookingId, bookingIds))
     .orderBy(bookingItineraryStopsTable.bookingId, bookingItineraryStopsTable.sequence);
   for (const row of rows) grouped.set(row.bookingId, [...(grouped.get(row.bookingId) ?? []), row]);
+  const legacyById = new Map(legacyBookings.map((booking) => [booking.id, booking]));
+  for (const id of bookingIds) {
+    const booking = legacyById.get(id);
+    if (!booking) continue;
+    const rows = buildItineraryRows(id, parseLegacyWaypoints(booking.waypoints), booking.dropoffAddress);
+    const existing = grouped.get(id) ?? [];
+    if (rows.length > 0 && (existing.length === 0 || itineraryNeedsSync(existing, rows))) {
+      grouped.set(id, materializeItineraryView(id, rows, existing));
+    }
+  }
+  return grouped;
+}
+
+/**
+ * Older hourly bookings predate the normalized itinerary table and only have
+ * their stops in bookings.waypoints. Reads can safely expose those legacy
+ * values, but lifecycle actions need real row ids so arrival/departure state
+ * is durable. Materialize the legacy route once, immediately before the first
+ * trip action that needs it.
+ */
+async function ensurePersistedItinerary(
+  booking: typeof bookingsTable.$inferSelect,
+  executor: typeof db | Transaction = db,
+) {
+  if (booking.charterMode !== "hourly") return [] as Array<typeof bookingItineraryStopsTable.$inferSelect>;
+
+  const existing = await executor
+    .select()
+    .from(bookingItineraryStopsTable)
+    .where(eq(bookingItineraryStopsTable.bookingId, booking.id))
+    .orderBy(bookingItineraryStopsTable.sequence);
+  const rows = buildItineraryRows(
+    booking.id,
+    parseLegacyWaypoints(booking.waypoints),
+    booking.dropoffAddress,
+  );
+  if (existing.length > 0 && !itineraryNeedsSync(existing, rows)) return existing;
+  if (rows.length === 0) return existing;
+
+  const synchronized = materializeItineraryView(booking.id, rows, existing);
+  await executor.delete(bookingItineraryStopsTable).where(eq(bookingItineraryStopsTable.bookingId, booking.id));
+  await executor.insert(bookingItineraryStopsTable).values(synchronized.map((row) => ({
+    bookingId: row.bookingId,
+    sequence: row.sequence,
+    kind: row.kind,
+    address: row.address,
+    lat: row.lat,
+    lng: row.lng,
+    arrivedAt: row.arrivedAt,
+    departedAt: row.departedAt,
+    arrivedByDriverId: row.arrivedByDriverId,
+    departedByDriverId: row.departedByDriverId,
+  })));
+  return executor
+    .select()
+    .from(bookingItineraryStopsTable)
+    .where(eq(bookingItineraryStopsTable.bookingId, booking.id))
+    .orderBy(bookingItineraryStopsTable.sequence);
+}
+
+async function loadDriverReviews(bookingIds: number[], executor: Pick<typeof db, 'select'> = db) {
+  const grouped = new Map<number, { rating: number; comment: string | null; createdAt: string }>();
+  if (bookingIds.length === 0) return grouped;
+  const rows = await executor
+    .select({
+      bookingId: reviewsTable.bookingId,
+      rating: reviewsTable.rating,
+      comment: reviewsTable.comment,
+      createdAt: reviewsTable.createdAt,
+    })
+    .from(reviewsTable)
+    .where(inArray(reviewsTable.bookingId, bookingIds))
+    .orderBy(desc(reviewsTable.createdAt));
+  for (const row of rows) {
+    if (!grouped.has(row.bookingId)) {
+      grouped.set(row.bookingId, {
+        rating: row.rating,
+        comment: row.comment,
+        createdAt: row.createdAt.toISOString(),
+      });
+    }
+  }
   return grouped;
 }
 
@@ -345,69 +467,6 @@ async function chargeExtraTime(
     );
     return null;
   }
-}
-
-/** "Maria Gonzalez" -> "Maria G." — enough for a driver to tell one card from
- *  another in the open-pool list without publishing every passenger's full name
- *  to the whole fleet. */
-function maskPassengerName(raw: unknown): string {
-  if (typeof raw !== "string") return "";
-  const parts = raw.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "";
-  const first = parts[0]!;
-  if (parts.length === 1) return first;
-  return `${first} ${parts[parts.length - 1]!.charAt(0).toUpperCase()}.`;
-}
-
-/**
- * What the chauffeur is shown for a trip, and what they will be paid for it.
- *
- * Three components, and they are paid on different terms:
- *
- *   fare      — commission on the undiscounted, pre-tax, pre-fee subtotal.
- *               Company promos and card fees never reduce it.
- *   overtime  — same commission. It is time worked like any other.
- *   extras    — the ones flagged paid_to_driver, in FULL with no commission.
- *               These are the chauffeur's own work or equipment (carrying a
- *               pet, fitting a car seat), so the company takes no share.
- *               Champagne and flowers are company goods and are excluded.
- *
- * Extras were previously absent from this entirely: they are not part of
- * fare_subtotal, so a chauffeur who fitted a car seat was paid nothing for it.
- */
-function toDriverView<T extends { priceQuoted: number; fareSubtotal: number; commissionPct?:string|null }>(
-  booking: T,
-  commissionPct: number,
-  opts: { driverExtras?: number; overtimeFare?: number } = {},
-): Omit<T, "priceQuoted" | "fareSubtotal"> & {
-  driverEarnings: number;
-  driverFareEarnings: number;
-  driverExtrasEarnings: number;
-  driverOvertimeEarnings: number;
-} {
-  const { priceQuoted, fareSubtotal, ...rest } = booking;
-  commissionPct=booking.commissionPct!=null?Number(booking.commissionPct):commissionPct;
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-
-  const driverFareEarnings = round2(fareSubtotal * commissionPct);
-  // The PRE-TAX overtime charge, not bookings.extra_charge — that now includes
-  // the tax and card fee the customer pays, and the chauffeur earns on neither.
-  const driverOvertimeEarnings = round2(
-    (opts.overtimeFare ?? 0) * commissionPct,
-  );
-  const driverExtrasEarnings = round2(opts.driverExtras ?? 0);
-
-  return {
-    ...rest,
-    // Broken out as well as totalled so the driver can see why they are paid
-    // what they are paid, rather than one number they cannot check.
-    driverFareEarnings,
-    driverOvertimeEarnings,
-    driverExtrasEarnings,
-    driverEarnings: round2(
-      driverFareEarnings + driverOvertimeEarnings + driverExtrasEarnings,
-    ),
-  };
 }
 
 router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
@@ -705,11 +764,17 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     const adminReceipts = await loadBookingReceipts(
       rows.map((r) => r.booking.id),
     );
+    const adminItineraries = await loadItineraries(
+      rows.map((r) => r.booking.id),
+      db,
+      rows.map((r) => r.booking),
+    );
     res.json(
       rows.map(({ booking, userRole }) => ({
         ...parseBooking(booking),
         extras: adminExtras.get(booking.id) ?? [],
         receipt: adminReceipts.get(booking.id) ?? null,
+        itinerary: adminItineraries.get(booking.id) ?? [],
         userRole: userRole ?? null,
       })),
     );
@@ -761,31 +826,29 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
       const poolExtras = await loadBookingExtras(
         driverBookings.map((b) => b.id),
       );
-      const poolItineraries = await loadItineraries(driverBookings.map((b) => b.id));
+      const poolItineraries = await loadItineraries(driverBookings.map((b) => b.id), db, driverBookings);
       res.json(
         driverBookings.map((b) => {
           const extras = poolExtras.get(b.id) ?? [];
-          return {
-            ...toDriverView(b, commissionPct, {
+          const view = toDriverView(b, commissionPct, {
               driverExtras: driverExtrasTotal(extras),
+          });
+          return maskOpenPoolBooking(
+            enrichDriverBooking(view, {
+              extras,
+              itinerary: poolItineraries.get(b.id) ?? [],
+              passengerPreferences: null,
             }),
-            extras,
-            itinerary: poolItineraries.get(b.id) ?? [],
-            passengerName: maskPassengerName(
-              (b as { passengerName?: unknown }).passengerName,
-            ),
-            passengerEmail: null,
-            passengerPhone: null,
-            specialRequests: null,
-            passengerPreferences: null,
-          };
+            (b as { passengerName?: unknown }).passengerName,
+          );
         }),
       );
       return;
     }
 
     // Attach passenger preferences so the driver can stage the vehicle correctly.
-    // Batch-fetch preferences for all unique userIds in this response.
+    // Batch-fetch by userId first and use an exact normalized email fallback for
+    // older admin-created bookings that were never linked to the passenger row.
     const userIds = [
       ...new Set(
         driverBookings
@@ -793,11 +856,26 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
           .filter(Boolean) as number[],
       ),
     ];
+    const passengerEmails = [
+      ...new Set(
+        driverBookings
+          .map((booking) => normalizePassengerEmail((booking as { passengerEmail?: unknown }).passengerEmail))
+          .filter((email): email is string => email != null),
+      ),
+    ];
     const prefsByUserId = new Map<number, Record<string, unknown>>();
-    if (userIds.length > 0) {
+    const prefsByEmail = new Map<string, Record<string, unknown>>();
+    if (userIds.length > 0 || passengerEmails.length > 0) {
+      const preferenceFilters = [
+        ...(userIds.length > 0 ? [inArray(usersTable.id, userIds)] : []),
+        ...(passengerEmails.length > 0
+          ? [sql`lower(${usersTable.email}) in (${sql.join(passengerEmails.map((email) => sql`${email}`), sql`, `)})`]
+          : []),
+      ];
       const prefRows = await db
         .select({
           id: usersTable.id,
+          email: usersTable.email,
           cabinTempF: usersTable.cabinTempF,
           musicPreference: usersTable.musicPreference,
           quietRide: usersTable.quietRide,
@@ -807,16 +885,14 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
           vipNotes: usersTable.vipNotes,
         })
         .from(usersTable)
-        .where(
-          userIds.length === 1
-            ? eq(usersTable.id, userIds[0]!)
-            : inArray(usersTable.id, userIds),
-        );
+        .where(or(...preferenceFilters));
       for (const p of prefRows) {
-        const { id, ...prefs } = p;
-        // Only include if at least one preference is set
-        if (Object.values(prefs).some((v) => v != null && v !== false)) {
+        const { id, email, ...prefs } = p;
+        // Keep an explicit false door-service choice; it is meaningful to the driver.
+        if (hasPassengerPreferences(prefs)) {
           prefsByUserId.set(id, prefs);
+          const normalizedEmail = normalizePassengerEmail(email);
+          if (normalizedEmail) prefsByEmail.set(normalizedEmail, prefs);
         }
       }
     }
@@ -824,28 +900,37 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
     const assignedExtras = await loadBookingExtras(
       driverBookings.map((b) => b.id),
     );
-    const itineraries = await loadItineraries(driverBookings.map((b) => b.id));
+    const itineraries = await loadItineraries(driverBookings.map((b) => b.id), db, driverBookings);
     const overtimeFares = await loadOverageFares(
       driverBookings.map((b) => b.id),
     );
+    const completedReviewIds = driverBookings
+      .filter((booking) => booking.status === "completed")
+      .map((booking) => booking.id);
+    const driverReviews = await loadDriverReviews(completedReviewIds);
     res.json(
       driverBookings.map((b) => {
         const extras = assignedExtras.get(b.id) ?? [];
         const view = toDriverView(b, commissionPct, {
           driverExtras: driverExtrasTotal(extras),
           // Rows from before the split stored the untaxed figure in extra_charge.
-          overtimeFare:
-            overtimeFares.get(b.id) ??
-            (parseFloat(
-              String((b as { extraCharge?: unknown }).extraCharge ?? "0"),
-            ) ||
-              0),
+          overtimeFare: driverOvertimeFareForBooking(
+            b,
+            overtimeFares.get(b.id),
+            (b as { extraCharge?: unknown }).extraCharge,
+          ),
         });
         const uid = (b as any).userId as number | null;
-        const passengerPreferences = uid
-          ? (prefsByUserId.get(uid) ?? null)
-          : null;
-        return { ...view, extras, passengerPreferences, itinerary: itineraries.get(b.id) ?? [] };
+        const email = normalizePassengerEmail((b as { passengerEmail?: unknown }).passengerEmail);
+        const passengerPreferences = (uid ? prefsByUserId.get(uid) : undefined)
+          ?? (email ? prefsByEmail.get(email) : undefined)
+          ?? null;
+        return enrichDriverBooking(view, {
+          extras,
+          passengerPreferences,
+          itinerary: itineraries.get(b.id) ?? [],
+          driverReview: driverReviews.get(b.id) ?? null,
+        });
       }),
     );
     return;
@@ -856,7 +941,12 @@ router.get("/bookings", requireAuth, async (req, res): Promise<void> => {
   // Extras are attached because the passenger paid for them and had no way to
   // see, on any screen, what they had actually booked.
   const listExtras = await loadBookingExtras(parsed2.map((b) => b.id));
-  res.json(parsed2.map((b) => ({ ...b, extras: listExtras.get(b.id) ?? [] })));
+  const listItineraries = await loadItineraries(parsed2.map((b) => b.id), db, parsed2);
+  res.json(parsed2.map((b) => ({
+    ...b,
+    extras: listExtras.get(b.id) ?? [],
+    itinerary: listItineraries.get(b.id) ?? [],
+  })));
 });
 
 router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promise<void> => {
@@ -1003,10 +1093,16 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
   }
   const quote = quoteOutcome.quote;
 
-  // Promo discount is re-derived from the promo_codes row. An invalid or
-  // exhausted code yields no discount rather than failing the whole booking.
-  // totalWithTax already contains the add-ons, taxed and fee'd.
-  const grossTotal = quote.totalWithTax;
+  // Promo discount is re-derived from the promo_codes row. It applies to the
+  // eligible subtotal BEFORE tax and card processing, then those charges are
+  // recalculated on what the passenger actually owes. Driver commission keeps
+  // using the undiscounted fareSubtotal below.
+  // Airport access is disclosed as an external charge in checkout and is not
+  // discounted. Add-ons remain part of the merchandise/service subtotal.
+  const promoEligibleSubtotal = Math.max(
+    0,
+    Math.round((quote.taxableSubtotal - quote.airportFee) * 100) / 100,
+  );
   let discountAmount = 0;
   let appliedPromoCode: string | null = null;
   if (parsed.data.promoCode) {
@@ -1015,7 +1111,7 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
     // traveller's behalf, where the traveller is the one holding the offer.
     const promo = await evaluatePromoCode(
       parsed.data.promoCode,
-      grossTotal,
+      promoEligibleSubtotal,
       bookingUserId,
     );
     if (promo.valid && promo.discountAmount != null) {
@@ -1024,10 +1120,15 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
     }
   }
 
-  const priceQuoted = Math.max(
-    0,
-    Math.round((grossTotal - discountAmount) * 100) / 100,
-  );
+  const customerCharge = computeDiscountedCharge({
+    taxableSubtotal: quote.taxableSubtotal,
+    maxDiscountableSubtotal: promoEligibleSubtotal,
+    discountAmount,
+    taxRate: quote.taxRate,
+    cardProcessingFeeRate: quote.cardProcessingFeeRate,
+  });
+  discountAmount = customerCharge.discountAmount;
+  const priceQuoted = customerCharge.total;
   // Driver commission base: base fare + billable miles (+surge) only. Taxes,
   // the card fee, promo discounts and the airport fee are all company-side —
   // the driver never earns on them. Flat routes pay commission on the flat price.
@@ -1150,7 +1251,7 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
     }
     if(appliedPromoCode){
       await tx.execute(sql`SELECT id FROM promo_codes WHERE code=${appliedPromoCode} FOR UPDATE`);
-      const current=await evaluatePromoCode(appliedPromoCode,grossTotal,bookingUserId,tx);
+      const current=await evaluatePromoCode(appliedPromoCode,promoEligibleSubtotal,bookingUserId,tx);
       if(!current.valid || current.discountAmount!==discountAmount)throw Object.assign(new Error('This promotion is no longer available. Refresh your quote.'),{status:409});
       await tx.update(promoCodesTable).set({usedCount:sql`${promoCodesTable.usedCount}+1`}).where(eq(promoCodesTable.code,appliedPromoCode));
     }
@@ -1159,7 +1260,7 @@ router.post("/bookings", bookingLimiter(), optionalAuth, async (req, res): Promi
       estimatedDistanceMiles:String(quote.estimatedDistance)}).returning();
     const commission=await getCommissionPct();
     await tx.execute(sql`UPDATE bookings SET checkout_key=${checkoutKey},checkout_fingerprint=${fingerprint},commission_pct=${commission},
-      tax_amount=${quote.taxAmount},card_fee=${quote.cardProcessingFee},airport_fee=${quote.airportFee},extras_total=${quote.extrasTotal},
+      tax_amount=${customerCharge.taxAmount},card_fee=${customerCharge.cardProcessingFee},airport_fee=${quote.airportFee},extras_total=${quote.extrasTotal},
       pickup_lat=${quote.pickupPoint?.lat??null},pickup_lng=${quote.pickupPoint?.lng??null} WHERE id=${created.id}`);
     if(pricedExtras.length)await tx.insert(bookingExtrasTable).values(pricedExtras.map(e=>({bookingId:created.id,extraServiceId:e.id,quantity:e.quantity,priceAtBooking:String(e.price)})));
     if(created.charterMode==='hourly')await tx.insert(bookingItineraryStopsTable).values([
@@ -1420,6 +1521,96 @@ router.get(
 );
 
 // Authenticated single-booking endpoint
+router.get("/bookings/:id/route-map", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(String(req.params["id"] ?? ""), 10);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid booking id" });
+    return;
+  }
+
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
+  if (!booking) {
+    res.status(404).json({ error: "Booking not found" });
+    return;
+  }
+
+  const caller = req.currentUser!;
+  if (caller.role !== "driver" && caller.role !== "admin") {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  if (caller.role === "driver") {
+    const [callerUser] = await db
+      .select({ email: usersTable.email })
+      .from(usersTable)
+      .where(eq(usersTable.id, caller.userId));
+    const driverCandidates = await db
+      .select({
+        id: driversTable.id,
+        userId: driversTable.userId,
+        email: driversTable.email,
+        totalRides: driversTable.totalRides,
+        approvalStatus: driversTable.approvalStatus,
+        complianceHold: driversTable.complianceHold,
+        status: driversTable.status,
+      })
+      .from(driversTable)
+      .where(
+        callerUser?.email
+          ? or(eq(driversTable.userId, caller.userId), eq(driversTable.email, callerUser.email))
+          : eq(driversTable.userId, caller.userId),
+      )
+      .orderBy(desc(driversTable.totalRides));
+    const driver = driverCandidates[0];
+    const blockReason = driver ? driverBlockReason(driver) : "not_approved";
+    if (!driver || blockReason) {
+      req.log.warn({ ip: req.ip, path: req.path, userId: caller.userId, role: caller.role }, "authorization_failed");
+      res.status(403).json({ error: blockReason ? driverBlockMessage(blockReason) : "Access denied" });
+      return;
+    }
+
+    let canSee = booking.driverId === driver.id;
+    if (!canSee && booking.driverId == null && ["pending", "authorized", "confirmed"].includes(booking.status)) {
+      if (await hasDriverBlockTable()) {
+        const [blocked] = await db
+          .select({ id: bookingDriverBlocksTable.id })
+          .from(bookingDriverBlocksTable)
+          .where(and(eq(bookingDriverBlocksTable.bookingId, id), eq(bookingDriverBlocksTable.driverId, driver.id)));
+        if (blocked) {
+          res.status(403).json({ error: "This offer is no longer available to your account." });
+          return;
+        }
+      }
+      const busyWindows = await getDriverBusyWindows(driver.id);
+      canSee = !hasConflict(parseBooking(booking), busyWindows);
+      if (canSee) {
+        const coverage = await loadZoneCoverage(driver.id);
+        const points = await loadPickupPoints([id]);
+        canSee = isTripVisibleToDriver(points.get(id) ?? null, coverage);
+      }
+    }
+    if (!canSee) {
+      req.log.warn({ ip: req.ip, path: req.path, userId: caller.userId, role: caller.role }, "authorization_failed");
+      res.status(403).json({ error: "This booking is not visible to your driver account." });
+      return;
+    }
+  }
+
+  const stops = (await loadItineraries([id], db, [booking])).get(id) ?? [];
+  const mapResult = await getRouteMapImageResult(
+    booking.pickupAddress,
+    stops.filter((stop) => stop.kind !== "final").sort((a, b) => a.sequence - b.sequence).map((stop) => stop.address),
+    booking.dropoffAddress,
+  );
+  res.set("Cache-Control", "private, max-age=300");
+  if (!mapResult.image) {
+    res.json({ available: false, reason: mapResult.reason ?? "provider_error" });
+    return;
+  }
+  res.json({ available: true, ...mapResult.image });
+});
+
 router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
   const params = GetBookingParams.safeParse(req.params);
   if (!params.success) {
@@ -1459,16 +1650,43 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     }
     const commissionPct = await getCommissionPct();
     const extras = await loadExtrasFor(booking.id);
+    const itinerary = (await loadItineraries([booking.id], db, [booking])).get(booking.id) ?? [];
+    let passengerPreferences: Record<string, unknown> | null = null;
+    const preferenceSelect = {
+      cabinTempF: usersTable.cabinTempF,
+      musicPreference: usersTable.musicPreference,
+      quietRide: usersTable.quietRide,
+      preferredBeverage: usersTable.preferredBeverage,
+      opensOwnDoor: usersTable.opensOwnDoor,
+      addressTitle: usersTable.addressTitle,
+      vipNotes: usersTable.vipNotes,
+    };
+    if (booking.userId != null) {
+      const [preferences] = await db.select(preferenceSelect).from(usersTable).where(eq(usersTable.id, booking.userId));
+      if (hasPassengerPreferences(preferences)) passengerPreferences = preferences;
+    }
+    if (!passengerPreferences && booking.passengerEmail) {
+      const normalizedEmail = normalizePassengerEmail(booking.passengerEmail);
+      const [preferences] = normalizedEmail
+        ? await db.select(preferenceSelect).from(usersTable).where(sql`lower(${usersTable.email}) = ${normalizedEmail}`)
+        : [];
+      if (hasPassengerPreferences(preferences)) passengerPreferences = preferences;
+    }
     const overtimeFares = await loadOverageFares([booking.id]);
-    res.json({
-      ...toDriverView(parseBooking(booking), commissionPct, {
+    const driverReview = booking.status === "completed"
+      ? ((await loadDriverReviews([booking.id])).get(booking.id) ?? null)
+      : null;
+    res.json(enrichDriverBooking(
+      toDriverView(parseBooking(booking), commissionPct, {
         driverExtras: driverExtrasTotal(extras),
-        overtimeFare:
-          overtimeFares.get(booking.id) ??
-          (parseFloat(String(booking.extraCharge ?? "0")) || 0),
+        overtimeFare: driverOvertimeFareForBooking(
+          booking,
+          overtimeFares.get(booking.id),
+          booking.extraCharge,
+        ),
       }),
-      extras,
-    });
+      { extras, itinerary, passengerPreferences, driverReview },
+    ));
     return;
   }
 
@@ -1511,9 +1729,11 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
     // The stored receipt lines, so the passenger's receipt can print what was
     // actually charged instead of the 80/20 split it used to guess.
     const receipts = await loadBookingReceipts([booking.id]);
+    const itinerary = (await loadItineraries([booking.id], db, [booking])).get(booking.id) ?? [];
     res.json({
       ...base,
       extras: await loadExtrasFor(booking.id),
+      itinerary,
       receipt: receipts.get(booking.id) ?? null,
       hasRating: existingReview != null,
       existingRating: existingReview?.rating ?? null,
@@ -1721,7 +1941,7 @@ router.get(
   },
 );
 
-router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Promise<void> => {
+router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
   const params = UpdateBookingParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -1734,7 +1954,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
     return;
   }
 
-  const [before] = await db
+  const [before] = await tx
     .select()
     .from(bookingsTable)
     .where(eq(bookingsTable.id, params.data.id));
@@ -1750,7 +1970,8 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
 
   if(!before){res.status(404).json({error:'Booking not found'});return;}
   if(parsed.data.status==='cancelled'){res.status(409).json({error:'Use the cancellation action so refunds are recorded.'});return;}
-  const booking=await withLock('driver-schedule:'+(updateData.driverId??before.driverId??'unassigned'),async tx=>{
+  await lockInTransaction(tx, 'driver-schedule:'+(updateData.driverId??before.driverId??'unassigned'));
+  const booking = await (async () => {
     await setActor(tx,req.currentUser!.userId);
     const assigning=parsed.data.driverId!==undefined||parsed.data.vehicleId!==undefined;
     const nextDriverId=parsed.data.driverId!==undefined?parsed.data.driverId:before.driverId;
@@ -1778,7 +1999,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
       await recordTripCompletion(tx, updated);
     }
     return updated;
-  });
+  })();
 
   if (!booking) {
     res.status(404).json({ error: "Booking not found" });
@@ -1869,7 +2090,7 @@ router.patch("/bookings/:id", requireAdmin, bookingAction(async (req, res): Prom
 router.post(
   "/bookings/:id/accept",
   requireAuth,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) {
       res.status(400).json({ error: "Invalid booking id" });
@@ -1891,7 +2112,7 @@ router.post(
       return;
     }
 
-    const byUserId = await db
+    const byUserId = await tx
       .select({
         id: driversTable.id,
         approvalStatus: driversTable.approvalStatus,
@@ -1943,7 +2164,7 @@ router.post(
     // Hiding the trip from their pool is presentation; this is the control. A
     // driver who lost this booking for not confirming can still POST the id.
     const [blocked] = (await hasDriverBlockTable())
-      ? await db
+      ? await tx
           .select({ id: bookingDriverBlocksTable.id })
           .from(bookingDriverBlocksTable)
           .where(
@@ -1970,7 +2191,7 @@ router.post(
       return;
     }
 
-    const [booking] = await db
+    const [booking] = await tx
       .select()
       .from(bookingsTable)
       .where(eq(bookingsTable.id, id));
@@ -2025,7 +2246,7 @@ router.post(
     // Re-check busy windows even though the open-pool query already filtered them.
     // This guards against race conditions where a driver accepts another trip between
     // loading the list and tapping Accept.
-    const busyWindows = await getDriverBusyWindows(driverRow.id);
+    const busyWindows = await getDriverBusyWindows(driverRow.id, tx);
     if (hasConflict(booking, busyWindows)) {
       res.status(409).json({
         error:
@@ -2036,7 +2257,8 @@ router.post(
     }
 
     // Serialize by driver: a row-level CAS alone protects the booking, not the agenda.
-    const result = await withLock('driver-schedule:'+driverRow.id, async tx => {
+    await lockInTransaction(tx, 'driver-schedule:'+driverRow.id);
+    const result = await (async () => {
       await setActor(tx, caller.userId);
       const windows = await getDriverBusyWindows(driverRow.id,tx);
       if (hasConflict(booking,windows)) return {error:'This trip conflicts with your schedule',booking:null};
@@ -2050,7 +2272,7 @@ router.post(
         .where(and(eq(bookingsTable.id,id),isNull(bookingsTable.driverId),inArray(bookingsTable.status,['pending','authorized','confirmed'])))
         .returning();
       return {error:updated?null:'Booking was taken or cancelled. Refresh your trips.',booking:updated??null};
-    });
+    })();
     if(!result.booking){res.status(409).json({error:result.error});return;}
     const updated=result.booking;
 
@@ -2081,7 +2303,7 @@ router.post(
         const actual=await getStripe().paymentIntents.retrieve(booking.stripePaymentIntentId!).catch(()=>null);
         if(actual?.status!=='succeeded'){
           const retryable=!actual||['requires_capture','processing'].includes(actual.status);
-          await db.update(bookingsTable).set({driverId:null,vehicleId:null,status:retryable?'authorized':'awaiting_payment',
+          await tx.update(bookingsTable).set({driverId:null,vehicleId:null,status:retryable?'authorized':'awaiting_payment',
             authorizedAt:retryable?booking.authorizedAt:null,updatedAt:new Date()}).where(and(eq(bookingsTable.id,id),eq(bookingsTable.status,'confirmed')));
           res.status(retryable?503:402).json({error:retryable?'Payment confirmation is pending. Please retry acceptance shortly.':'Payment could not be captured. Please contact the admin.',captureError:true});
           return;
@@ -2195,6 +2417,7 @@ async function resolveAssignedDriver(
   req: import("express").Request,
   res: import("express").Response,
   bookingId: number,
+  executor: Pick<typeof db, 'select'> = db,
 ): Promise<{
   booking: typeof bookingsTable.$inferSelect;
   driverRow: { id: number };
@@ -2207,7 +2430,7 @@ async function resolveAssignedDriver(
 
   // ORDER BY total_rides DESC so we always get the canonical (most-active) record
   // when a driver has multiple records linked to the same userId.
-  const driverRows = await db
+  const driverRows = await executor
     .select({ id: driversTable.id })
     .from(driversTable)
     .where(eq(driversTable.userId, caller.userId))
@@ -2219,7 +2442,7 @@ async function resolveAssignedDriver(
     return null;
   }
 
-  const [booking] = await db
+  const [booking] = await executor
     .select()
     .from(bookingsTable)
     .where(eq(bookingsTable.id, bookingId));
@@ -2518,7 +2741,7 @@ router.post(
       return;
     }
 
-    const itinerary = (await loadItineraries([id])).get(id) ?? [];
+    const itinerary = await ensurePersistedItinerary(booking, db);
     const current = itinerary.find(stop => stop.sequence === sequence);
     if (!current) {
       res.status(404).json({ error: "Itinerary stop not found" });
@@ -2551,7 +2774,7 @@ router.post(
         .where(and(eq(bookingItineraryStopsTable.id, current.id), isNull(bookingItineraryStopsTable.departedAt)));
     }
 
-    res.json({ ok: true, itinerary: (await loadItineraries([id])).get(id) ?? [] });
+    res.json({ ok: true, itinerary: (await loadItineraries([id], db, [booking])).get(id) ?? [] });
   },
 );
 
@@ -2560,14 +2783,14 @@ router.post(
 router.post(
   "/bookings/:id/trip/complete",
   requireAuth,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) {
       res.status(400).json({ error: "Invalid booking id" });
       return;
     }
 
-    const resolved = await resolveAssignedDriver(req, res, id);
+    const resolved = await resolveAssignedDriver(req, res, id, tx);
     if (!resolved) return;
     const { booking, driverRow } = resolved;
 
@@ -2583,7 +2806,7 @@ router.post(
     }
 
     if (booking.charterMode === "hourly") {
-      const itinerary = (await loadItineraries([id])).get(id) ?? [];
+      const itinerary = await ensurePersistedItinerary(booking, tx);
       const finalDestination = itinerary.find(stop => stop.kind === "final");
       if (!finalDestination?.arrivedAt) {
         res.status(409).json({ error: "Arrive at the final destination before completing this hourly trip" });
@@ -2639,7 +2862,7 @@ router.post(
       bookingId: id, driverId: driverRow.id, endedAt, extraCharge, totalPrice,
       breakdown: !useManual && (overage.reason === "overage" || overage.overtimeMinutes > 0)
         ? { ...charge, minutes: overage.overtimeMinutes } : undefined,
-    });
+    }, tx);
 
     if (!updated) {
       res
@@ -2667,7 +2890,7 @@ router.post(
         req.log,
       );
       if (payment) {
-        await settleOvertime(payment.operation, payment.paymentIntentId);
+        await settleOvertime(payment.operation, payment.paymentIntentId, tx);
         overagePaymentIntentId = payment.paymentIntentId;
       }
     }
@@ -2701,7 +2924,7 @@ router.post(
 router.post(
   "/bookings/:id/collect-extra-time",
   requireAdmin,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     // String(...) because Express 5 types params as string | string[]. Most of
     // this file predates that and carries the resulting type error; no reason to
     // add another.
@@ -2711,7 +2934,7 @@ router.post(
       return;
     }
 
-    const [booking] = await db
+    const [booking] = await tx
       .select()
       .from(bookingsTable)
       .where(eq(bookingsTable.id, id));
@@ -2883,7 +3106,7 @@ router.post(
 router.post(
   "/admin/bookings/:id/extras",
   requireAdmin,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
 
@@ -2898,7 +3121,7 @@ router.post(
     const hash=addonRequestHash(parsed.data.method,parsed.data.extras);
     let operation=await loadAddonOperation(operationId,id,hash);
     if(operation?.response){res.json({...operation.response,extras:await loadExtrasFor(id)});return;}
-    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id));
+    const [booking] = await tx.select().from(bookingsTable).where(eq(bookingsTable.id, id));
     if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
     if (booking.status === "cancelled") {
       res.status(400).json({ error: "This booking is cancelled." });
@@ -2929,7 +3152,7 @@ router.post(
     if(parsed.data.method==='card')paymentIntentId=await payAddonCard(stripe,operation,await findCardOnFile(booking.userId));
     else ({invoiceUrl,invoicePdfUrl}=await invoiceAddon(stripe,operation,{email:booking.passengerEmail,name:booking.passengerName}));
 
-    const result=await db.transaction(async tx=>{
+    const result=await (async()=>{
       await tx.insert(bookingExtrasTable).values(priced.map(e=>({bookingId:id,extraServiceId:e.id,quantity:e.quantity,priceAtBooking:String(e.price)})));
       const [updated]=await tx.update(bookingsTable).set({
         priceQuoted:sql`${bookingsTable.priceQuoted} + ${charge.total}`,
@@ -2948,7 +3171,7 @@ router.post(
       const response={ok:true,booking:parseBooking(updated),method:parsed.data.method,paymentIntentId,invoiceUrl,charge};
       await tx.execute(sql`UPDATE booking_adjustments SET response=${JSON.stringify(response)}::jsonb,applied_at=now() WHERE id=${operationId}`);
       return response;
-    });
+    })();
     res.json({...result,extras:await loadExtrasFor(id)});
   }),
 );
@@ -2959,7 +3182,7 @@ router.post(
 router.post(
   "/bookings/:id/extend-charter",
   requireAuth,
-  bookingAction(async (req, res): Promise<void> => {
+  bookingAction(async (req, res, _next, tx: Transaction): Promise<void> => {
     const id = parseInt(String(req.params["id"] ?? ""), 10);
     if (isNaN(id)) { res.status(400).json({ error: "Invalid booking id" }); return; }
     const caller = req.currentUser!;
@@ -2973,7 +3196,7 @@ router.post(
     let operation=await loadAddonOperation(operationId,id,hash);
     if(operation?.response){res.json(operation.response);return;}
 
-    const [booking]=await db.select().from(bookingsTable).where(eq(bookingsTable.id,id));
+    const [booking]=await tx.select().from(bookingsTable).where(eq(bookingsTable.id,id));
     if(!booking){res.status(404).json({error:'Booking not found'});return;}
     if(booking.userId!==caller.userId){res.status(403).json({error:'Access denied'});return;}
     if(booking.status!=='in_progress'||booking.charterMode!=='hourly'||!booking.tripStartedAt){res.status(409).json({error:'Extra time can only be added while an hourly charter is in progress.'});return;}
@@ -2993,7 +3216,7 @@ router.post(
     if(!Number.isInteger(frozenHours)||!Number.isInteger(frozenPrevious)){res.status(409).json({error:'The saved extension needs review before collection.'});return;}
     const paymentIntentId=await payAddonCard(getStripe(),operation,card,'extra_time');
     const totalHours=frozenPrevious!+frozenHours!;
-    const result=await db.transaction(async tx=>{
+    const result=await (async()=>{
       const [updated]=await tx.update(bookingsTable).set({
         charterHours:totalHours,
         fareSubtotal:sql`coalesce(${bookingsTable.fareSubtotal}, ${bookingsTable.priceQuoted}) + ${operation!.snapshot.charge.fare}`,
@@ -3011,7 +3234,7 @@ router.post(
       const response={ok:true,booking:parseBooking(updated),paymentIntentId,charge:operation!.snapshot.charge};
       await tx.execute(sql`UPDATE booking_adjustments SET response=${JSON.stringify(response)}::jsonb,applied_at=now() WHERE id=${operationId}`);
       return response;
-    });
+    })();
     res.json(result);
   }),
 );

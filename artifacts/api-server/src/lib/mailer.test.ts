@@ -14,7 +14,7 @@ vi.mock("@workspace/db/schema", () => ({ emailLogsTable: {} }));
 
 process.env.RESEND_API_KEY = "test-key";
 
-const { escapeHtml, sendBookingConfirmationPassenger, sendWeeklyDriverPayout } = await import("./mailer");
+const { escapeHtml, sendBookingConfirmationPassenger, sendInvoiceToPassenger, sendWeeklyDriverPayout } = await import("./mailer");
 
 describe("escapeHtml", () => {
   it("escapes all five HTML-significant characters", () => {
@@ -119,5 +119,36 @@ describe("sendWeeklyDriverPayout — baseHtml regression", () => {
 
     const html = sendMock.mock.calls[0]![0].html as string;
     expect(html).toContain("****4321");
+  });
+});
+
+describe("sendInvoiceToPassenger — hourly itinerary", () => {
+  beforeEach(() => sendMock.mockClear());
+
+  it("includes intermediate stops in the passenger invoice email", async () => {
+    await sendInvoiceToPassenger(
+      {
+        id: 22,
+        passengerName: "Eliot Example",
+        passengerEmail: "test@example.com",
+        pickupAddress: "Pickup",
+        dropoffAddress: "Airport",
+        pickupAt: new Date().toISOString(),
+        vehicleClass: "suv",
+        passengers: 3,
+        priceQuoted: 350,
+        itinerary: [
+          { sequence: 1, kind: "stop", address: "Miami International Airport" },
+          { sequence: 2, kind: "final", address: "Airport" },
+        ],
+      },
+      "https://example.com/pay",
+      null,
+    );
+
+    const html = sendMock.mock.calls[0]![0].html as string;
+    expect(html).toContain("Miami International Airport");
+    expect(html).toContain("Stop 1");
+    expect(html).toContain("Final destination");
   });
 });

@@ -153,11 +153,11 @@ export default function Home() {
           </div>
 
           <div className="mt-16">
-            <Link href="/fleet">
-              <Button variant="outline" className="border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-sm px-10 py-6 rounded-none h-auto">
+            <Button asChild variant="outline" className="border-white/20 text-white hover:bg-white hover:text-black font-medium uppercase tracking-widest text-sm px-10 py-6 rounded-none h-auto">
+              <Link href="/fleet">
                 View Entire Fleet
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </div>
       </section>
@@ -176,11 +176,11 @@ export default function Home() {
         </div>
         <div className="relative z-10 text-center px-6 max-w-4xl mx-auto">
           <h2 className="text-4xl md:text-6xl font-serif text-white mb-8 italic">"The anticipation of the journey should equal the destination."</h2>
-          <Link href="/book">
-            <Button className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm px-12 py-7 rounded-none">
+          <Button asChild className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm px-12 py-7 rounded-none">
+            <Link href="/book">
               Begin Your Journey
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </section>
     </div>

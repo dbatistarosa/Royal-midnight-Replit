@@ -52,7 +52,7 @@ export default function Signup() {
 
       const result = await registerMutation.mutateAsync({ data });
       localStorage.removeItem("rm_referral_code");
-      login(result.user as any, result.token);
+      login(result.user as any);
       toast({ title: "Account created", description: "Welcome to Royal Midnight." });
       setLocation("/passenger/dashboard");
     } catch (err: any) {

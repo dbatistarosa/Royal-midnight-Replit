@@ -21,6 +21,7 @@ import type {
 export function login(body: LoginBody): Promise<LoginResponse> {
   return customFetch<LoginResponse>("/auth/login", {
     method: "POST",
+    headers: { "X-RM-Client": "driver-app" },
     body: JSON.stringify(body),
   });
 }

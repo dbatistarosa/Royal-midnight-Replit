@@ -1,10 +1,20 @@
 import { Router, type IRouter } from "express";
 import { eq, and, ne, inArray } from "drizzle-orm";
 import { z } from "zod/v4";
-import { db, driversTable, usersTable, geoZonesTable, driverServiceZonesTable, pricingRulesTable } from "@workspace/db";
+import {
+  db,
+  driversTable,
+  usersTable,
+  geoZonesTable,
+  driverServiceZonesTable,
+  pricingRulesTable,
+  driverChangeRequestsTable,
+  driverVehiclesTable,
+  notificationsTable,
+} from "@workspace/db";
 import { requireAdmin } from "../middleware/auth.js";
 import { tableExists } from "../lib/schemaGuards.js";
-import { syncDriverVehicleFromLegacy } from "../lib/driverVehicles.js";
+import { createDriverVehicle, syncDriverVehicleFromLegacy, syncLegacyDriverColumns, syncFleetVehicle } from "../lib/driverVehicles.js";
 
 /**
  * Full administrative edit of a chauffeur record.
@@ -24,6 +34,186 @@ import { syncDriverVehicleFromLegacy } from "../lib/driverVehicles.js";
  */
 
 const router: IRouter = Router();
+
+function parseChangePayload(raw: string): Record<string, unknown> {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  } catch {
+    // A malformed request is rejected by the review endpoint rather than
+    // being applied as an arbitrary update.
+  }
+  throw Object.assign(new Error("The change request payload is invalid"), { status: 422 });
+}
+
+function assertObjectPath(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !/^\/objects\/[A-Za-z0-9/_.-]+$/.test(value) || value.includes("..")) {
+    throw Object.assign(new Error("The profile photo path is invalid"), { status: 422 });
+  }
+}
+
+router.get("/admin/driver-change-requests", requireAdmin, async (req, res): Promise<void> => {
+  const requestedStatus = typeof req.query.status === "string" ? req.query.status : "pending";
+  if (!["pending", "approved", "rejected", "all"].includes(requestedStatus)) {
+    res.status(400).json({ error: "Invalid request status" });
+    return;
+  }
+  const requests = await db
+    .select({
+      id: driverChangeRequestsTable.id,
+      driverId: driverChangeRequestsTable.driverId,
+      driverName: driversTable.name,
+      driverEmail: driversTable.email,
+      kind: driverChangeRequestsTable.kind,
+      payload: driverChangeRequestsTable.payload,
+      status: driverChangeRequestsTable.status,
+      adminNotes: driverChangeRequestsTable.adminNotes,
+      submittedAt: driverChangeRequestsTable.submittedAt,
+      reviewedAt: driverChangeRequestsTable.reviewedAt,
+    })
+    .from(driverChangeRequestsTable)
+    .innerJoin(driversTable, eq(driversTable.id, driverChangeRequestsTable.driverId))
+    .where(requestedStatus === "all" ? undefined : eq(driverChangeRequestsTable.status, requestedStatus));
+  res.json(requests.map((request) => ({
+    ...request,
+    payload: parseChangePayload(request.payload),
+    submittedAt: request.submittedAt.toISOString(),
+    reviewedAt: request.reviewedAt?.toISOString() ?? null,
+  })));
+});
+
+router.post("/admin/driver-change-requests/:id/approve", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid request id" });
+    return;
+  }
+  const [request] = await db.select().from(driverChangeRequestsTable).where(eq(driverChangeRequestsTable.id, id));
+  if (!request) {
+    res.status(404).json({ error: "Change request not found" });
+    return;
+  }
+  if (request.status !== "pending") {
+    res.status(409).json({ error: "This change request has already been reviewed" });
+    return;
+  }
+  const payload = parseChangePayload(request.payload);
+  const adminNotes = typeof req.body?.adminNotes === "string" ? req.body.adminNotes.trim() : null;
+  try {
+    await db.transaction(async (tx) => {
+      if (request.kind === "profile_photo") {
+        assertObjectPath(payload.profilePicture);
+        await tx.update(driversTable).set({ profilePicture: payload.profilePicture }).where(eq(driversTable.id, request.driverId));
+      } else if (request.kind === "vehicle_create") {
+        if (typeof payload.make !== "string" || typeof payload.model !== "string") {
+          throw Object.assign(new Error("The vehicle change payload is invalid"), { status: 422 });
+        }
+        await createDriverVehicle(tx, request.driverId, {
+          year: typeof payload.year === "string" ? payload.year : null,
+          make: payload.make,
+          model: payload.model,
+          color: typeof payload.color === "string" ? payload.color : null,
+          vehicleClass: typeof payload.vehicleClass === "string" ? payload.vehicleClass : null,
+          passengerCapacity: typeof payload.passengerCapacity === "number" ? payload.passengerCapacity : null,
+          luggageCapacity: typeof payload.luggageCapacity === "number" ? payload.luggageCapacity : null,
+          hasCarSeat: payload.hasCarSeat === true,
+          regPlate: typeof payload.regPlate === "string" ? payload.regPlate : null,
+          isDefault: payload.isDefault === true,
+        });
+      } else if (request.kind === "vehicle_update") {
+        const vehicleId = Number(payload.vehicleId);
+        const changes = payload.changes;
+        if (!Number.isInteger(vehicleId) || !changes || typeof changes !== "object" || Array.isArray(changes)) {
+          throw Object.assign(new Error("The vehicle change payload is invalid"), { status: 422 });
+        }
+        const updateData = changes as Record<string, unknown>;
+        if (updateData.isDefault === true) {
+          await tx.update(driverVehiclesTable).set({ isDefault: false }).where(eq(driverVehiclesTable.driverId, request.driverId));
+        }
+        const [vehicle] = await tx.update(driverVehiclesTable).set(updateData as any)
+          .where(and(eq(driverVehiclesTable.id, vehicleId), eq(driverVehiclesTable.driverId, request.driverId)))
+          .returning();
+        if (!vehicle) throw Object.assign(new Error("Vehicle not found"), { status: 404 });
+        if (vehicle.isDefault && vehicle.make && vehicle.model) {
+          await syncLegacyDriverColumns(tx, request.driverId, {
+            make: vehicle.make,
+            model: vehicle.model,
+            year: vehicle.year,
+            color: vehicle.color,
+            vehicleClass: vehicle.vehicleClass,
+            passengerCapacity: vehicle.passengerCapacity,
+            luggageCapacity: vehicle.luggageCapacity,
+            hasCarSeat: vehicle.hasCarSeat,
+            regPlate: vehicle.regPlate,
+          });
+        }
+        if (vehicle.make && vehicle.model) await syncFleetVehicle(tx, request.driverId, {
+          year: vehicle.year,
+          make: vehicle.make,
+          model: vehicle.model,
+          color: vehicle.color,
+          vehicleClass: vehicle.vehicleClass,
+          passengerCapacity: vehicle.passengerCapacity,
+          regPlate: vehicle.regPlate,
+        });
+      } else if (request.kind === "vehicle_delete") {
+        const vehicleId = Number(payload.vehicleId);
+        if (!Number.isInteger(vehicleId)) throw Object.assign(new Error("The vehicle change payload is invalid"), { status: 422 });
+        await tx.delete(driverVehiclesTable).where(and(eq(driverVehiclesTable.id, vehicleId), eq(driverVehiclesTable.driverId, request.driverId)));
+      } else {
+        throw Object.assign(new Error("Unsupported driver change request"), { status: 422 });
+      }
+      await tx.update(driverChangeRequestsTable).set({
+        status: "approved",
+        adminNotes,
+        reviewedAt: new Date(),
+        reviewedBy: req.currentUser!.userId,
+      }).where(eq(driverChangeRequestsTable.id, id));
+    });
+  } catch (error) {
+    const status = (error as { status?: number }).status ?? 500;
+    if (status !== 500) {
+      res.status(status).json({ error: (error as Error).message });
+      return;
+    }
+    throw error;
+  }
+
+  const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, request.driverId));
+  if (driver?.userId != null) {
+    await db.insert(notificationsTable).values({
+      userId: driver.userId,
+      title: "Change approved",
+      message: request.kind === "profile_photo" ? "Your profile photo was approved." : "Your vehicle change was approved.",
+      type: "change_review",
+    });
+  }
+  res.json({ success: true, requestId: id, status: "approved" });
+});
+
+router.post("/admin/driver-change-requests/:id/reject", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+  if (!Number.isInteger(id) || id <= 0 || !reason) {
+    res.status(400).json({ error: "request id and reason are required" });
+    return;
+  }
+  const [request] = await db.select().from(driverChangeRequestsTable).where(eq(driverChangeRequestsTable.id, id));
+  if (!request) {
+    res.status(404).json({ error: "Change request not found" });
+    return;
+  }
+  if (request.status !== "pending") {
+    res.status(409).json({ error: "This change request has already been reviewed" });
+    return;
+  }
+  await db.update(driverChangeRequestsTable).set({ status: "rejected", adminNotes: reason, reviewedAt: new Date(), reviewedBy: req.currentUser!.userId }).where(eq(driverChangeRequestsTable.id, id));
+  const [driver] = await db.select({ userId: driversTable.userId }).from(driversTable).where(eq(driversTable.id, request.driverId));
+  if (driver?.userId != null) {
+    await db.insert(notificationsTable).values({ userId: driver.userId, title: "Change needs attention", message: reason, type: "change_review" });
+  }
+  res.json({ success: true, requestId: id, status: "rejected" });
+});
 
 /** Trim to null, so clearing a field in the form actually clears the column. */
 const optionalText = (max: number) =>

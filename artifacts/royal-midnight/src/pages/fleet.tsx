@@ -65,11 +65,11 @@ export default function Fleet() {
                   </div>
                 </div>
 
-                <Link href={`/book?class=${vehicle.id}`}>
-                  <Button className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm px-10 py-6 rounded-none">
+                <Button asChild className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm px-10 py-6 rounded-none">
+                  <Link href={`/book?class=${vehicle.id}`}>
                     Select Vehicle
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </div>
             </div>
           ))}

@@ -1,20 +1,26 @@
-# Edge Function audit — 2026-08-13
+# Edge Function audit — 2026-09-22
+
+**Current deployment check 2026-09-22:** the Supabase MCP `list_edge_functions`
+call returned only `check-reservation-status` as `ACTIVE` (version 6). The
+other functions listed below are retained as historical findings and source
+files, but were not returned by the production deployment listing. This closes
+the previously documented exposure for `update-driver-location`,
+`calculate-route-price`, `send-message-via-sent`, and `sent-dm-webhook` at the
+deployment level. Re-run the listing after any future function deployment.
 
 **Update 2026-08-23:** all five functions are now in this repository (pulled
 verbatim from the dashboard via the Supabase MCP `get_edge_function` tool) and
 `supabase/config.toml` documents `verify_jwt` for each. `sent-dm-webhook` also
 got the timestamp-freshness fix described below — **deployed to production as
 version 3** via the Supabase MCP `deploy_edge_function` tool, with the user's
-go-ahead. `update-driver-location` and `calculate-route-price` are still live
-in production; re-confirmed on 2026-08-23 that nothing in the repo (web,
-api-server, or driver-app) calls either one. Deleting them requires the
-Supabase dashboard — there is no delete-function tool available via MCP or CLI
-from this environment.
+go-ahead. The 2026-08-23 deployment still contained `update-driver-location`
+and `calculate-route-price`; the current deployment listing above no longer
+does. Nothing in the repo (web, api-server, or driver-app) calls either one.
 
 The Cyber Neo audit only ever saw `check-reservation-status`, because that was
-the only function in this repository at the time. Production has **five
-deployed**. The other four were created outside version control and had never
-been reviewed before this update.
+the only function in this repository at the time. The 2026-08-23 production
+deployment had **five deployed**; the other four were created outside version
+control and had never been reviewed before that update.
 
 Findings below were confirmed by invoking the live endpoints with nothing but the
 project's **public anon key** — not inferred from reading code.
@@ -26,10 +32,10 @@ function with `verify_jwt: true` and no check of its own is a public endpoint.
 | Function | verify_jwt | In repo | Callers in code | Verdict |
 |---|---|---|---|---|
 | `check-reservation-status` | false | yes | pg_cron (jobid 1, every minute) | CLOSED 2026-08-14 |
-| `update-driver-location` | true | yes (2026-08-23) | **none** | **HIGH — still open, delete via dashboard** |
-| `calculate-route-price` | false | yes (2026-08-23) | **none** | MEDIUM — still open, delete via dashboard |
-| `send-message-via-sent` | true | yes (2026-08-23) | none | Dormant, unchanged |
-| `sent-dm-webhook` | false | yes (2026-08-23) | Sent.dm (external) | **Replay fix deployed (v3), CLOSED** |
+| `update-driver-location` | true | yes (2026-08-23) | **none** | **NOT DEPLOYED — verified 2026-09-22** |
+| `calculate-route-price` | false | yes (2026-08-23) | **none** | **NOT DEPLOYED — verified 2026-09-22** |
+| `send-message-via-sent` | true | yes (2026-08-23) | none | **NOT DEPLOYED — verified 2026-09-22** |
+| `sent-dm-webhook` | false | yes (2026-08-23) | Sent.dm (external) | **NOT DEPLOYED — verified 2026-09-22** |
 
 ## CLOSED 2026-08-14 — `check-reservation-status`
 

@@ -1,0 +1,22 @@
+diff --git a/src/Assets.js b/src/Assets.js
+index b34df882c0205ec80afa4e916daee6baa60e05db..05cd2bb3c9d1f6a7816f507b7ee5b6d2530fef56 100644
+--- a/src/Assets.js
++++ b/src/Assets.js
+@@ -174,7 +174,16 @@ async function getAssetData(
+   const isImageInput = assetInfo.files[0].includes(".zip/")
+     ? _fs.default.readFileSync(assetInfo.files[0])
+     : assetInfo.files[0];
+-  const dimensions = isImage ? (0, _imageSize.default)(isImageInput) : null;
++  // image-size 2.x deliberately accepts buffers for its synchronous API;
++  // Metro's non-zip asset path is still a string. Read that path explicitly
++  // so Expo/EAS can use the patched dependency without reviving image-size 1.x.
++  const dimensions = isImage
++    ? (0, _imageSize.default)(
++        typeof isImageInput === "string"
++          ? _fs.default.readFileSync(isImageInput)
++          : isImageInput,
++      )
++    : null;
+   const scale = assetInfo.scales[0];
+   const assetData = {
+     __packager_asset: true,

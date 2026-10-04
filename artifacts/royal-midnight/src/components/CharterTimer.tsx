@@ -123,7 +123,9 @@ export function CharterTimer({
         <p className="text-[11px] text-red-300/90 mt-2 flex items-start gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5 mt-px flex-shrink-0" />
           Past the {GRACE_MINUTES}-minute allowance — {billedHours} extra hour{billedHours === 1 ? "" : "s"}
-          {projectedCharge > 0 ? ` ($${projectedCharge.toFixed(2)})` : ""} will be added on completion.
+          {audience === "driver"
+            ? " will be added to your final payout on completion."
+            : `${projectedCharge > 0 ? ` ($${projectedCharge.toFixed(2)})` : ""} will be added on completion.`}
         </p>
       )}
 

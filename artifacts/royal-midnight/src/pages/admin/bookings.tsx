@@ -26,6 +26,12 @@ function detectAirportCode(address: string): AirportCode | null {
   return null;
 }
 
+type BookingItineraryPoint = {
+  id?: number;
+  sequence: number;
+  kind: "stop" | "final" | string;
+  address: string;
+};
 
 type BookingRow = {
   id: number;
@@ -63,6 +69,7 @@ type BookingRow = {
   /** Recorded money breakdown; null for bookings sold before migration 0012. */
   receipt?: StoredReceipt | null;
   overageMinutes?: number | null;
+  itinerary?: BookingItineraryPoint[] | null;
 };
 
 type DriverOption = { id: number; name: string; status: string };
@@ -262,7 +269,9 @@ export default function AdminBookings() {
     window.history.replaceState({}, "", window.location.pathname);
 
     // Find which booking this PI belongs to via its metadata, then confirm it
-    fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`)
+    fetch(`${API_BASE}/payments/find-booking?paymentIntentId=${encodeURIComponent(pi)}`, {
+      credentials: "include",
+    })
       .then(r => r.ok ? r.json() as Promise<{ bookingId: number }> : Promise.reject("not found"))
       .then(({ bookingId }) =>
         fetch(`${API_BASE}/payments/confirm/${bookingId}`, {
@@ -1021,6 +1030,21 @@ export default function AdminBookings() {
                                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Drop-off</p>
                                 <p className="text-white">{b.dropoffAddress}</p>
                               </div>
+                              {b.itinerary?.some((point) => point.kind === "stop") && (
+                                <div className="border-l-2 border-primary/50 pl-3">
+                                  <p className="text-[10px] uppercase tracking-widest text-primary">Hourly itinerary</p>
+                                  <div className="mt-1 space-y-1">
+                                    {[...(b.itinerary ?? [])]
+                                      .filter((point) => point.kind === "stop")
+                                      .sort((left, right) => left.sequence - right.sequence)
+                                      .map((point, index) => (
+                                        <p key={`${point.sequence}-${point.address}`} className="text-white">
+                                          <span className="text-primary mr-1">Stop {index + 1}:</span>{point.address}
+                                        </p>
+                                      ))}
+                                  </div>
+                                </div>
+                              )}
                               <div>
                                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> Pickup Time</p>
                                 <p className="text-white">{format(new Date(b.pickupAt), "PPP 'at' p")}</p>

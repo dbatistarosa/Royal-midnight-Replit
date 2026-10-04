@@ -95,7 +95,26 @@ export default function AdminPayouts() {
     }
     setRevealing(driverId);
     try {
-      const res = await fetch(`${API_BASE}/admin/drivers/${driverId}/bank/reveal`, { headers: { Authorization: authHdr } });
+      let res = await fetch(`${API_BASE}/admin/drivers/${driverId}/bank/reveal`, {
+        credentials: "include",
+        headers: { Authorization: authHdr },
+      });
+      if (res.status === 428) {
+        const password = window.prompt("Confirma tu contraseña para revelar los datos bancarios durante 10 minutos:");
+        if (!password) throw new Error("Se canceló la verificación de contraseña.");
+        const stepUp = await fetch(`${API_BASE}/auth/step-up`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", Authorization: authHdr },
+          body: JSON.stringify({ password }),
+        });
+        const stepUpData = await stepUp.json() as { error?: string };
+        if (!stepUp.ok) throw new Error(stepUpData.error || "No se pudo verificar la contraseña.");
+        res = await fetch(`${API_BASE}/admin/drivers/${driverId}/bank/reveal`, {
+          credentials: "include",
+          headers: { Authorization: authHdr },
+        });
+      }
       const data = await res.json() as { accountNumber?: string | null; routingNumber?: string | null; error?: string };
       if (!res.ok) throw new Error(data.error || "Could not load bank details.");
       setRevealedId(driverId);

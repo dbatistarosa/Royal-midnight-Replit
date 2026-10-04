@@ -1,0 +1,13 @@
+# Shared monorepo exclusions used by EAS when an app lives under artifacts/.
+**/node_modules
+**/node_modules/**
+**/.expo
+**/dist
+**/dist/**
+**/dist-android
+**/dist-android/**
+**/*.log
+**/*.tsbuildinfo
+.git
+.git/**
+**/google-services.json

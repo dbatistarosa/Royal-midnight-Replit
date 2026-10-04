@@ -317,6 +317,64 @@ type DriverRow = {
   insuranceDoc?: string | null;
 };
 
+type DriverChangeRequest = {
+  id: number;
+  driverId: number;
+  driverName: string;
+  driverEmail: string;
+  kind: "profile_photo" | "vehicle_create" | "vehicle_update" | "vehicle_delete" | string;
+  payload: Record<string, unknown>;
+  status: "pending" | "approved" | "rejected" | string;
+  adminNotes?: string | null;
+  submittedAt: string;
+};
+
+function ChangeRequestCard({
+  request,
+  saving,
+  onApprove,
+  onReject,
+}: {
+  request: DriverChangeRequest;
+  saving: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const photoPath = request.kind === "profile_photo" && typeof request.payload.profilePicture === "string"
+    ? request.payload.profilePicture
+    : null;
+  const { url: photoUrl } = useSignedDocUrl(photoPath);
+  const vehicleLabel = request.kind.startsWith("vehicle_")
+    ? [request.payload.year, request.payload.make, request.payload.model, request.payload.color].filter(Boolean).join(" ") || "Vehicle details change"
+    : "Profile photo replacement";
+  return (
+    <div className="border border-white/10 bg-background/40 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+      {photoUrl ? <img src={photoUrl} alt={`${request.driverName} pending profile`} className="w-14 h-14 rounded-full object-cover border border-primary/40" /> : (
+        <div className="w-14 h-14 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center text-primary text-xs uppercase">{request.kind.startsWith("vehicle_") ? "Car" : "Photo"}</div>
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm text-white font-medium">{request.driverName}</p>
+          <span className="text-[10px] uppercase tracking-widest text-primary border border-primary/20 bg-primary/5 px-2 py-0.5">{request.kind.replaceAll("_", " ")}</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">{request.driverEmail} · Submitted {new Date(request.submittedAt).toLocaleDateString()}</p>
+        <p className="text-xs text-gray-300 mt-2">{vehicleLabel}</p>
+        {request.kind === "vehicle_update" && request.payload.changes && typeof request.payload.changes === "object" ? (
+          <p className="text-[11px] text-muted-foreground mt-1">Requested fields: {Object.keys(request.payload.changes as Record<string, unknown>).join(", ")}</p>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <Button size="sm" onClick={onApprove} disabled={saving} className="bg-green-600 hover:bg-green-700 text-white rounded-none text-xs">
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <><ShieldCheck className="w-3 h-3 mr-1" />Approve</>}
+        </Button>
+        <Button size="sm" variant="outline" onClick={onReject} disabled={saving} className="border-red-900/40 text-red-400 hover:bg-red-900/10 rounded-none text-xs">
+          <ShieldAlert className="w-3 h-3 mr-1" />Reject
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function ApprovalBadge({ status }: { status?: string }) {
   if (status === "approved") return <span className="px-2 py-0.5 text-[10px] uppercase tracking-widest rounded-full bg-green-500/10 text-green-400 border border-green-500/20">Approved</span>;
   if (status === "rejected") return <span className="px-2 py-0.5 text-[10px] uppercase tracking-widest rounded-full bg-red-500/10 text-red-400 border border-red-500/20">Rejected</span>;
@@ -352,6 +410,9 @@ export default function AdminDrivers() {
   const [docsLoading, setDocsLoading] = useState<number | null>(null);
   const [reviewModal, setReviewModal] = useState<ReviewModalState>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
+  const [changeRequests, setChangeRequests] = useState<DriverChangeRequest[]>([]);
+  const [changeRequestsLoading, setChangeRequestsLoading] = useState(false);
+  const [changeRequestAction, setChangeRequestAction] = useState<number | null>(null);
 
   // Drivers with a booking currently on_way/on_location/in_progress — same
   // set the admin Dispatch map uses to show "On Duty" instead of raw status.
@@ -394,6 +455,43 @@ export default function AdminDrivers() {
   }, [token]);
 
   useEffect(() => { refetch(); }, [refetch]);
+
+  const loadChangeRequests = useCallback(async () => {
+    if (!isAuthenticated) return;
+    setChangeRequestsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/driver-change-requests?status=pending`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setChangeRequests(await res.json() as DriverChangeRequest[]);
+    } finally {
+      setChangeRequestsLoading(false);
+    }
+  }, [isAuthenticated, token]);
+
+  useEffect(() => { void loadChangeRequests(); }, [loadChangeRequests]);
+
+  const reviewChangeRequest = async (request: DriverChangeRequest, decision: "approve" | "reject") => {
+    const reason = decision === "reject" ? window.prompt("Why should this change be rejected?", "Please submit a corrected version.")?.trim() : "";
+    if (decision === "reject" && !reason) return;
+    setChangeRequestAction(request.id);
+    try {
+      const res = await fetch(`${API_BASE}/admin/driver-change-requests/${request.id}/${decision}`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify(decision === "reject" ? { reason } : {}),
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Could not review change request");
+      toast({ title: decision === "approve" ? "Change approved" : "Change rejected", description: `${request.driverName} has been notified.` });
+      setChangeRequests(prev => prev.filter(item => item.id !== request.id));
+      refetch();
+    } catch (error) {
+      toast({ title: "Review failed", description: error instanceof Error ? error.message : "Could not review change request.", variant: "destructive" });
+    } finally {
+      setChangeRequestAction(null);
+    }
+  };
 
   const loadDriverDocs = useCallback(async (driverId: number) => {
     if (driverDocs[driverId] || docsLoading === driverId) return;
@@ -570,7 +668,7 @@ export default function AdminDrivers() {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end mb-6 sm:mb-8 gap-3">
         <div>
           <h1 className="font-serif text-2xl sm:text-3xl mb-1">Drivers</h1>
-          {pendingCount > 0 && (
+      {pendingCount > 0 && (
             <p className="text-sm text-yellow-400">{pendingCount} application{pendingCount > 1 ? "s" : ""} pending review</p>
           )}
         </div>
@@ -584,6 +682,29 @@ export default function AdminDrivers() {
           </Button>
         </div>
       </div>
+
+      {(changeRequestsLoading || changeRequests.length > 0) && (
+        <section className="mb-8 border border-primary/25 bg-primary/[0.03] p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="font-serif text-xl">Driver changes awaiting approval</h2>
+              <p className="text-xs text-muted-foreground mt-1">Photos and vehicle changes stay inactive until an administrator approves them.</p>
+            </div>
+            {changeRequestsLoading && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+          </div>
+          <div className="space-y-3">
+            {changeRequests.map(request => (
+              <ChangeRequestCard
+                key={request.id}
+                request={request}
+                saving={changeRequestAction === request.id}
+                onApprove={() => void reviewChangeRequest(request, "approve")}
+                onReject={() => void reviewChangeRequest(request, "reject")}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">

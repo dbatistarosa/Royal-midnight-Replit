@@ -1,0 +1,11 @@
+node_modules
+**/node_modules/**
+.expo/
+dist/
+dist-android/
+dist-android-verify/
+dist-*/
+*.log
+*.tsbuildinfo
+.git/
+google-services.json

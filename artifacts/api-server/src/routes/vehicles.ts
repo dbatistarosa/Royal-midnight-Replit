@@ -17,7 +17,9 @@ import {
 
 const router: IRouter = Router();
 
-router.get("/vehicles", async (req, res): Promise<void> => {
+// Fleet records contain plates and driver associations. Keep both collection
+// and detail endpoints administrative; the public catalog is a separate route.
+router.get("/vehicles", requireAdmin, async (req, res): Promise<void> => {
   const parsed = ListVehiclesQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -54,7 +56,7 @@ router.post("/vehicles", requireAdmin, async (req, res): Promise<void> => {
   res.status(201).json(GetVehicleResponse.parse({ ...vehicle, createdAt: vehicle.createdAt.toISOString() }));
 });
 
-router.get("/vehicles/:id", async (req, res): Promise<void> => {
+router.get("/vehicles/:id", requireAdmin, async (req, res): Promise<void> => {
   const params = GetVehicleParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });

@@ -5,6 +5,7 @@ export const sessionsTable = pgTable("sessions", {
   userId: integer("user_id").notNull(),
   token: text("token").notNull().unique(),
   role: text("role").notNull(),
+  stepUpUntil: timestamp("step_up_until", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
 });

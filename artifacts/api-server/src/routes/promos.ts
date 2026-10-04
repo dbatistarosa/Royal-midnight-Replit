@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
-import { eq, and, ne, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db, promoCodesTable, bookingsTable } from "@workspace/db";
 import { requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { promoLimiter } from "../lib/rateLimit.js";
+import { promoPerCustomerLimitMessage } from "../lib/promoPolicy.js";
 import {
   ListPromosResponse,
   CreatePromoBody,
@@ -102,31 +103,32 @@ export async function evaluatePromoCode(
   // by simply not signing in.
   const perUser = promo.maxUsesPerUser ?? null;
   if (perUser != null && perUser > 0) {
-    if (userId == null) {
-      return invalid("Sign in to use this promo code — it is limited per customer.");
-    }
-    // Excludes cancelled bookings: this cap is meant to be "you've redeemed
-    // this code N times," not "you've ever typed this code into a booking
-    // that didn't go through" — without the status filter, a cancelled trip
-    // permanently burned one of a customer's uses with nothing to show for it.
+    const identityMessage = promoPerCustomerLimitMessage({
+      maxUsesPerUser: perUser,
+      userId,
+      usedByUser: 0,
+    });
+    if (identityMessage) return invalid(identityMessage);
+
+    // Every created booking carrying the code counts, including cancelled
+    // bookings. Otherwise a customer can repeatedly book and cancel to farm a
+    // one-time welcome offer. This also matches migration 0013's contract.
     const [row] = await executor
       .select({ used: sql<number>`count(*)::int` })
       .from(bookingsTable)
       .where(
         and(
           eq(bookingsTable.promoCode, code),
-          eq(bookingsTable.userId, userId),
-          ne(bookingsTable.status, "cancelled"),
+          eq(bookingsTable.userId, userId!),
         ),
       );
     const usedByThisUser = row?.used ?? 0;
-    if (usedByThisUser >= perUser) {
-      return invalid(
-        perUser === 1
-          ? "You have already used this promo code."
-          : `You have already used this promo code ${perUser} times.`,
-      );
-    }
+    const limitMessage = promoPerCustomerLimitMessage({
+      maxUsesPerUser: perUser,
+      userId,
+      usedByUser: usedByThisUser,
+    });
+    if (limitMessage) return invalid(limitMessage);
   }
 
   const minAmount = promo.minBookingAmount ? parseFloat(promo.minBookingAmount) : 0;
@@ -151,8 +153,9 @@ export async function evaluatePromoCode(
 /**
  * Undo a promo redemption when the booking that used it is cancelled.
  *
- * `usedCount` is a real persistent counter (unlike the per-user cap above,
- * which is derived live from non-cancelled bookings) — it was incremented on
+ * `usedCount` is a real persistent global-inventory counter (unlike the
+ * per-user cap above, which is derived from every booking carrying the code)
+ * — it was incremented on
  * creation and never released, so a capped-supply code could be exhausted by
  * cancellations alone with nothing actually redeemed. Floored at 0 with a SQL
  * GREATEST so a decrement racing a concurrent read can never drive it

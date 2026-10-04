@@ -146,19 +146,19 @@ export function Navbar() {
               )}
             </div>
           ) : (
-            <Link href="/auth/login">
-              <Button variant="outline" className="border-white/20 text-white hover:border-primary hover:text-primary bg-transparent rounded-none uppercase tracking-widest text-xs px-5 py-5">
+            <Button asChild variant="outline" className="border-white/20 text-white hover:border-primary hover:text-primary bg-transparent rounded-none uppercase tracking-widest text-xs px-5 py-5">
+              <Link href="/auth/login">
                 Sign In
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           )}
 
           {!isDriver && (
-            <Link href="/book">
-              <Button className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+            <Button asChild className="bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-xs px-8 py-6 rounded-none">
+              <Link href="/book">
                 Reserve Now
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           )}
         </div>
 
@@ -201,11 +201,11 @@ export function Navbar() {
             </Link>
           )}
           {!isDriver && (
-            <Link href="/book" onClick={() => setMobileMenuOpen(false)}>
-              <Button className="w-full bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm py-6 rounded-none">
+            <Button asChild className="w-full bg-primary text-black hover:bg-primary/90 font-medium uppercase tracking-widest text-sm py-6 rounded-none">
+              <Link href="/book" onClick={() => setMobileMenuOpen(false)}>
                 Reserve Now
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           )}
         </div>
       )}

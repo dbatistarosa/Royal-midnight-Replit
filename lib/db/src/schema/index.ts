@@ -24,6 +24,7 @@ export * from "./message-events";
 export * from "./driver-locations";
 export * from "./corporate-accounts";
 export * from "./driver-vehicles";
+export * from "./driver-change-requests";
 export * from "./fixed-routes";
 export * from "./extra-services";
 export * from "./object-owners";

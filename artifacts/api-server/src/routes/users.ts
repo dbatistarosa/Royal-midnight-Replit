@@ -17,12 +17,9 @@ import {
   GetUserBookingsParams,
   GetUserBookingsResponse,
 } from "@workspace/api-zod";
+import { serializeUser } from "../lib/serializeUser.js";
 
 const router: IRouter = Router();
-
-function parseUser(u: typeof usersTable.$inferSelect) {
-  return { ...u, createdAt: u.createdAt.toISOString() };
-}
 
 // Admin-only: list all users (used by admin passengers/drivers pages)
 router.get("/users", requireAdmin, async (req, res): Promise<void> => {
@@ -37,7 +34,7 @@ router.get("/users", requireAdmin, async (req, res): Promise<void> => {
     .from(usersTable)
     .where(parsed.data.role ? eq(usersTable.role, parsed.data.role) : undefined);
 
-  res.json(ListUsersResponse.parse(users.map(parseUser)));
+  res.json(ListUsersResponse.parse(users.map(serializeUser)));
 });
 
 // Admin-only: create a user directly (prefer /auth/register for self-signup)
@@ -49,7 +46,7 @@ router.post("/users", requireAdmin, async (req, res): Promise<void> => {
   }
 
   const [user] = await db.insert(usersTable).values(parsed.data).returning();
-  res.status(201).json(GetUserResponse.parse(parseUser(user)));
+  res.status(201).json(GetUserResponse.parse(serializeUser(user)));
 });
 
 // Auth: self or admin
@@ -72,7 +69,7 @@ router.get("/users/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(GetUserResponse.parse(parseUser(user)));
+  res.json(GetUserResponse.parse(serializeUser(user)));
 });
 
 // Auth: self or admin; only name and phone can be updated (email is identity)
@@ -148,7 +145,7 @@ router.patch("/users/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(UpdateUserResponse.parse(parseUser(user)));
+  res.json(UpdateUserResponse.parse(serializeUser(user)));
 });
 
 // Auth: self or admin

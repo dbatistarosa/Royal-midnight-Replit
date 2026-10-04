@@ -7,12 +7,22 @@ import { useAuthStore } from "@/auth/store";
 import { useDriverByUserId } from "@/api/hooks";
 import { GoldButton } from "@/components/GoldButton";
 import { colors } from "@/theme/colors";
+import { registerForPushNotifications } from "@/notifications/registerForPushNotifications";
+import { useNotificationHandlers } from "@/notifications/useNotificationHandlers";
 
 export default function AppLayout() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const segments = useSegments();
   const { data: driver, isLoading, isError, error, refetch } = useDriverByUserId(user?.id ?? null);
+  useNotificationHandlers();
+
+  useEffect(() => {
+    if (!driver?.id) return;
+    void registerForPushNotifications(driver.id).catch((registrationError) => {
+      console.warn("[notifications] push registration unavailable:", registrationError?.message ?? registrationError);
+    });
+  }, [driver?.id]);
 
   // A failed fetch (most commonly a 401 on an expired/revoked session) used
   // to leave this screen spinning forever: isLoading settles to false but

@@ -75,11 +75,9 @@ type BookingRow = {
   charterMode?: string | null;
   charterHours?: number | null;
   maxMilesPerHour?: number | null;
-  hourlyRate?: number | null;
   tripStartedAt?: string | null;
   estimatedDistanceMiles?: number | null;
   estimatedDurationMinutes?: number | null;
-  extraCharge?: number | string | null;
   passengerPreferences?: PassengerPreferences | null;
   checklistCompletedAt?: string | null;
   itinerary?: Array<{
@@ -344,6 +342,21 @@ function vehicleLabel(vc?: string | null) {
   return vc ?? "—";
 }
 
+function BookingRouteSummary({ booking }: { booking: BookingRow }) {
+  const stops = [...(booking.itinerary ?? [])]
+    .filter(item => item.kind === "stop")
+    .sort((a, b) => a.sequence - b.sequence);
+  return (
+    <div className="text-sm text-muted-foreground space-y-1">
+      <div><span className="text-primary mr-1">Pickup:</span>{booking.pickupAddress}</div>
+      {stops.map((stop, index) => (
+        <div key={`${stop.sequence}-${stop.address}`}><span className="text-primary mr-1">Stop {index + 1}:</span>{stop.address}</div>
+      ))}
+      <div><span className="text-primary mr-1">Final:</span>{booking.dropoffAddress}</div>
+    </div>
+  );
+}
+
 function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; showEarnings?: boolean }) {
   const routeStops = [...(booking.itinerary ?? [])]
     .filter(item => item.kind === "stop")
@@ -460,7 +473,6 @@ function BookingDetailPanel({ booking, showEarnings }: { booking: BookingRow; sh
         <CharterTimer
           startedAt={booking.tripStartedAt}
           charterHours={booking.charterHours}
-          hourlyRate={booking.hourlyRate}
         />
       )}
     </div>
@@ -741,9 +753,7 @@ function BookingCard({ booking, authHeader, onRefresh }: { booking: BookingRow; 
           )}
         </div>
       </div>
-      <div className="text-sm text-muted-foreground">
-        {booking.pickupAddress} → {booking.dropoffAddress}
-      </div>
+      <BookingRouteSummary booking={booking} />
       {booking.pickupAt && (
         <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
           <Clock className="w-3 h-3 flex-shrink-0" />
@@ -912,11 +922,7 @@ function AvailableRideCard({
           )}
         </div>
       </div>
-      <div className="text-sm text-muted-foreground mb-1">
-        <span className="inline-block">{booking.pickupAddress}</span>
-        <span className="mx-1.5 text-primary">→</span>
-        <span className="inline-block">{booking.dropoffAddress}</span>
-      </div>
+      <div className="mb-1"><BookingRouteSummary booking={booking} /></div>
       {booking.pickupAt && (
         <div className="text-xs text-muted-foreground mt-1">
           {format(new Date(booking.pickupAt), "MMM d, yyyy 'at' h:mm a")}

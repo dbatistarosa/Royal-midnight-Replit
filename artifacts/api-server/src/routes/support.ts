@@ -3,6 +3,7 @@ import { eq, and, asc } from "drizzle-orm";
 import { db, supportTicketsTable, ticketMessagesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, optionalAuth } from "../middleware/auth.js";
 import { notifyNewSupportTicket, notifySupportReply } from "../lib/mailer.js";
+import { supportAuthorRole } from "../lib/supportAuthor.js";
 import {
   ListTicketsQueryParams,
   ListTicketsResponse,
@@ -153,8 +154,8 @@ router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void
   }
 
   const message = (req.body?.message as string | undefined)?.trim();
-  if (!message || message.length === 0) {
-    res.status(400).json({ error: "message is required" });
+  if (!message || message.length === 0 || message.length > 10000) {
+    res.status(400).json({ error: "message is required and must be at most 10000 characters" });
     return;
   }
 
@@ -175,7 +176,7 @@ router.post("/support/:id/messages", requireAuth, async (req, res): Promise<void
     return;
   }
 
-  const authorRole = caller.role === "admin" ? "admin" : "passenger";
+  const authorRole = supportAuthorRole(caller.role);
 
   const [msg] = await db
     .insert(ticketMessagesTable)

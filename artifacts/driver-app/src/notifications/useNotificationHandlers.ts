@@ -1,2 +1,3 @@
-// Push notifications are temporarily disabled — see registerForPushNotifications.ts.
-export function useNotificationHandlers(): void {}
+export function useNotificationHandlers(): void {
+  // Native push navigation is disabled until Firebase/FCM is configured.
+}

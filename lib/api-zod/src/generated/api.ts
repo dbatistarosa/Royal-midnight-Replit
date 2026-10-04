@@ -67,7 +67,7 @@ export const LoginBody = zod.object({
 });
 
 export const LoginResponse = zod.object({
-  token: zod.string(),
+  token: zod.string().optional(),
   user: zod.object({
     id: zod.number(),
     name: zod.string(),
@@ -98,7 +98,7 @@ export const VerifyOtpBody = zod.object({
 });
 
 export const VerifyOtpResponse = zod.object({
-  token: zod.string(),
+  token: zod.string().optional(),
   user: zod.object({
     id: zod.number(),
     name: zod.string(),
@@ -933,11 +933,11 @@ export const ListReviewsResponse = zod.array(ListReviewsResponseItem);
  * @summary Submit a review
  */
 export const CreateReviewBody = zod.object({
-  bookingId: zod.number(),
-  driverId: zod.number(),
+  bookingId: zod.number().int().positive(),
+  driverId: zod.number().int().positive(),
   userId: zod.number().nullish(),
-  rating: zod.number(),
-  comment: zod.string().nullish(),
+  rating: zod.number().int().min(1).max(5),
+  comment: zod.string().trim().max(2000).nullish(),
 });
 
 /**
@@ -968,12 +968,12 @@ export const ListTicketsResponse = zod.array(ListTicketsResponseItem);
  */
 export const CreateTicketBody = zod.object({
   userId: zod.number().nullish(),
-  name: zod.string(),
-  email: zod.string(),
-  subject: zod.string(),
-  message: zod.string(),
+  name: zod.string().trim().min(1).max(120),
+  email: zod.string().trim().email().max(320),
+  subject: zod.string().trim().min(1).max(200),
+  message: zod.string().trim().min(1).max(10000),
   priority: zod.enum(["low", "medium", "high", "urgent"]),
-  bookingId: zod.number().nullish(),
+  bookingId: zod.number().int().positive().nullish(),
 });
 
 /**

@@ -331,14 +331,14 @@ export default function DriverOnboarding() {
         return;
       }
 
-      if (data.token && data.user) {
+      if (data.user) {
         login({
           id: data.user.id,
           name: data.user.name,
           email: data.user.email,
           phone: data.user.phone ?? null,
           role: data.user.role,
-        }, data.token);
+        });
       }
 
       setSubmitted(true);
