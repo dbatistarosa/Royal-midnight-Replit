@@ -27,9 +27,9 @@
 | API production build | PASS | `dist/app.mjs` built and cold-imported with a dummy database URL as `function`; no real database connection was made. |
 | Driver v2 typecheck | PASS | `tsc -p tsconfig.json --noEmit` exited 0. |
 | Driver v2 unit tests | PASS | 39/39 tests passed with zero failures. |
-| Driver Android export | PASS before security update; post-update CI required | The original clean export bundled 2,228 modules and wrote an 8.2 MB Android bundle without publishing, and the first PR CI Driver job passed. Post-update local retries were blocked by missing package files in the Windows/OneDrive pnpm cache even after forced relinking; the clean Linux CI job remains the authority for the updated lockfile. |
+| Driver Android export | PASS | The clean Linux CI run `37134433945` installed the updated lockfile, typechecked the Driver, ran its unit tests, exported Android successfully, and verified resolved native configuration. No EAS build or publication occurred. |
 | Driver Expo config | PASS | Package `com.royalmidnight.driver`; API `https://www.royalmidnight.com/api`; resolved config contains `x86_64`. |
-| Production dependency audit | PASS locally with two scoped unfixable exceptions; CI recheck pending | Nodemailer and `brace-expansion` are patched. `GHSA-86w9-cpqp-85rv` (`node-forge` 1.4.0) and `GHSA-vfj7-8cjw-p6xm` (`braces` 3.0.3) have no published patched release as of 2026-10-03. Their reported paths are limited to Expo CLI/code-signing/Metro build tooling and are not bundled into either APK. |
+| Production dependency audit | PASS with two scoped unfixable exceptions | CI run `37134433945` passed `pnpm audit --audit-level high --prod`. Nodemailer and `brace-expansion` are patched. `GHSA-86w9-cpqp-85rv` (`node-forge` 1.4.0) and `GHSA-vfj7-8cjw-p6xm` (`braces` 3.0.3) have no published patched release as of 2026-10-03. Their reported paths are limited to Expo CLI/code-signing/Metro build tooling and are not bundled into either APK. |
 | Supabase migration manifest | PASS | `node --test scripts/migration-manifest.test.mjs`: 6/6; ten ordered, nonempty, uniquely versioned migration files with checksums. Commit `5565fc5`. |
 | Production migration state | PASS with one documented exception | Read-only Supabase query: all ten authoritative migration names are present; nine normalized SHA-256 values match exactly. `backfill_default_vehicle_capacity` has the known content drift already explicitly allowlisted in `vercel.json`. No SQL was applied. |
 | Forbidden tracked paths | PASS | Zero tracked `.env*` files other than `.env.example`, mobile service files, private-key containers, Vercel environment exports, `.playwright-cli`, or `.superpowers` ledgers. |
@@ -47,6 +47,7 @@
 - The first PR CI run (`37026835443`) proved the Linux web build, root typecheck, 307 tests, and Driver Android quality job all pass. It failed only at the production audit, which reported five high advisories: two in Nodemailer 9.1.1, two in `brace-expansion` 5.0.9, and one unfixable `node-forge` advisory.
 - The remediated lockfile resolves Nodemailer 10.0.13 and `brace-expansion` 5.0.12. The local production audit now exits 0. `node-forge` remains at the latest published version, 1.4.0; `GHSA-86w9-cpqp-85rv` explicitly lists no patched version, so the repository contains a narrow documented `auditConfig.ignoreGhsas` exception rather than a false version override.
 - PR CI run `37133834256` passed the Driver Android job, typecheck, all tests, and the Linux web build. Its audit then surfaced newly reviewed `GHSA-vfj7-8cjw-p6xm` in `braces` 3.0.3. GitHub lists no patched version and npm still reports 3.0.3 as latest; all 100 audit paths are under Expo/Metro build tooling. A second narrow GHSA exception records this temporary upstream debt.
+- Final PR CI run `37134433945` passed every step: frozen install, typecheck, 307 tests, Linux web production build, production audit, API build, API cold import, Driver Android export, and native configuration.
 - Nodemailer 10's ESM package layout initially appeared to fail the API cold-import inside the filesystem sandbox. Repeating the exact import with access to the pnpm junction succeeded (`Bundle loaded OK: function`), confirming no application compatibility change.
 - A post-update Android export on this host exposed incomplete local pnpm package materialization: successively missing files from React, `react-native-css-interop`, Expo Modules Core, and TanStack Query. A forced frozen hoisted reinstall restored some files but not the entire Expo tree. No source workaround was added for a corrupt local cache; the clean Linux CI job is the acceptance gate.
 - The user selected Production for the read-only migration-state check. The existing ignored local export contains the expected key once, but its substituted value is not a PostgreSQL connection URI; the local CLI attempt therefore stopped before any connection or query and cleared the process variable.
@@ -63,16 +64,15 @@
 | Tests | `corepack pnpm test` | PASS, 307/307 after commit `476bb5f`. |
 | API | package production build plus cold import of `dist/app.mjs` | PASS. |
 | Web | package production build | PASS in GitHub Actions Linux run `37026835443`; local Windows limitation remains documented. |
-| Driver v2 | explicit TypeScript check, 39 tests, Android export, resolved Expo config | Typecheck/tests PASS; pre-update clean export and first PR CI PASS; updated-lock clean CI pending. No EAS build or publication. |
+| Driver v2 | explicit TypeScript check, 39 tests, Android export, resolved Expo config | PASS in final CI run `37134433945`; no EAS build or publication. |
 | Migrations | manifest validator, local `corepack pnpm db:check` attempt without `--apply`, and read-only Supabase metadata/hash query | Local manifest PASS; Production 10/10 present, 9 exact, 1 explicitly allowlisted known drift. |
-| Security | tracked-path scan, changed-line pattern scan, and `pnpm audit --audit-level high --prod` | PASS locally; zero secret findings; patched high advisories removed; two no-fix Expo-build-tool advisories explicitly scoped and ignored; clean CI recheck pending. |
+| Security | tracked-path scan, changed-line pattern scan, and `pnpm audit --audit-level high --prod` | PASS in final CI run `37134433945`; zero secret findings; patched high advisories removed; two no-fix Expo-build-tool advisories explicitly scoped and ignored. |
 | Git | ancestry checks and `git diff --check recovery/phase0-2026-10-01...HEAD` | PASS. |
 
 ## Phase 0 disposition
 
-The integration branch is reconciled and the code/test/security gates pass locally, but Phase 0 is **not yet fully green** until the updated lockfile completes clean CI. One validation gate and one migration-history debt remain open:
+The integration branch is reconciled and all code, test, build, security, and Driver gates are green in final CI run `37134433945`. One migration-history debt remains open:
 
-1. require the clean Linux PR run to pass the web build, production audit, API cold import, and Driver Android quality job with the updated lockfile;
-2. decide in a later authorized phase how to canonicalize the already allowlisted `backfill_default_vehicle_capacity` history without editing or replaying an applied production migration.
+1. decide in a later authorized phase how to canonicalize the already allowlisted `backfill_default_vehicle_capacity` history without editing or replaying an applied production migration.
 
 The isolated branch was pushed and draft PR 18 was opened with explicit authorization. No merge, production deployment, migration application, EAS build/publication, Stripe operation, Supabase write, or production-data write occurred.
