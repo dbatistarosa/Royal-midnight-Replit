@@ -6,7 +6,7 @@ import { RegisterBody, LoginBody, SendOtpBody, VerifyOtpBody } from "@workspace/
 import crypto from "crypto";
 import { z } from "zod";
 import { readSessionToken, requireAdmin, requireAuth, SESSION_COOKIE } from "../middleware/auth.js";
-import { hashPassword, verifyPassword, isLegacyHash } from "../lib/hash.js";
+import { hashPassword, verifyPassword, isLegacyHash, burnPasswordCheck } from "../lib/hash.js";
 import { sendPasswordResetEmail, sendDriverApplicationReceived, sendNewDriverApplicationAdmin } from "../lib/mailer.js";
 import { sendOtpSms } from "../lib/sms.js";
 import { storeOtp, verifyOtp } from "../lib/otpStore.js";
@@ -162,12 +162,15 @@ router.post("/auth/login", credentialLimiter, async (req, res): Promise<void> =>
   const email = parsed.data.email.trim().toLowerCase();
   const [user] = await db.select().from(usersTable).where(sql`lower(trim(${usersTable.email})) = ${email.trim().toLowerCase()}`);
 
-  if (!user) {
+  if (!user || !user.passwordHash) {
+    // Same bcrypt cost as a wrong password, so timing doesn't reveal whether
+    // the email is registered.
+    burnPasswordCheck(password);
     res.status(401).json({ error: "Invalid credentials" });
     return;
   }
 
-  if (!user.passwordHash || !verifyPassword(password, user.passwordHash)) {
+  if (!verifyPassword(password, user.passwordHash)) {
     req.log.warn({ ip: req.ip, email: user.email }, "authentication_failed");
     res.status(401).json({ error: "Invalid credentials" });
     return;

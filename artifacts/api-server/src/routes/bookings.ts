@@ -1454,7 +1454,9 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
         },
         "authorization_failed",
       );
-      res.status(403).json({ error: "Access denied" });
+      // 404, not 403: "exists but not yours" must look like "doesn't exist",
+      // or any account can enumerate booking ids.
+      res.status(404).json({ error: "Booking not found" });
       return;
     }
     const commissionPct = await getCommissionPct();
@@ -1491,7 +1493,9 @@ router.get("/bookings/:id", requireAuth, async (req, res): Promise<void> => {
           },
           "authorization_failed",
         );
-        res.status(403).json({ error: "Access denied" });
+        // 404, not 403: "exists but not yours" must look like "doesn't exist",
+      // or any account can enumerate booking ids.
+      res.status(404).json({ error: "Booking not found" });
         return;
       }
     }
