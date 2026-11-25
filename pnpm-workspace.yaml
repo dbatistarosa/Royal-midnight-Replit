@@ -5,7 +5,11 @@ packages:
   - scripts
 
 allowBuilds:
-  bcrypt: true
+  # bcrypt 6 ships N-API prebuilds (linux-x64 included) that node-gyp-build
+  # loads at runtime. Its install script only re-checks for them, and under
+  # pnpm 11 it fails on a clean install (node-gyp-build not on PATH), which
+  # broke every uncached Vercel build. Skipping it changes nothing at runtime.
+  bcrypt: false
   core-js: true
   esbuild: true
 
@@ -43,7 +47,6 @@ minimumReleaseAgeExclude:
 
 onlyBuiltDependencies:
   - '@swc/core'
-  - bcrypt
   - core-js
   - esbuild
   - msw
