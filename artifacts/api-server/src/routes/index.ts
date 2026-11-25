@@ -1,6 +1,7 @@
 import systemHealthRouter from "./systemHealth.js";
 import emailVerificationRouter from "./emailVerification.js";
 import { Router, type IRouter } from "express";
+import { stripInternalFields } from "../middleware/stripInternalFields.js";
 import healthRouter from "./health";
 import authRouter from "./auth";
 import bookingsRouter from "./bookings";
@@ -27,6 +28,9 @@ import cronRouter from "./cron";
 import extrasRouter from "./extras";
 
 const router: IRouter = Router();
+
+// Must run before any route so its res.json wrapper covers every response.
+router.use(stripInternalFields);
 
 router.use(healthRouter);
 router.use(systemHealthRouter);

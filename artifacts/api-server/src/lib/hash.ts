@@ -48,3 +48,14 @@ export function isValidHash(value: string): boolean {
   // The deprecated SHA-256 scheme, still accepted at login and upgraded there.
   return isLegacyHash(value);
 }
+
+// A real bcrypt hash of a random throwaway value, computed once at startup.
+// The login handler verifies against it when the email is unknown (or the
+// account has no password), so that path costs the same bcrypt work as a
+// wrong password on a real account and response time stops revealing which
+// emails are registered.
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), ROUNDS);
+
+export function burnPasswordCheck(password: string): void {
+  bcrypt.compareSync(password, DUMMY_HASH);
+}

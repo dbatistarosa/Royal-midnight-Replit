@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, sql } from "drizzle-orm";
 import { db, reviewsTable, bookingsTable, driversTable } from "@workspace/db";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, optionalAuth } from "../middleware/auth.js";
 import {
   ListReviewsQueryParams,
   CreateReviewBody,
@@ -9,11 +9,32 @@ import {
 
 const router: IRouter = Router();
 
-router.get("/reviews", async (req, res): Promise<void> => {
+router.get("/reviews", optionalAuth, async (req, res): Promise<void> => {
   const parsed = ListReviewsQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
+  }
+
+  // Filtering by booking ties a review to a specific ride, so only that
+  // booking's passenger or an admin may do it. Anyone else gets an empty list
+  // — the same answer as a booking with no review, so nothing is revealed.
+  if (parsed.data.bookingId != null) {
+    const caller = req.currentUser;
+    if (!caller) {
+      res.json([]);
+      return;
+    }
+    if (caller.role !== "admin") {
+      const [owned] = await db
+        .select({ id: bookingsTable.id })
+        .from(bookingsTable)
+        .where(and(eq(bookingsTable.id, parsed.data.bookingId), eq(bookingsTable.userId, caller.userId)));
+      if (!owned) {
+        res.json([]);
+        return;
+      }
+    }
   }
 
   const conditions = [];
